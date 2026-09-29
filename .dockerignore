@@ -3,5 +3,6 @@ Dockerfile
 .git
 .github
 .husky
-jmeter.log
+coverage
 reports/
+**/*.test.js

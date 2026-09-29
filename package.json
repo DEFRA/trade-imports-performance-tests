@@ -1,0 +1,32 @@
+{
+  "name": "trade-imports-performance-tests",
+  "version": "0.0.0",
+  "description": "k6 performance test suites for the trade imports services on CDP",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24",
+    "npm": ">=11.6.2"
+  },
+  "packageManager": "npm@11.6.2",
+  "scripts": {
+    "format": "prettier --write \"**/*.{js,md,json,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{js,md,json,yml,yaml}\"",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:docker-compose": "docker compose run --rm k6-workspace",
+    "k6:local": "docker compose run --rm k6-local",
+    "k6:image": "docker compose up --build --exit-code-from development development",
+    "k6:down": "docker compose --profile local --profile workspace down"
+  },
+  "author": "Defra DDTS",
+  "license": "OGL-UK-3.0",
+  "devDependencies": {
+    "eslint": "9.39.2",
+    "neostandard": "0.13.0",
+    "prettier": "3.8.2",
+    "vitest": "4.1.8"
+  }
+}
