@@ -20,6 +20,11 @@ describe('kindOf', () => {
     expect(kindOf('ins-address-add-save')).toBe('page')
   })
 
+  test('returns upload for the document upload and page for its status poll', () => {
+    expect(kindOf('animals-documents-upload')).toBe('upload')
+    expect(kindOf('animals-documents-status')).toBe('page')
+  })
+
   test('returns api for a backend call', () => {
     expect(kindOf('animals-backend-replace')).toBe('api')
   })

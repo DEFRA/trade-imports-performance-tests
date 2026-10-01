@@ -36,9 +36,138 @@ describe('TRAFFIC_DEFAULTS', () => {
     ['frontDoor.addressBookSessionsPerNotification', 0.25],
     ['mix.dashboardReadShareTarget', 0.25],
     ['liveAnimals.notificationsPerHour', 44],
-    ['highRiskPlants.notificationsPerHour', 36]
+    ['highRiskPlants.notificationsPerHour', 36],
+    ['liveAnimals.amendShare', 0.2],
+    ['liveAnimals.cancelAmendShare', 0.05],
+    ['highRiskPlants.amendShare', 0.2],
+    ['highRiskPlants.cancelAmendShare', 0.05],
+    ['addressBook.worstCaseSearchShare', 0.25],
+    ['liveAnimals.documentKilobytes.min', 100],
+    ['liveAnimals.documentKilobytes.max', 5000]
   ])('%s is %s', (path, expected) => {
     expect(pathOf(TRAFFIC_DEFAULTS, path)).toBe(expected)
+  })
+
+  test.each([
+    [
+      'liveAnimals.documentsPerNotification',
+      [0.3, 0.45, 0.2, 0.05],
+      [0, 1, 2, 3]
+    ],
+    [
+      'highRiskPlants.commodityLinesPerNotification',
+      [0.5, 0.3, 0.15, 0.05],
+      [1, 4, 11, 26]
+    ]
+  ])('%s has the stated shares and minimums', (path, shares, minimums) => {
+    const buckets = pathOf(TRAFFIC_DEFAULTS, path)
+
+    expect(buckets.map(({ share }) => share)).toEqual(shares)
+    expect(buckets.map(({ min }) => min)).toEqual(minimums)
+  })
+
+  test('has 50 as the largest number of commodity lines', () => {
+    expect(
+      TRAFFIC_DEFAULTS.highRiskPlants.commodityLinesPerNotification.at(-1).max
+    ).toBe(50)
+  })
+
+  test('draws documents from PDF and JPEG', () => {
+    expect(
+      TRAFFIC_DEFAULTS.liveAnimals.documentTypes.map(({ value }) => value)
+    ).toEqual(['pdf', 'jpeg'])
+  })
+
+  test('mean documents per notification is 1', () => {
+    const mean = TRAFFIC_DEFAULTS.liveAnimals.documentsPerNotification.reduce(
+      (sum, { share, max }) => sum + share * max,
+      0
+    )
+
+    expect(mean).toBeCloseTo(1)
+  })
+})
+
+describe('SMOKE_PROFILE', () => {
+  test('amends every notification and runs a worst-case search every time', () => {
+    const model = resolveTrafficModel({}, SMOKE_PROFILE)
+
+    expect(model.liveAnimals.amendShare).toBe(1)
+    expect(model.highRiskPlants.amendShare).toBe(1)
+    expect(model.addressBook.worstCaseSearchShare).toBe(1)
+  })
+})
+
+describe('distribution overrides', () => {
+  test('replaces a distribution whole', () => {
+    const model = resolveTrafficModel({
+      TRAFFIC_MODEL:
+        '{"highRiskPlants":{"commodityLinesPerNotification":[{"share":1,"min":50,"max":50}]}}'
+    })
+
+    expect(model.highRiskPlants.commodityLinesPerNotification).toEqual([
+      { share: 1, min: 50, max: 50 }
+    ])
+  })
+
+  test('accepts live animals with no documents', () => {
+    const model = resolveTrafficModel({
+      TRAFFIC_MODEL:
+        '{"liveAnimals":{"documentsPerNotification":[{"share":1,"min":0,"max":0}]}}'
+    })
+
+    expect(model.liveAnimals.documentsPerNotification).toEqual([
+      { share: 1, min: 0, max: 0 }
+    ])
+  })
+
+  test.each([
+    [
+      '{"highRiskPlants":{"commodityLinesPerNotification":[{"share":0.5,"min":1,"max":3}]}}',
+      'Traffic model value "highRiskPlants.commodityLinesPerNotification" must be buckets whose shares add up to 1'
+    ],
+    [
+      '{"highRiskPlants":{"commodityLinesPerNotification":[{"share":1,"min":5,"max":3}]}}',
+      'Traffic model value "highRiskPlants.commodityLinesPerNotification" must be buckets of whole numbers from min to max, with min at least 1'
+    ],
+    [
+      '{"highRiskPlants":{"commodityLinesPerNotification":[{"share":1,"min":0,"max":0}]}}',
+      'Traffic model value "highRiskPlants.commodityLinesPerNotification" must be buckets of whole numbers from min to max, with min at least 1'
+    ],
+    [
+      '{"liveAnimals":{"documentsPerNotification":[{"share":1,"min":0.5,"max":2}]}}',
+      'Traffic model value "liveAnimals.documentsPerNotification" must be buckets of whole numbers from min to max, with min at least 0'
+    ],
+    [
+      '{"liveAnimals":{"documentTypes":[{"share":1,"value":"gif"}]}}',
+      'Traffic model value "liveAnimals.documentTypes" must be buckets of pdf, jpeg'
+    ],
+    [
+      '{"highRiskPlants":{"commodityTypes":[{"share":1,"value":"seeds"}]}}',
+      'Traffic model value "highRiskPlants.commodityTypes" must be buckets of plants-for-planting, potatoes, wood-and-cut-trees'
+    ],
+    [
+      '{"liveAnimals":{"documentsPerNotification":3}}',
+      'Traffic model value "liveAnimals.documentsPerNotification" must be a list of buckets'
+    ],
+    [
+      '{"liveAnimals":{"documentsPerNotification":[]}}',
+      'Traffic model value "liveAnimals.documentsPerNotification" must be a list of buckets'
+    ],
+    [
+      '{"liveAnimals":{"documentKilobytes":{"min":100,"max":10001}}}',
+      'Traffic model value "liveAnimals.documentKilobytes" must be a range from min to max of at most 10000'
+    ],
+    [
+      '{"liveAnimals":{"documentKilobytes":{"min":600,"max":500}}}',
+      'Traffic model value "liveAnimals.documentKilobytes" must be a range from min to max of at most 10000'
+    ],
+    [
+      '{"addressBook":{"worstCaseSearchShare":2}}',
+      'Traffic model value "addressBook.worstCaseSearchShare" must be between 0 and 1'
+    ]
+  ])('rejects %s', (text, message) => {
+    expect(() => resolveTrafficModel({ TRAFFIC_MODEL: text })).toThrow(message)
   })
 })
 
@@ -220,6 +349,15 @@ describe('amendmentPlan', () => {
     expect(plans.map((plan) => plan.cancelsAmendment)).toEqual(
       iterations.map((iteration) => isChosen(iteration, 0.5))
     )
+  })
+
+  test('amends 20 and cancels 1 of 100 notifications at the c-012 defaults', () => {
+    const plans = Array.from({ length: 100 }, (_, iteration) =>
+      amendmentPlan(iteration, TRAFFIC_DEFAULTS.liveAnimals)
+    )
+
+    expect(plans.filter((plan) => plan.amends)).toHaveLength(20)
+    expect(plans.filter((plan) => plan.cancelsAmendment)).toHaveLength(1)
   })
 
   test('amends and cancels nothing at an amend share of 0', () => {

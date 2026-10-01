@@ -1,5 +1,9 @@
 import { check } from 'k6'
 
+import { WORST_CASE_SEARCH_LENGTH } from '../config/test-data.js'
+import { worstCaseSearchTerm } from '../lib/address-book.js'
+import { pickOne } from '../lib/distributions.js'
+
 const HTTP_OK = 200
 
 /**
@@ -67,11 +71,31 @@ export const choiceLabelled = (page, name, text) => {
  */
 export const pagePath = ({ base }, slug) => `${base}/${slug}`
 
+const searchWorstCase = (context, opened, endpoints) => {
+  const { walker, worstCaseSearch } = context
+
+  worstCaseSearch.pending = false
+
+  const answered = walker.submit(
+    opened,
+    { q: worstCaseSearchTerm(WORST_CASE_SEARCH_LENGTH), action: 'search' },
+    endpoints.search
+  )
+
+  check(answered, {
+    'worst-case address search answered': (page) => page.status === HTTP_OK
+  })
+
+  return answered
+}
+
 /**
  * Picks the performance-test address on a picker page.
  *
  * Opens the picker, searches for the address by name, then saves the radio
  * whose label names it. The picker's own save lands on the page it came from.
+ * When the notification's worst-case search is still pending, the first picker
+ * runs it before the real search.
  *
  * @param {object} context - The step context.
  * @param {object} options - Picker settings.
@@ -84,8 +108,11 @@ export const pagePath = ({ base }, slug) => `${base}/${slug}`
 export const pickAddress = (context, { landed, slug, field, endpoints }) => {
   const { walker, addressName } = context
   const opened = walker.reach(landed, pagePath(context, slug), endpoints.open)
+  const searchFrom = context.worstCaseSearch?.pending
+    ? searchWorstCase(context, opened, endpoints)
+    : opened
   const searched = walker.submit(
-    opened,
+    searchFrom,
     { q: addressName, action: 'search' },
     endpoints.search
   )
@@ -96,6 +123,15 @@ export const pickAddress = (context, { landed, slug, field, endpoints }) => {
     endpoints.save
   )
 }
+
+/**
+ * Draws one of the values a page offers.
+ *
+ * @param {{ random: () => number }} context - The step context.
+ * @param {Array} values - The values to choose from.
+ * @returns {*} The chosen value, or undefined for an empty list.
+ */
+export const pickFrom = (context, values) => pickOne(values, context.random())
 
 /**
  * Picks the parts of a step context that identify one notification's run.

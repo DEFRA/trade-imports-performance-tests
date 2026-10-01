@@ -11,11 +11,13 @@ const D7_DASHBOARD_READ_SHARE = 0.25
 const LIVE_ANIMALS_NOTIFICATIONS_PER_HOUR = 44
 const HIGH_RISK_PLANTS_NOTIFICATIONS_PER_HOUR = 36
 const INTERIM_ADDRESS_BOOK_SESSIONS_PER_NOTIFICATION = 0.25
-const EVERY_NOTIFICATION_AMENDED = 1
-const HALF_OF_AMENDMENTS_CANCELLED = 0.5
+const C012_AMENDED_SHARE = 0.2
+const C012_CANCELLED_SHARE_OF_AMENDED = 0.05
+const INTERIM_WORST_CASE_SEARCH_SHARE = 0.25
+const DOCUMENT_CAP_KILOBYTES = 10_000
 const DEFAULT_DURATION = '2m'
 
-const ADDRESS_BOOK_SESSION_PAGES = 11
+const ADDRESS_BOOK_SESSION_PAGES = 12
 const SECONDS_PER_MINUTE = 60
 const SIGN_IN_PAGES_WITHOUT_WAIT = 1
 const SECONDS_PER_HOUR = 3600
@@ -38,17 +40,40 @@ export const TRAFFIC_DEFAULTS = freezeDeep({
     pagesPerNotification: AG1_PAGES_PER_NOTIFICATION,
     sessionsPerNotification: A2_SESSIONS_PER_NOTIFICATION,
     sessionMinutes: AG2_SESSION_MINUTES,
-    amendShare: EVERY_NOTIFICATION_AMENDED,
-    cancelAmendShare: HALF_OF_AMENDMENTS_CANCELLED
+    amendShare: C012_AMENDED_SHARE,
+    cancelAmendShare: C012_CANCELLED_SHARE_OF_AMENDED,
+    documentsPerNotification: [
+      { share: 0.3, min: 0, max: 0 },
+      { share: 0.45, min: 1, max: 1 },
+      { share: 0.2, min: 2, max: 2 },
+      { share: 0.05, min: 3, max: 3 }
+    ],
+    documentKilobytes: { min: 100, max: 5000 },
+    documentTypes: [
+      { share: 0.5, value: 'pdf' },
+      { share: 0.5, value: 'jpeg' }
+    ]
   },
   highRiskPlants: {
     notificationsPerHour: HIGH_RISK_PLANTS_NOTIFICATIONS_PER_HOUR,
     pagesPerNotification: PP1_PAGES_PER_NOTIFICATION,
     sessionsPerNotification: A2_SESSIONS_PER_NOTIFICATION,
     sessionMinutes: PP2_SESSION_MINUTES,
-    amendShare: EVERY_NOTIFICATION_AMENDED,
-    cancelAmendShare: HALF_OF_AMENDMENTS_CANCELLED
+    amendShare: C012_AMENDED_SHARE,
+    cancelAmendShare: C012_CANCELLED_SHARE_OF_AMENDED,
+    commodityLinesPerNotification: [
+      { share: 0.5, min: 1, max: 3 },
+      { share: 0.3, min: 4, max: 10 },
+      { share: 0.15, min: 11, max: 25 },
+      { share: 0.05, min: 26, max: 50 }
+    ],
+    commodityTypes: [
+      { share: 0.34, value: 'plants-for-planting' },
+      { share: 0.33, value: 'potatoes' },
+      { share: 0.33, value: 'wood-and-cut-trees' }
+    ]
   },
+  addressBook: { worstCaseSearchShare: INTERIM_WORST_CASE_SEARCH_SHARE },
   frontDoor: {
     corePagesPerJourneySession: C1_CORE_PAGES_PER_JOURNEY_SESSION,
     dashboardOnlySessionsPerNotification:
@@ -71,13 +96,16 @@ export const SMOKE_PROFILE = freezeDeep({
   liveAnimals: {
     notificationsPerHour: SMOKE_NOTIFICATIONS_PER_HOUR,
     sessionMinutes: SMOKE_SESSION_MINUTES,
+    amendShare: 1,
     cancelAmendShare: 1
   },
   highRiskPlants: {
     notificationsPerHour: SMOKE_NOTIFICATIONS_PER_HOUR,
     sessionMinutes: SMOKE_SESSION_MINUTES,
+    amendShare: 1,
     cancelAmendShare: 0
   },
+  addressBook: { worstCaseSearchShare: 1 },
   frontDoor: {
     dashboardOnlySessionMinutes: SMOKE_DASHBOARD_ONLY_SESSION_MINUTES
   }
@@ -87,8 +115,18 @@ const WHOLE_NUMBER_KEYS = new Set(['notificationsPerHour'])
 const SHARE_KEYS = new Set([
   'amendShare',
   'cancelAmendShare',
-  'dashboardReadShareTarget'
+  'dashboardReadShareTarget',
+  'worstCaseSearchShare'
 ])
+const COUNT_DISTRIBUTION_MINIMUMS = {
+  documentsPerNotification: 0,
+  commodityLinesPerNotification: 1
+}
+const VALUE_DISTRIBUTION_KEYS = {
+  documentTypes: ['pdf', 'jpeg'],
+  commodityTypes: ['plants-for-planting', 'potatoes', 'wood-and-cut-trees']
+}
+const SHARE_TOTAL_TOLERANCE = 1e-9
 
 const isPlainObject = (value) =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -149,20 +187,87 @@ const failureFor = (key, value) => {
     : undefined
 }
 
+const failIfAny = (path, failure) => {
+  if (failure) {
+    throw new Error(`Traffic model value "${path}" must be ${failure}`)
+  }
+}
+
+const isWholeNumber = (value) => Number.isInteger(value)
+
+const sharesFailure = (buckets) => {
+  const total = buckets.reduce((sum, { share }) => sum + share, 0)
+  const sharesAreValid = buckets.every(
+    ({ share }) => typeof share === 'number' && share >= 0 && share <= 1
+  )
+
+  return sharesAreValid && Math.abs(total - 1) <= SHARE_TOTAL_TOLERANCE
+    ? undefined
+    : 'buckets whose shares add up to 1'
+}
+
+const countBucketFailure =
+  (minimum) =>
+  ({ min, max }) =>
+    isWholeNumber(min) && isWholeNumber(max) && min >= minimum && min <= max
+      ? undefined
+      : `buckets of whole numbers from min to max, with min at least ${minimum}`
+
+const valueBucketFailure = (allowed) => (bucket) =>
+  allowed.includes(bucket.value)
+    ? undefined
+    : `buckets of ${allowed.join(', ')}`
+
+const bucketFailureFor = (key) => {
+  if (key in COUNT_DISTRIBUTION_MINIMUMS) {
+    return countBucketFailure(COUNT_DISTRIBUTION_MINIMUMS[key])
+  }
+
+  return valueBucketFailure(VALUE_DISTRIBUTION_KEYS[key])
+}
+
+const distributionFailure = (key, buckets) => {
+  if (
+    !Array.isArray(buckets) ||
+    buckets.length === 0 ||
+    !buckets.every(isPlainObject)
+  ) {
+    return 'a list of buckets'
+  }
+
+  return (
+    sharesFailure(buckets) ?? buckets.map(bucketFailureFor(key)).find(Boolean)
+  )
+}
+
+const isDistributionKey = (key) =>
+  key in COUNT_DISTRIBUTION_MINIMUMS || key in VALUE_DISTRIBUTION_KEYS
+
+const kilobyteRangeFailure = ({ min, max }) =>
+  min <= max && max <= DOCUMENT_CAP_KILOBYTES
+    ? undefined
+    : `a range from min to max of at most ${DOCUMENT_CAP_KILOBYTES}`
+
 const validate = (model, parent = '') => {
   for (const [key, value] of Object.entries(model)) {
     const path = joinPath(parent, key)
 
-    if (isPlainObject(value)) {
-      validate(value, path)
+    if (isDistributionKey(key)) {
+      failIfAny(path, distributionFailure(key, value))
       continue
     }
 
-    const failure = failureFor(key, value)
+    if (isPlainObject(value)) {
+      validate(value, path)
 
-    if (failure) {
-      throw new Error(`Traffic model value "${path}" must be ${failure}`)
+      if (key === 'documentKilobytes') {
+        failIfAny(path, kilobyteRangeFailure(value))
+      }
+
+      continue
     }
+
+    failIfAny(path, failureFor(key, value))
   }
 }
 

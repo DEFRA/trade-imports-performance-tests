@@ -1,6 +1,10 @@
-export const ENDPOINT_KINDS = Object.freeze({ PAGE: 'page', API: 'api' })
+export const ENDPOINT_KINDS = Object.freeze({
+  PAGE: 'page',
+  API: 'api',
+  UPLOAD: 'upload'
+})
 
-const { PAGE, API } = ENDPOINT_KINDS
+const { PAGE, API, UPLOAD } = ENDPOINT_KINDS
 
 const ofKind = (kind, names) => names.map((name) => [name, kind])
 
@@ -36,6 +40,9 @@ const ANIMALS_PAGES = [
   'animals-import-reason-save',
   'animals-additional-details',
   'animals-additional-details-save',
+  'animals-documents',
+  'animals-documents-status',
+  'animals-documents-save',
   'animals-addresses',
   'animals-addresses-save',
   'animals-party-picker',
@@ -59,6 +66,8 @@ const ANIMALS_PAGES = [
   'animals-cancel-amend',
   'animals-cancel-amend-save'
 ]
+
+const ANIMALS_UPLOADS = ['animals-documents-upload']
 
 const PLANTS_PAGES = [
   'plants-dashboard',
@@ -110,6 +119,7 @@ export const ENDPOINTS = Object.freeze(
   Object.fromEntries([
     ...ofKind(PAGE, INS_PAGES),
     ...ofKind(PAGE, ANIMALS_PAGES),
+    ...ofKind(UPLOAD, ANIMALS_UPLOADS),
     ...ofKind(PAGE, PLANTS_PAGES),
     ...ofKind(API, BACKEND_APIS)
   ])

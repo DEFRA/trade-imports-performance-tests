@@ -95,3 +95,20 @@ export const SCENARIOS = Object.freeze({
  * @returns {Record<string, object>} One constant-arrival-rate scenario per entry of `SCENARIOS`.
  */
 export const smokeScenarios = (model) => arrivalScenarios(model, SCENARIOS)
+
+/**
+ * Lists every notification type the run splits its load by.
+ *
+ * Live animals has one type. High-risk plants has one per commodity type in
+ * the traffic model.
+ *
+ * @param {object} model - A resolved traffic model.
+ * @returns {Array<[string, string]>} Pairs of scenario name and notification type.
+ */
+export const notificationSplits = (model) => [
+  ['live-animals', 'live-animals'],
+  ...model.highRiskPlants.commodityTypes.map(({ value }) => [
+    'high-risk-plants',
+    value
+  ])
+]

@@ -106,6 +106,7 @@ const toPage = (response, url, outcome) => {
   return {
     status: response.status,
     url,
+    receivedAt: Date.now(),
     html,
     crumb: html?.find('meta[name="csrf-token"]').attr('content') ?? '',
     heading: html?.find('h1').first().text().trim() ?? '',
@@ -130,7 +131,7 @@ const toPage = (response, url, outcome) => {
  * @param {{ add: (value: number) => void }} options.staleRedirects - Counts handled stale-concurrency redirects.
  * @param {object} [options.jar] - A cookie jar to share with another session, as one browser does across frontends.
  * @param {Record<string, string>} [options.extraTags] - Tags added to every request, overriding the defaults.
- * @returns {{ open: Function, post: Function, submitForm: Function, signedInThroughIdentityProvider: () => boolean }} The session.
+ * @returns {{ open: Function, post: Function, submitForm: Function, submitMultipart: Function, getJson: Function, signedInThroughIdentityProvider: () => boolean }} The session. `submitMultipart` posts a form with one file; `getJson` reads a JSON route, returning undefined unless it answers 200 with JSON.
  */
 export const createBrowserSession = ({
   baseUrl,
@@ -208,10 +209,43 @@ export const createBrowserSession = ({
       endpoint
     )
 
+  const submitMultipart = (page, answers, file, endpoint) => {
+    const url = `${baseUrl}${page.url.slice(originOf(page.url).length)}`
+    const fields = formFields(
+      { ...prefilledFields(page.formInputs), ...page.hiddenFields },
+      answers
+    )
+
+    return follow(
+      http.post(url, { ...fields, file }, paramsFor(endpoint)),
+      url,
+      endpoint
+    )
+  }
+
+  const getJson = (path, endpoint) => {
+    const response = http.get(
+      `${baseUrl}${path}`,
+      paramsFor(endpoint, { accept: 'application/json' })
+    )
+
+    if (response.status !== HTTP_OK) {
+      return undefined
+    }
+
+    try {
+      return response.json()
+    } catch {
+      return undefined
+    }
+  }
+
   return {
     open,
     post,
     submitForm,
+    submitMultipart,
+    getJson,
     signedInThroughIdentityProvider: () => signedIn
   }
 }

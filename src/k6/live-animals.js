@@ -1,18 +1,25 @@
 import { STEP_ENDPOINTS } from '../config/journey-endpoints.js'
-import { arrivalDateText, blankFieldAnswers } from '../lib/form-fill.js'
+import { ANIMAL_COMMODITY_SEARCH } from '../config/test-data.js'
+import { countAt } from '../lib/distributions.js'
+import {
+  blankFieldAnswers,
+  selectOptions,
+  slashDateText
+} from '../lib/form-fill.js'
+import { documentsStep } from './documents.js'
 import {
   choiceLabelled,
   choiceValues,
   identityOf,
   pagePath,
   pickAddress,
+  pickFrom,
   reachAndSubmit,
   saved
 } from './journey-pages.js'
 
 const ENDPOINTS = STEP_ENDPOINTS['live-animals']
 
-const SPECIES_SEARCH = 'Bos taurus'
 const ARRIVAL_DAYS_AHEAD = 7
 const PARTY_SLUGS = [
   'place-of-origin/select',
@@ -22,11 +29,20 @@ const PARTY_SLUGS = [
   'destinations/select'
 ]
 const FRANCE = 'FR'
+const DEFAULT_PORT_OF_ENTRY = 'GB ABD'
 
-const originAnswers = ({ vu, iteration, suffix }) => ({
-  countryOfOrigin: FRANCE,
+const drawnOrElse = (context, formInputs, name, fallback) =>
+  pickFrom(context, selectOptions(formInputs, name)) ?? fallback
+
+const originAnswers = (context, page) => ({
+  countryOfOrigin: drawnOrElse(
+    context,
+    page.formInputs,
+    'countryOfOrigin',
+    FRANCE
+  ),
   regionOfOriginCodeRequirement: 'no',
-  internalReferenceNumber: `PERF-${vu}-${iteration}${suffix}`
+  internalReferenceNumber: `PERF-${context.vu}-${context.iteration}${context.suffix}`
 })
 
 const commodities = {
@@ -40,7 +56,7 @@ const commodities = {
     )
     const searched = walker.submit(
       opened,
-      { commoditySearch: SPECIES_SEARCH, action: 'search' },
+      { commoditySearch: ANIMAL_COMMODITY_SEARCH, action: 'search' },
       ENDPOINTS.commodities.search
     )
 
@@ -48,7 +64,7 @@ const commodities = {
       'commodities',
       walker.submit(
         searched,
-        { species: choiceLabelled(searched, 'species', SPECIES_SEARCH) },
+        { species: pickFrom(context, choiceValues(searched, 'species')) },
         ENDPOINTS.commodities.save
       )
     )
@@ -86,9 +102,14 @@ const portOfEntry = reachAndSubmit(
   'port-of-entry',
   'port-of-entry',
   ENDPOINTS['port-of-entry'],
-  ({ now }) => ({
-    arrivalDateAtPort: arrivalDateText(now, ARRIVAL_DAYS_AHEAD),
-    portOfEntry: 'GB ABD',
+  (context, page) => ({
+    arrivalDateAtPort: slashDateText(context.now, ARRIVAL_DAYS_AHEAD),
+    portOfEntry: drawnOrElse(
+      context,
+      page.formInputs,
+      'portOfEntry',
+      DEFAULT_PORT_OF_ENTRY
+    ),
     meansOfTransport: 'ROAD_VEHICLE',
     transportIdentification: 'FR-892-LK',
     transportDocumentReference: 'CMR-2026-884721'
@@ -107,7 +128,15 @@ const transitCountries = {
     )
     const added = walker.submit(
       opened,
-      { transitedCountry: FRANCE, action: 'add' },
+      {
+        transitedCountry: drawnOrElse(
+          context,
+          opened.formInputs,
+          'transitedCountry',
+          FRANCE
+        ),
+        action: 'add'
+      },
       endpoints.add
     )
 
@@ -176,6 +205,7 @@ export const LIVE_ANIMALS_STEPS = Object.freeze({
         )
       })
     ),
+    documentsStep,
     addresses,
     reachAndSubmit('cph-number', 'cph-number', ENDPOINTS['cph-number'], () => ({
       cphCounty: '12',
@@ -194,5 +224,9 @@ export const LIVE_ANIMALS_STEPS = Object.freeze({
     'cph-number',
     'port-of-entry'
   ],
-  amendEdit: 'origin'
+  amendEdit: 'origin',
+  planFor: (journeyModel, iteration) => ({
+    notificationType: 'live-animals',
+    documents: countAt(iteration, journeyModel.documentsPerNotification)
+  })
 })
