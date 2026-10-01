@@ -49,3 +49,10 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose down
+
+  smoke:
+    name: Smoke run against the workspace stack
+    if: ${{ !github.event.pull_request.draft }}
+    uses: ./.github/workflows/smoke.yml
+    with:
+      branch: ${{ github.head_ref }}

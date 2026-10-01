@@ -18,6 +18,7 @@
     "test:watch": "vitest",
     "test:docker-compose": "docker compose run --rm k6-workspace",
     "k6:local": "docker compose run --rm k6-local",
+    "k6:inspect": "docker compose run --rm k6-local inspect --include-system-env-vars --execution-requirements src/suites/smoke.k6.js",
     "k6:image": "docker compose up --build --exit-code-from development development",
     "k6:down": "docker compose --profile local --profile workspace down"
   },
