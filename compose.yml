@@ -47,6 +47,7 @@ services:
       ENVIRONMENT: local
       LOCALHOST_ALIAS: host.docker.internal
       AUTH_PASSWORD: '${AUTH_PASSWORD:-Password123}'
+      TRAFFIC_MODEL: '${TRAFFIC_MODEL:-}'
 
   localstack:
     image: localstack/localstack:4.3.0

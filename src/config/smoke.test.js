@@ -1,33 +1,42 @@
 import { describe, expect, test } from 'vitest'
 
 import { ENDPOINTS } from './endpoints.js'
-import {
-  JOURNEYS,
-  SCENARIOS,
-  resolvePassword,
-  smokeScenarios
-} from './smoke.js'
+import { SCENARIOS, resolvePassword, smokeScenarios } from './smoke.js'
+import { SMOKE_PROFILE, resolveTrafficModel } from './traffic.js'
 
-const MAX_SMOKE_VUS = 5
-
-const withoutPrefix = (endpoint, prefix) =>
-  endpoint.startsWith(`${prefix}-`)
-    ? endpoint.slice(prefix.length + 1)
-    : endpoint
+const JOURNEY_SCENARIOS = [
+  ['live-animals', 'animals'],
+  ['high-risk-plants', 'plants']
+]
+const SHARED_ROLES = [
+  'dashboard',
+  'dashboard-search',
+  'create',
+  'hub',
+  'notification-view',
+  'declaration',
+  'declaration-save',
+  'amend',
+  'cancel-amend',
+  'cancel-amend-save'
+]
+const ADDRESS_BOOK_ENDPOINTS = [
+  'ins-address-book',
+  'ins-address-book-search',
+  'ins-address-add',
+  'ins-address-add-save',
+  'ins-address-view',
+  'ins-address-edit',
+  'ins-address-edit-save',
+  'ins-address-delete',
+  'ins-address-delete-save'
+]
 
 describe('SCENARIOS', () => {
-  test('uses at most 5 virtual users in total', () => {
-    const total = Object.values(SCENARIOS).reduce(
-      (sum, { vus }) => sum + vus,
-      0
-    )
-
-    expect(total).toBeLessThanOrEqual(MAX_SMOKE_VUS)
-  })
-
-  test('has the front door and both journeys', () => {
+  test('has the front door, the address book and both journeys', () => {
     expect(Object.keys(SCENARIOS)).toEqual([
       'ins-front-door',
+      'ins-address-book',
       'live-animals',
       'high-risk-plants'
     ])
@@ -41,32 +50,60 @@ describe('SCENARIOS', () => {
     }
   })
 
-  test('gives both journeys the same endpoint shape, prefix aside', () => {
-    const shapeOf = (scenario) => {
-      const { endpointPrefix, savePageEndpoint } = JOURNEYS[scenario]
+  test.each(JOURNEY_SCENARIOS)(
+    '%s follows the whole journey: dashboard, create, hub, review, declaration, amend and cancel amend',
+    (scenario, prefix) => {
+      const { endpoints } = SCENARIOS[scenario]
 
-      return SCENARIOS[scenario].endpoints.map((endpoint) =>
-        withoutPrefix(endpoint, endpointPrefix).replace(
-          savePageEndpoint.slice(endpointPrefix.length + 1),
-          'save-page'
-        )
+      expect(endpoints).toEqual(
+        expect.arrayContaining([
+          'sign-in',
+          'ins-dashboard',
+          ...SHARED_ROLES.map((role) => `${prefix}-${role}`)
+        ])
       )
     }
+  )
 
-    expect(shapeOf('live-animals')).toEqual(shapeOf('high-risk-plants'))
+  test("includes a sample of each journey's draft page endpoints", () => {
+    expect(SCENARIOS['live-animals'].endpoints).toEqual(
+      expect.arrayContaining([
+        'animals-origin',
+        'animals-commodities',
+        'animals-identification',
+        'animals-party-picker-save',
+        'animals-port-of-entry-save',
+        'animals-contact-save'
+      ])
+    )
+    expect(SCENARIOS['high-risk-plants'].endpoints).toEqual(
+      expect.arrayContaining([
+        'plants-commodity-type',
+        'plants-commodity-line-save',
+        'plants-arrival-details',
+        'plants-destination-save',
+        'plants-identification-numbers-save',
+        'plants-contact-save'
+      ])
+    )
+  })
+
+  test('has the address book list, add, view, edit and delete pages', () => {
+    expect(SCENARIOS['ins-address-book'].endpoints).toEqual(
+      expect.arrayContaining(ADDRESS_BOOK_ENDPOINTS)
+    )
   })
 })
 
 describe('smokeScenarios', () => {
-  test('gives every scenario a constant-VU executor with the configured duration', () => {
-    const scenarios = smokeScenarios()
+  test('gives every scenario an arrival-rate executor and its exec function', () => {
+    const scenarios = smokeScenarios(resolveTrafficModel({}, SMOKE_PROFILE))
 
     expect(Object.keys(scenarios)).toEqual(Object.keys(SCENARIOS))
 
     for (const [name, scenario] of Object.entries(scenarios)) {
       expect(scenario).toMatchObject({
-        executor: 'constant-vus',
-        vus: SCENARIOS[name].vus,
+        executor: 'constant-arrival-rate',
         duration: '2m',
         exec: SCENARIOS[name].exec
       })

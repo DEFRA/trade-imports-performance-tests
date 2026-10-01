@@ -1,0 +1,100 @@
+import { sleep } from 'k6'
+import { Counter, Rate, Trend } from 'k6/metrics'
+
+import { TRAFFIC_CLASSES, isDashboardRead } from '../config/request-mix.js'
+import { thinkSeconds } from '../lib/traffic-shape.js'
+
+const HTTP_OK = 200
+
+const pageRequests = new Counter('page_requests')
+const dashboardReadShare = new Rate('dashboard_read_share')
+const postSubmissionReads = new Counter('post_submission_reads')
+const amendmentPages = new Counter('amendment_pages')
+const pagesPerNotification = new Trend('pages_per_notification')
+const sessionSeconds = new Trend('session_seconds')
+
+const pathOf = (url) => url.replace(/^https?:\/\/[^/?#]+/, '').split(/[?#]/)[0]
+
+/**
+ * Records a page request in the request mix, with no request and no wait.
+ *
+ * @param {string} trafficClass - A value of `TRAFFIC_CLASSES`.
+ */
+export const recordPage = (trafficClass) => {
+  pageRequests.add(1, { traffic_class: trafficClass })
+  dashboardReadShare.add(isDashboardRead(trafficClass))
+
+  if (trafficClass === TRAFFIC_CLASSES.POST_SUBMISSION_READ) {
+    postSubmissionReads.add(1)
+  }
+
+  if (trafficClass === TRAFFIC_CLASSES.AMENDMENT) {
+    amendmentPages.add(1)
+  }
+}
+
+/**
+ * Records how many pages a finished notification took.
+ *
+ * @param {number} count - Journey-frontend page requests across all its sessions.
+ */
+export const recordNotificationPages = (count) =>
+  pagesPerNotification.add(count)
+
+/**
+ * Records how long a user session lasted.
+ *
+ * @param {number} seconds - Wall-clock seconds, including think time.
+ */
+export const recordSession = (seconds) => sessionSeconds.add(seconds)
+
+/**
+ * Wraps a browser session so every page request is classified and followed by think time.
+ *
+ * Every navigation a scenario makes goes through here, which is what keeps the
+ * request mix honest and the load paced like a person's.
+ *
+ * @param {object} options - Walker settings.
+ * @param {object} options.session - A browser session.
+ * @param {number} options.thinkMean - The mean wait after a page, in seconds.
+ * @param {string} options.trafficClass - The class page requests are recorded under.
+ * @param {{ count: number }} [options.counter] - Counts the pages requested, shared across sessions.
+ * @returns {object} The walker.
+ */
+export const createWalker = ({ session, thinkMean, trafficClass, counter }) => {
+  const settle = (page) => {
+    recordPage(trafficClass)
+
+    if (counter) {
+      counter.count += 1
+    }
+
+    sleep(thinkSeconds(thinkMean, Math.random()))
+
+    return page
+  }
+
+  const open = (path, endpoint) => settle(session.open(path, endpoint))
+
+  const post = (path, fields, endpoint) =>
+    settle(session.post(path, fields, endpoint))
+
+  const submit = (page, answers, endpoint) =>
+    settle(session.submitForm(page, answers, endpoint))
+
+  const reach = (current, path, endpoint) =>
+    current?.status === HTTP_OK && pathOf(current.url) === path
+      ? current
+      : open(path, endpoint)
+
+  return {
+    session,
+    open,
+    post,
+    submit,
+    reach,
+    record: recordPage,
+    withClass: (nextClass) =>
+      createWalker({ session, thinkMean, trafficClass: nextClass, counter })
+  }
+}

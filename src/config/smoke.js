@@ -1,18 +1,30 @@
+import { journeyEndpoints } from './journey-endpoints.js'
+import { arrivalScenarios } from './traffic.js'
+
 export const STUB_PROFILE = 'zero-delay'
 
 const DEFAULT_STUB_PASSWORD = 'Password123'
 
 export const IDENTITY = Object.freeze({ crn: '2100010101' })
 
-export const THINK_TIME_MIN_S = 1
-export const THINK_TIME_MAX_S = 3
 export const MAX_REDIRECT_HOPS = 10
 
 export const READINESS = Object.freeze({ timeoutSeconds: 300, pollSeconds: 5 })
 export const SETUP_TIMEOUT = '360s'
 
-const SCENARIO_DURATION = '2m'
-const GRACEFUL_STOP = '30s'
+export const PERF_ADDRESS = Object.freeze({
+  name: 'Perf Test Holding',
+  addressLine1: '4 Nursery Lane',
+  addressLine2: '',
+  townOrCity: 'Perth',
+  county: '',
+  postcode: 'PH1 5EX',
+  countryCode: 'GB',
+  phone: '01738 555 0143',
+  email: 'perf@example.co.uk'
+})
+
+export const ADDRESS_BOOK_LOAD_NAME_PREFIX = 'Address Book Load'
 
 /**
  * Reads the stub sign-in password.
@@ -28,64 +40,58 @@ export const JOURNEYS = Object.freeze({
     frontend: 'trade-imports-animals-frontend',
     backend: 'trade-imports-animals-backend',
     setBase: '/live-animals',
-    savePage: 'origin',
+    firstSavePage: 'origin',
     endpointPrefix: 'animals',
-    savePageEndpoint: 'animals-origin'
+    trafficKey: 'liveAnimals'
   }),
   'high-risk-plants': Object.freeze({
     frontend: 'trade-imports-plants-frontend',
     backend: 'trade-imports-plants-backend',
     setBase: '/high-risk-plants',
-    savePage: 'commodity-type',
+    firstSavePage: 'commodity-type',
     endpointPrefix: 'plants',
-    savePageEndpoint: 'plants-commodity-type'
+    trafficKey: 'highRiskPlants'
   })
 })
 
-const journeyEndpoints = ({ endpointPrefix, savePageEndpoint }) => [
+const ADDRESS_BOOK_ENDPOINTS = [
   'sign-in',
-  `${endpointPrefix}-dashboard`,
-  `${endpointPrefix}-create`,
-  savePageEndpoint,
-  `${savePageEndpoint}-save`,
-  `${endpointPrefix}-backend-fulfilments`,
-  `${endpointPrefix}-backend-list`,
-  `${endpointPrefix}-backend-replace`
+  'ins-dashboard',
+  'ins-address-book',
+  'ins-address-book-search',
+  'ins-address-add',
+  'ins-address-add-save',
+  'ins-address-view',
+  'ins-address-edit',
+  'ins-address-edit-save',
+  'ins-address-delete',
+  'ins-address-delete-save'
 ]
+
+const journeyScenario = (journeyKey, exec) => ({
+  exec,
+  endpoints: journeyEndpoints(journeyKey, JOURNEYS[journeyKey].endpointPrefix)
+})
 
 export const SCENARIOS = Object.freeze({
   'ins-front-door': Object.freeze({
-    vus: 1,
     exec: 'insFrontDoor',
     endpoints: ['sign-in', 'ins-dashboard']
   }),
-  'live-animals': Object.freeze({
-    vus: 2,
-    exec: 'liveAnimals',
-    endpoints: journeyEndpoints(JOURNEYS['live-animals'])
+  'ins-address-book': Object.freeze({
+    exec: 'insAddressBook',
+    endpoints: ADDRESS_BOOK_ENDPOINTS
   }),
-  'high-risk-plants': Object.freeze({
-    vus: 2,
-    exec: 'highRiskPlants',
-    endpoints: journeyEndpoints(JOURNEYS['high-risk-plants'])
-  })
+  'live-animals': Object.freeze(journeyScenario('live-animals', 'liveAnimals')),
+  'high-risk-plants': Object.freeze(
+    journeyScenario('high-risk-plants', 'highRiskPlants')
+  )
 })
 
 /**
  * Builds the k6 `scenarios` option for the smoke run.
  *
- * @returns {Record<string, object>} One constant-VU scenario per entry of `SCENARIOS`.
+ * @param {object} model - A resolved traffic model.
+ * @returns {Record<string, object>} One constant-arrival-rate scenario per entry of `SCENARIOS`.
  */
-export const smokeScenarios = () =>
-  Object.fromEntries(
-    Object.entries(SCENARIOS).map(([name, { vus, exec }]) => [
-      name,
-      {
-        executor: 'constant-vus',
-        vus,
-        duration: SCENARIO_DURATION,
-        gracefulStop: GRACEFUL_STOP,
-        exec
-      }
-    ])
-  )
+export const smokeScenarios = (model) => arrivalScenarios(model, SCENARIOS)
