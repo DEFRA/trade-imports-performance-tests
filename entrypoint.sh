@@ -4,8 +4,18 @@ echo "run_id: $RUN_ID in $ENVIRONMENT"
 
 PERFTEST_HOME=${PERFTEST_HOME:-/opt/perftest}
 REPORTS_DIR=${PERFTEST_HOME}/reports
-TEST_SUITE=${TEST_SUITE:-health-check}
+
+default_suite() {
+  case "$ENVIRONMENT" in
+    dev|test) echo "smoke" ;;
+    *) echo "health-check" ;;
+  esac
+}
+
+TEST_SUITE=${TEST_SUITE:-$(default_suite)}
 SUITE_FILE=${PERFTEST_HOME}/src/suites/${TEST_SUITE}.k6.js
+
+echo "Running suite $TEST_SUITE in $ENVIRONMENT"
 
 mkdir -p "$REPORTS_DIR"
 

@@ -20,6 +20,19 @@ describe('resolveEnvironment', () => {
       expect(() => resolveEnvironment(env)).toThrow('ENVIRONMENT is not set')
     }
   )
+
+  test.each(['prod', 'PROD', ' prod '])(
+    'refuses to run against prod: %j',
+    (environment) => {
+      expect(() => resolveEnvironment({ ENVIRONMENT: environment })).toThrow(
+        'Refusing to run against prod'
+      )
+    }
+  )
+
+  test.each(['dev', 'test'])('returns %s unchanged', (environment) => {
+    expect(resolveEnvironment({ ENVIRONMENT: environment })).toBe(environment)
+  })
 })
 
 describe('resolveLocalhostAlias', () => {
@@ -47,6 +60,33 @@ describe('resolveServiceUrl', () => {
   test('builds the CDP address from the environment', () => {
     expect(resolveServiceUrl({ ENVIRONMENT: 'perf-test' }, SERVICE)).toBe(
       'https://trade-imports-ins-frontend.perf-test.cdp-int.defra.cloud'
+    )
+  })
+
+  test.each([
+    [
+      'dev',
+      'trade-imports-ins-frontend',
+      'https://trade-imports-ins-frontend.dev.cdp-int.defra.cloud'
+    ],
+    [
+      'test',
+      'trade-imports-plants-frontend',
+      'https://trade-imports-plants-frontend.test.cdp-int.defra.cloud'
+    ],
+    [
+      'dev',
+      'trade-imports-animals-backend',
+      'https://trade-imports-animals-backend.dev.cdp-int.defra.cloud'
+    ],
+    [
+      'test',
+      'trade-imports-plants-backend',
+      'https://trade-imports-plants-backend.test.cdp-int.defra.cloud'
+    ]
+  ])('%s resolves %s to its CDP address', (environment, service, expected) => {
+    expect(resolveServiceUrl({ ENVIRONMENT: environment }, service)).toBe(
+      expected
     )
   })
 
