@@ -11,7 +11,7 @@ const view = {
 
 describe('replaceBodyFrom', () => {
   test('copies the reference, token and fulfilments from the view', () => {
-    expect(replaceBodyFrom(view).notification).toEqual({
+    expect(replaceBodyFrom(view, {}).notification).toEqual({
       referenceNumber: 'DRAFT.GB.2026.1',
       concurrencyToken: 7,
       fulfilments: { origin: { country: 'FR' } }
@@ -58,19 +58,26 @@ describe('replaceBodyFrom', () => {
 
   test('throws when the view has no fulfilments', () => {
     expect(() =>
-      replaceBodyFrom({ referenceNumber: 'r', concurrencyToken: 1 })
+      replaceBodyFrom({ referenceNumber: 'r', concurrencyToken: 1 }, {})
     ).toThrow('no fulfilments')
   })
 
   test('accepts a concurrency token of 0', () => {
-    const body = replaceBodyFrom({ ...view, concurrencyToken: 0 })
+    const body = replaceBodyFrom({ ...view, concurrencyToken: 0 }, {})
 
     expect(body.notification.concurrencyToken).toBe(0)
   })
 
   test('throws when the view has no concurrency token', () => {
     expect(() =>
-      replaceBodyFrom({ referenceNumber: 'r', fulfilments: {} })
+      replaceBodyFrom({ referenceNumber: 'r', fulfilments: {} }, {})
     ).toThrow('no concurrencyToken')
+  })
+
+  test('refuses to replay a save the backend list does not hold', () => {
+    expect(() => replaceBodyFrom(view)).toThrow(/backend list does not hold/)
+    expect(() => replaceBodyFrom(view, null)).toThrow(
+      /backend list does not hold/
+    )
   })
 })

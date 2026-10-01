@@ -22,11 +22,15 @@ const shapeFieldsOf = (listItem) =>
  * is a capture of what the frontend persisted and never a hand-built one.
  *
  * @param {{ referenceNumber: string, concurrencyToken: string, fulfilments: unknown }} fulfilmentsView - The backend's fulfilments read.
- * @param {Record<string, unknown>} [listItem] - The notification as the backend's list read returns it.
+ * @param {Record<string, unknown>} listItem - The notification as the backend's list read returns it.
  * @returns {{ notification: Record<string, unknown> }} The replace body.
  */
-export const replaceBodyFrom = (fulfilmentsView, listItem = {}) => {
+export const replaceBodyFrom = (fulfilmentsView, listItem) => {
   const { referenceNumber, concurrencyToken, fulfilments } = fulfilmentsView
+
+  if (listItem === undefined || listItem === null) {
+    throw new Error('Cannot replay a save the backend list does not hold')
+  }
 
   if (fulfilments === undefined || fulfilments === null) {
     throw new Error('Cannot replay a save that has no fulfilments')

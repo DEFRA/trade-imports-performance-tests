@@ -35,13 +35,17 @@ const ANSWERS = {
   })
 }
 
+const isAnswered = (value) => typeof value === 'string' && value !== ''
+
 const READS_BACK = {
   origin: (page, answers) =>
+    isAnswered(answers.internalReferenceNumber) &&
     page.html?.find('input[name="internalReferenceNumber"]').attr('value') ===
-    answers.internalReferenceNumber,
+      answers.internalReferenceNumber,
   'commodity-type': (page, answers) =>
+    isAnswered(answers.commodityType) &&
     page.html?.find('input[name="commodityType"][checked]').attr('value') ===
-    answers.commodityType
+      answers.commodityType
 }
 
 const isSavedPage = (page) =>
@@ -78,6 +82,14 @@ export const insFrontDoor = (session, iteration) => {
   think()
 }
 
+const capturedBodyFrom = (fulfilments, list) => {
+  try {
+    return replaceBodyFrom(fulfilments.json(), list.json('content.0'))
+  } catch {
+    return undefined
+  }
+}
+
 const replayCapturedSave = ({ journey, backendUrl, id }) => {
   const prefix = journey.endpointPrefix
   const notificationUrl = `${backendUrl}/notifications/${id}`
@@ -99,9 +111,23 @@ const replayCapturedSave = ({ journey, backendUrl, id }) => {
     'backend list read succeeds': (response) => response.status === HTTP_OK
   })
 
+  if (fulfilments.status !== HTTP_OK || list.status !== HTTP_OK) {
+    return
+  }
+
+  const body = capturedBodyFrom(fulfilments, list)
+
+  check(body, {
+    'captured save is complete': (captured) => captured !== undefined
+  })
+
+  if (body === undefined) {
+    return
+  }
+
   const replace = http.put(
     notificationUrl,
-    JSON.stringify(replaceBodyFrom(fulfilments.json(), list.json('content.0'))),
+    JSON.stringify(body),
     backendParams(`${prefix}-backend-replace`, JSON_HEADERS)
   )
 
@@ -149,9 +175,13 @@ export const draftJourney = ({
 
   check(created, {
     'draft created through the frontend': (page) =>
-      id !== '' && page.url.endsWith(`/${savePage}`)
+      page.status === HTTP_OK && id !== '' && page.url.endsWith(`/${savePage}`)
   })
   think()
+
+  if (id === '' || created.status !== HTTP_OK) {
+    return
+  }
 
   const answers = ANSWERS[savePage](created, vu, iteration)
   const saved = session.submitForm(created, answers, `${savePageEndpoint}-save`)

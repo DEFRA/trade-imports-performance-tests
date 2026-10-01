@@ -67,7 +67,7 @@ This builds the image, runs it against the stand-in service and uploads the repo
 npm run test:docker-compose
 ```
 
-This runs `src/suites/smoke.k6.js` from source against the trade imports workspace stack, which must already be running. Start it with `tim docker up`, not `tim docker dev`. `up` is production-like: template caching is on and sign-in goes through the Defra ID stub. `dev` turns caching off, so it measures something other than CDP.
+This runs `src/suites/smoke.k6.js` from source against the trade imports workspace stack, which must already be running. Start it with `tim docker up`, not `tim docker dev`. `up` is production-like: template caching is on and sign-in goes through the Defra ID stub. `dev` turns caching off, so it measures something other than CDP. The build loop's gate runs this same suite against a `--dev` stack, so its timings are not production-like; the pull-request run in `smoke.yml` is the production-like one.
 
 The run waits for the stack to be functionally ready (up to 5 minutes), then runs 3 scenarios at once for about 2 minutes with 5 virtual users in total:
 
