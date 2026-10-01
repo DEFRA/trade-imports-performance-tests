@@ -16,6 +16,11 @@ const C012_CANCELLED_SHARE_OF_AMENDED = 0.05
 const INTERIM_WORST_CASE_SEARCH_SHARE = 0.25
 const DOCUMENT_CAP_KILOBYTES = 10_000
 const DEFAULT_DURATION = '2m'
+const GBN_AG_ANNUAL_NOTIFICATIONS = 42_000
+const GBN_PP_ANNUAL_NOTIFICATIONS = 34_000
+const INTERIM_ADDRESS_BOOK_ENTRIES = 500
+const BACKGROUND_VIRTUAL_USERS = 10
+const BACKGROUND_MAX_DURATION = '24h'
 
 const ADDRESS_BOOK_SESSION_PAGES = 12
 const SECONDS_PER_MINUTE = 60
@@ -84,6 +89,14 @@ export const TRAFFIC_DEFAULTS = freezeDeep({
       INTERIM_ADDRESS_BOOK_SESSIONS_PER_NOTIFICATION
   },
   mix: { dashboardReadShareTarget: D7_DASHBOARD_READ_SHARE },
+  backgroundVolume: {
+    liveAnimalsNotifications: GBN_AG_ANNUAL_NOTIFICATIONS,
+    highRiskPlantsNotifications: GBN_PP_ANNUAL_NOTIFICATIONS,
+    addressBookEntries: INTERIM_ADDRESS_BOOK_ENTRIES,
+    maxCreatedPerRun: GBN_AG_ANNUAL_NOTIFICATIONS,
+    virtualUsers: BACKGROUND_VIRTUAL_USERS,
+    maxDuration: BACKGROUND_MAX_DURATION
+  },
   duration: DEFAULT_DURATION
 })
 
@@ -111,7 +124,39 @@ export const SMOKE_PROFILE = freezeDeep({
   }
 })
 
-const WHOLE_NUMBER_KEYS = new Set(['notificationsPerHour'])
+const BACKGROUND_MINIMAL_PAGES = 1
+const BACKGROUND_CORE_PAGES = 2
+const BACKGROUND_SESSIONS_PER_NOTIFICATION = 1
+const BACKGROUND_WORST_CASE_SEARCH_SHARE = 0
+
+/**
+ * What the background-volume suite lays over the defaults: each notification
+ * is one page and one session with no documents, and no address-book search
+ * or extra INS status check, because the run is set-up and measures nothing.
+ */
+export const BACKGROUND_VOLUME_PROFILE = freezeDeep({
+  liveAnimals: {
+    pagesPerNotification: BACKGROUND_MINIMAL_PAGES,
+    sessionsPerNotification: BACKGROUND_SESSIONS_PER_NOTIFICATION,
+    documentsPerNotification: [{ share: 1, min: 0, max: 0 }]
+  },
+  highRiskPlants: {
+    pagesPerNotification: BACKGROUND_MINIMAL_PAGES,
+    sessionsPerNotification: BACKGROUND_SESSIONS_PER_NOTIFICATION
+  },
+  addressBook: { worstCaseSearchShare: BACKGROUND_WORST_CASE_SEARCH_SHARE },
+  frontDoor: { corePagesPerJourneySession: BACKGROUND_CORE_PAGES }
+})
+
+const WHOLE_NUMBER_KEYS = new Set([
+  'notificationsPerHour',
+  'liveAnimalsNotifications',
+  'highRiskPlantsNotifications',
+  'addressBookEntries',
+  'maxCreatedPerRun',
+  'virtualUsers'
+])
+const DURATION_KEYS = new Set(['duration', 'maxDuration'])
 const SHARE_KEYS = new Set([
   'amendShare',
   'cancelAmendShare',
@@ -164,7 +209,7 @@ const deepMerge = (base, override, parent = '') => {
 }
 
 const failureFor = (key, value) => {
-  if (key === 'duration') {
+  if (DURATION_KEYS.has(key)) {
     return typeof value === 'string' && DURATION_FORMAT.test(value)
       ? undefined
       : 'a duration such as 2m'

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest'
 
 import { SCENARIOS } from './smoke.js'
 import {
+  BACKGROUND_VOLUME_PROFILE,
   SMOKE_PROFILE,
   TRAFFIC_DEFAULTS,
   amendmentPlan,
@@ -42,6 +43,12 @@ describe('TRAFFIC_DEFAULTS', () => {
     ['highRiskPlants.amendShare', 0.2],
     ['highRiskPlants.cancelAmendShare', 0.05],
     ['addressBook.worstCaseSearchShare', 0.25],
+    ['backgroundVolume.liveAnimalsNotifications', 42000],
+    ['backgroundVolume.highRiskPlantsNotifications', 34000],
+    ['backgroundVolume.addressBookEntries', 500],
+    ['backgroundVolume.maxCreatedPerRun', 42000],
+    ['backgroundVolume.virtualUsers', 10],
+    ['backgroundVolume.maxDuration', '24h'],
     ['liveAnimals.documentKilobytes.min', 100],
     ['liveAnimals.documentKilobytes.max', 5000]
   ])('%s is %s', (path, expected) => {
@@ -95,6 +102,60 @@ describe('SMOKE_PROFILE', () => {
     expect(model.liveAnimals.amendShare).toBe(1)
     expect(model.highRiskPlants.amendShare).toBe(1)
     expect(model.addressBook.worstCaseSearchShare).toBe(1)
+  })
+})
+
+describe('BACKGROUND_VOLUME_PROFILE', () => {
+  const model = resolveTrafficModel({}, BACKGROUND_VOLUME_PROFILE)
+
+  test('resolves, with no documents, one session and one page for each notification', () => {
+    expect(model.liveAnimals.documentsPerNotification).toEqual([
+      { share: 1, min: 0, max: 0 }
+    ])
+    expect(model.liveAnimals.sessionsPerNotification).toBe(1)
+    expect(model.highRiskPlants.sessionsPerNotification).toBe(1)
+    expect(model.liveAnimals.pagesPerNotification).toBe(1)
+    expect(model.highRiskPlants.pagesPerNotification).toBe(1)
+  })
+
+  test('runs no worst-case search and no extra INS status check', () => {
+    expect(model.addressBook.worstCaseSearchShare).toBe(0)
+    expect(model.frontDoor.corePagesPerJourneySession).toBe(2)
+  })
+
+  test('leaves amendments, commodity types and commodity lines as journey traffic has them', () => {
+    expect(model.liveAnimals.amendShare).toBe(0.2)
+    expect(model.liveAnimals.cancelAmendShare).toBe(0.05)
+    expect(model.highRiskPlants.amendShare).toBe(0.2)
+    expect(model.highRiskPlants.commodityTypes).toEqual(
+      TRAFFIC_DEFAULTS.highRiskPlants.commodityTypes
+    )
+    expect(model.highRiskPlants.commodityLinesPerNotification).toEqual(
+      TRAFFIC_DEFAULTS.highRiskPlants.commodityLinesPerNotification
+    )
+  })
+
+  test.each([
+    [
+      '{"backgroundVolume":{"maxDuration":"1 day"}}',
+      'Traffic model value "backgroundVolume.maxDuration" must be a duration such as 2m'
+    ],
+    [
+      '{"backgroundVolume":{"virtualUsers":2.5}}',
+      'Traffic model value "backgroundVolume.virtualUsers" must be a whole number'
+    ],
+    [
+      '{"backgroundVolume":{"maxCreatedPerRun":0}}',
+      'Traffic model value "backgroundVolume.maxCreatedPerRun" must be a positive number'
+    ],
+    [
+      '{"backgroundVolume":{"addressBookEntries":-1}}',
+      'Traffic model value "backgroundVolume.addressBookEntries" must be a positive number'
+    ]
+  ])('rejects %s', (text, message) => {
+    expect(() =>
+      resolveTrafficModel({ TRAFFIC_MODEL: text }, BACKGROUND_VOLUME_PROFILE)
+    ).toThrow(message)
   })
 })
 

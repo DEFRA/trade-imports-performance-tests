@@ -393,7 +393,13 @@ const runUserSession = (run, { index, chunk, last }) => {
   }
 
   const context = contextFor(run, user.walker, run.id)
-  const drafted = runDraftChunk(run, context, chunk, landed, index === 0)
+  const drafted = runDraftChunk(
+    run,
+    context,
+    chunk,
+    landed,
+    index === 0 && run.replaysCapturedSave
+  )
 
   if (!drafted.ok || (last && !finishNotification(run, context))) {
     return false
@@ -429,7 +435,11 @@ const prepareRun = (options) => {
     worstCaseSearch: {
       pending: isChosen(iterationInTest, model.addressBook.worstCaseSearchShare)
     },
-    thinkMean: thinkSecondsMean(journeyModel, model.frontDoor),
+    thinkMean:
+      options.paced === false
+        ? 0
+        : thinkSecondsMean(journeyModel, model.frontDoor),
+    replaysCapturedSave: options.replaysCapturedSave ?? true,
     counter: { count: 0 },
     id: '',
     amends,
@@ -468,6 +478,8 @@ const prepareRun = (options) => {
  * @param {string} options.addressName - The name of the address the pickers choose.
  * @param {number} options.vu - The virtual user number.
  * @param {number} options.iterationInTest - The iteration number across the whole scenario.
+ * @param {boolean} [options.paced] - False waits no think time, for set-up runs that measure nothing. Defaults to true.
+ * @param {boolean} [options.replaysCapturedSave] - False skips the backend replay of the first save. Defaults to true.
  */
 export const notificationJourney = (options) => {
   const run = prepareRun(options)

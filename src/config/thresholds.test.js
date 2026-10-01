@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'vitest'
 
+import { DATASTORES } from './background-volume.js'
 import {
+  backgroundVolumeReportThresholds,
+  backgroundVolumeThresholds,
   documentScanThresholds,
   notificationSplitThresholds,
   scenarioThresholds,
@@ -129,6 +132,67 @@ describe('notificationSplitThresholds', () => {
       'notifications_started{scenario:high-risk-plants,notification_type:potatoes}':
         ['count>=0']
     })
+  })
+})
+
+describe('backgroundVolumeThresholds', () => {
+  const background = backgroundVolumeThresholds(['seed-live-animals'])
+
+  test('has the failed-request, checks and dropped-iteration keys only', () => {
+    expect(Object.keys(background).sort()).toEqual([
+      'checks{scenario:seed-live-animals}',
+      'dropped_iterations{scenario:seed-live-animals}',
+      'http_req_failed{scenario:seed-live-animals}'
+    ])
+  })
+
+  test('fails on more than 1% failed requests or fewer than 99% passed checks', () => {
+    expect(background['http_req_failed{scenario:seed-live-animals}']).toEqual([
+      { threshold: 'rate<0.01', abortOnFail: true, delayAbortEval: '30s' }
+    ])
+    expect(background['checks{scenario:seed-live-animals}']).toEqual([
+      { threshold: 'rate>0.99', abortOnFail: true, delayAbortEval: '30s' }
+    ])
+  })
+
+  test('aborts on failed requests and failed checks after 30s', () => {
+    for (const key of [
+      'checks{scenario:seed-live-animals}',
+      'http_req_failed{scenario:seed-live-animals}'
+    ]) {
+      for (const entry of background[key]) {
+        expect(entry).toMatchObject({
+          abortOnFail: true,
+          delayAbortEval: '30s'
+        })
+      }
+    }
+  })
+
+  test('judges dropped iterations at the end of the run', () => {
+    expect(
+      background['dropped_iterations{scenario:seed-live-animals}']
+    ).toEqual(['count<1'])
+  })
+
+  test('sets no response-time threshold', () => {
+    expect(
+      Object.keys(background).filter((key) => key.includes('http_req_duration'))
+    ).toEqual([])
+  })
+})
+
+describe('backgroundVolumeReportThresholds', () => {
+  test('is one reporting-only threshold for each datastore', () => {
+    const report = backgroundVolumeReportThresholds(DATASTORES)
+
+    expect(Object.keys(report)).toEqual(
+      DATASTORES.map((datastore) => `background_volume{datastore:${datastore}}`)
+    )
+
+    for (const limits of Object.values(report)) {
+      expect(limits).toEqual(['value>=0'])
+    }
   })
 })
 

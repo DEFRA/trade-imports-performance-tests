@@ -1,6 +1,7 @@
 import exec from 'k6/execution'
 import { Counter } from 'k6/metrics'
 
+import { DATASTORES, indexesBuiltLine } from '../config/background-volume.js'
 import { mixTargetLine } from '../config/request-mix.js'
 import {
   IDENTITY,
@@ -14,6 +15,7 @@ import {
   smokeScenarios
 } from '../config/smoke.js'
 import {
+  backgroundVolumeReportThresholds,
   documentScanThresholds,
   notificationSplitThresholds,
   smokeThresholds
@@ -33,6 +35,10 @@ import {
   dashboardOnlySession,
   ensurePerfAddress
 } from '../k6/front-door.js'
+import {
+  measureBackgroundVolume,
+  reportBackgroundVolume
+} from '../k6/background-volume.js'
 import { HIGH_RISK_PLANTS_STEPS } from '../k6/high-risk-plants.js'
 import { notificationJourney } from '../k6/journeys.js'
 import { LIVE_ANIMALS_STEPS } from '../k6/live-animals.js'
@@ -56,6 +62,7 @@ const urls = {
   plantsFrontend: resolveServiceUrl(__ENV, plants.frontend),
   animalsBackend: resolveServiceUrl(__ENV, animals.backend),
   plantsBackend: resolveServiceUrl(__ENV, plants.backend),
+  insBackend: resolveServiceUrl(__ENV, 'trade-imports-ins-backend'),
   referenceData: resolveServiceUrl(__ENV, 'trade-imports-reference-data')
 }
 
@@ -64,7 +71,8 @@ export const options = {
   thresholds: {
     ...smokeThresholds(SCENARIOS),
     ...documentScanThresholds('live-animals'),
-    ...notificationSplitThresholds(notificationSplits(model))
+    ...notificationSplitThresholds(notificationSplits(model)),
+    ...backgroundVolumeReportThresholds(DATASTORES)
   },
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'],
   setupTimeout: SETUP_TIMEOUT,
@@ -84,12 +92,18 @@ export function setup() {
   }
 
   waitForReadiness({ urls, localhostAlias, credentials })
+  console.log(indexesBuiltLine())
   ensurePerfAddress({
     insUrl: urls.ins,
     localhostAlias,
     credentials,
     address: PERF_ADDRESS
   })
+  reportBackgroundVolume(
+    measureBackgroundVolume({ urls, localhostAlias, credentials }),
+    model.backgroundVolume,
+    'start'
+  )
 
   return { addressName: PERF_ADDRESS.name }
 }

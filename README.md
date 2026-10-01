@@ -8,6 +8,7 @@ CDP builds this repo into a Docker image. The CDP Portal runs the image, and the
 - [Run locally](#run-locally)
 - [Run in CDP](#run-in-cdp)
 - [Smoke run on pull requests](#smoke-run-on-pull-requests)
+- [Background volume](#background-volume)
 - [Traffic model](#traffic-model)
 - [Request mix](#request-mix)
 - [Thresholds](#thresholds)
@@ -16,17 +17,17 @@ CDP builds this repo into a Docker image. The CDP Portal runs the image, and the
 
 ## Layout
 
-| Path                 | What it holds                                                                                                                                                                                                                                                                                                                                                |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `src/suites/`        | One k6 script per suite, named `<suite>.k6.js`                                                                                                                                                                                                                                                                                                               |
-| `src/config/`        | Environment and service URLs, the endpoint catalogue, thresholds and smoke values, the traffic model (`traffic.js`), the journeys' endpoint names (`journey-endpoints.js`), the request-mix classes (`request-mix.js`) and the stated facts the test data rests on (`test-data.js`)                                                                          |
-| `src/lib/`           | Pure helpers with unit tests, shared by suites, with no k6 imports                                                                                                                                                                                                                                                                                           |
-| `src/k6/`            | k6-only modules: the browser-like session, the notification driver (`journeys.js`), the two journeys' steps (`live-animals.js`, `high-risk-plants.js`), the live-animals documents step (`documents.js`), the front door (`front-door.js`), shared step helpers (`journey-pages.js`), page requests and the request mix (`pages.js`), and the readiness wait |
-| `entrypoint.sh`      | What the image runs: one suite, then the S3 upload                                                                                                                                                                                                                                                                                                           |
-| `Dockerfile`         | The image CDP runs, based on `grafana/k6` with the AWS CLI added                                                                                                                                                                                                                                                                                             |
-| `compose.yml`        | Local runs: LocalStack for S3 and `target`, a stand-in service that has `/health`                                                                                                                                                                                                                                                                            |
-| `compose/`           | LocalStack set-up and the stand-in service's nginx config                                                                                                                                                                                                                                                                                                    |
-| `.github/workflows/` | Pull request checks, and the CDP publish on merge to `main`                                                                                                                                                                                                                                                                                                  |
+| Path                 | What it holds                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/suites/`        | One k6 script per suite, named `<suite>.k6.js`                                                                                                                                                                                                                                                                                                                                                                                            |
+| `src/config/`        | Environment and service URLs, the endpoint catalogue, thresholds and smoke values, the traffic model (`traffic.js`), the journeys' endpoint names (`journey-endpoints.js`), the request-mix classes (`request-mix.js`) the stated facts the test data rests on (`test-data.js`) and the background volume's targets, scenarios and index line (`background-volume.js`)                                                                    |
+| `src/lib/`           | Pure helpers with unit tests, shared by suites, with no k6 imports                                                                                                                                                                                                                                                                                                                                                                        |
+| `src/k6/`            | k6-only modules: the browser-like session, the notification driver (`journeys.js`), the two journeys' steps (`live-animals.js`, `high-risk-plants.js`), the live-animals documents step (`documents.js`), the front door (`front-door.js`), shared step helpers (`journey-pages.js`), page requests and the request mix (`pages.js`), the readiness wait, and the background volume's reads and address creation (`background-volume.js`) |
+| `entrypoint.sh`      | What the image runs: one suite, then the S3 upload                                                                                                                                                                                                                                                                                                                                                                                        |
+| `Dockerfile`         | The image CDP runs, based on `grafana/k6` with the AWS CLI added                                                                                                                                                                                                                                                                                                                                                                          |
+| `compose.yml`        | Local runs: LocalStack for S3 and `target`, a stand-in service that has `/health`                                                                                                                                                                                                                                                                                                                                                         |
+| `compose/`           | LocalStack set-up and the stand-in service's nginx config                                                                                                                                                                                                                                                                                                                                                                                 |
+| `.github/workflows/` | Pull request checks, and the CDP publish on merge to `main`                                                                                                                                                                                                                                                                                                                                                                               |
 
 Suites import shared modules with relative paths. k6 and Vitest both load them, so keep them free of Node-only and k6-only APIs. Pass k6's `__ENV` in rather than reading it inside the module.
 
@@ -71,7 +72,7 @@ npm run test:docker-compose
 
 This runs `src/suites/smoke.k6.js` from source against the trade imports workspace stack, which must already be running. Start it with `tim docker up`, not `tim docker dev`. `up` is production-like: template caching is on and sign-in goes through the Defra ID stub. `dev` turns caching off, so it measures something other than CDP. The build loop's gate runs this same suite against a `--dev` stack, so its timings are not production-like; the pull-request run in `smoke.yml` is the production-like one.
 
-The run waits for the stack to be functionally ready (up to 5 minutes), makes sure the `Perf Test Holding` address exists in the address book, then runs 4 open-model scenarios at once for a 2 minute smoke window. Each starts iterations at a stated rate, so a slowing service keeps receiving the load it would in production. The smoke profile pre-allocates 5 virtual users across the 4 scenarios and can grow to 10 if the service slows:
+The run waits for the stack to be functionally ready (up to 5 minutes). Ready now includes the INS backend (the dashboard read model) and the address book answering a read, and the run then logs `Indexes: built ...`, because each of those services builds its indexes before it answers. It makes sure the `Perf Test Holding` address exists in the address book, logs `Background volume at start: ...` with each datastore's count, then runs 4 open-model scenarios at once for a 2 minute smoke window. Each starts iterations at a stated rate, so a slowing service keeps receiving the load it would in production. The smoke profile pre-allocates 5 virtual users across the 4 scenarios and can grow to 10 if the service slows:
 
 - `live-animals` and `high-risk-plants` each run one notification across 1 or 2 sessions, in the order a user fills the journey in. Every session signs in afresh through INS, and the last one submits through the declaration page, reads the notification back from the dashboard and hub, then amends it and either cancels the amendment or resubmits it. The first captured save is replayed against the backend
 - `ins-front-door` runs dashboard-only sessions: sign in, then keep checking the INS dashboard
@@ -145,6 +146,41 @@ smoke:
 
 The stubs answer without added delay, which is the zero-delay profile. The question the pull request run asks is whether the change made INS slower.
 
+## Background volume
+
+An empty database answers every query fast, so a load run measures nothing useful until each environment holds a realistic background volume. The `background-volume` suite creates it, once per environment, and it is kept between runs.
+
+| Datastore            | Target | Source                                                 |
+| -------------------- | ------ | ------------------------------------------------------ |
+| Live animals         | 42,000 | section 6.1 baseline: a year of notifications          |
+| High-risk plants     | 34,000 | section 7.1 baseline: a year of notifications          |
+| Address book         | 500    | interim, no source gives a figure                      |
+| Dashboard read model | none   | filled from the events the journeys publish, see below |
+
+The targets are one year at the 2025 baseline: 42,000 live-animals notifications (source section 6.1 Baseline, vol-130) and 34,000 high-risk-plants notifications (source section 7.1 Baseline, vol-144).
+
+The animals backend, plants backend, INS backend and address book each set `spring.data.mongodb.auto-index-creation: true` in `src/main/resources/application.yml` and create no index any other way. Each builds its indexes at start-up, before it answers a read. That is why a run counts its indexes as built once every service has answered.
+
+Everything is created through the frontends' own save routes, as the one stubbed user. Each notification is one run of the same journey driver as journey traffic, with the same commodity types, commodity lines, origins, species, amendment shares and cancelled shares, so the volume is varied as journey traffic is. Each address goes through the INS add-address form.
+
+Run it once per environment:
+
+```bash
+TEST_SUITE=background-volume   # CDP Portal, on the run
+npm run test:docker-compose:background-volume   # workspace Docker stack
+```
+
+- It tops up to the target. It counts what is there, creates only the shortfall and never deletes, so a second run creates nothing new once the target is met.
+- It continues the spread where the last run stopped, so the whole background set follows the shares as if it had been created in one run.
+- It is not a measurement. It waits no think time, skips the backend replay of the first save and adds no uploaded documents: the document store's volume is a separate figure (section 5.5 row 4), and uploading a year of files of up to 5MB through cdp-uploader is not what this run is for. The thresholds gate correctness only: failed requests, failed checks and dropped iterations.
+- Creating a year takes hours, not minutes. `backgroundVolume.maxCreatedPerRun` limits what one run creates, so creation can be split across runs, for example `TRAFFIC_MODEL='{"backgroundVolume":{"maxCreatedPerRun":5000}}'`. A run that cannot finish its batch in `backgroundVolume.maxDuration` fails on dropped iterations, and the next run carries on.
+- Where a CDP environment's notification expiry sweep is on, the sweep removes background notifications and the volume shrinks. The next background run tops it up.
+- The dashboard read model holds only what the journeys publish. Live animals publishes events and high-risk plants does not yet (pbe-022), so the read model will hold fewer than the sum of the two targets. Each run reports the real figure and claims no target for it.
+
+Every run states the volume it started with: `Background volume at start: live-animals 12 of 42000, high-risk-plants 9 of 34000, dashboard-read-model 12, address-book 3 of 500`. It also records each count in the `background_volume` metric. The background run also logs `Background volume at end: ...` and `Created this run: ...`.
+
+Before any measurement, a run waits for the animals backend, the plants backend, the INS backend (the dashboard read model) and the address book to answer a read, then logs `Indexes: built ...`. Each of those services builds its indexes at start-up before it answers a request (Spring Data auto-index-creation), so an answer means its indexes are built. A service that never answers fails the run in `setup()` before anything is measured. This confirms the indexes that exist are built. It adds none.
+
 ## Traffic model
 
 The load is a model, held as values in `src/config/traffic.js` and never fixed in the scripts. Every figure is a working figure from the INS volumetrics page and is still to be confirmed, so a revised figure changes a value, not a script.
@@ -175,9 +211,17 @@ The load is a model, held as values in `src/config/traffic.js` and never fixed i
 | `frontDoor.pagesPerDashboardOnlySession`         | 8        | C4                                                    | 8     |
 | `frontDoor.addressBookSessionsPerNotification`   | 0.25     | interim, no volumetrics figure                        | 0.25  |
 | `mix.dashboardReadShareTarget`                   | 0.25     | D7                                                    | 0.25  |
+| `backgroundVolume.liveAnimalsNotifications`      | 42000    | section 6.1, vol-130                                  | same  |
+| `backgroundVolume.highRiskPlantsNotifications`   | 34000    | section 7.1, vol-144                                  | same  |
+| `backgroundVolume.addressBookEntries`            | 500      | interim, no volumetrics figure                        | same  |
+| `backgroundVolume.maxCreatedPerRun`              | 42000    | the largest target, so a run creates the whole gap    | same  |
+| `backgroundVolume.virtualUsers`                  | 10       | interim                                               | same  |
+| `backgroundVolume.maxDuration`                   | `24h`    | interim                                               | same  |
 | `duration`                                       | `2m`     | the length of the run                                 | `2m`  |
 
-Override any value with `TRAFFIC_MODEL`, a JSON object laid over the defaults and the smoke profile. An unknown key, bad JSON or a value that is not allowed fails the run at start and names the key. The effective model is logged in `setup()`.
+The smoke run reads the `backgroundVolume` targets only to report them beside the counts.
+
+Override any value with `TRAFFIC_MODEL`, a JSON object laid over the defaults and the suite's profile. An unknown key, bad JSON or a value that is not allowed fails the run at start and names the key. The effective model is logged in `setup()`.
 
 ```bash
 TRAFFIC_MODEL='{"liveAnimals":{"pagesPerNotification":45}}' npm run test:docker-compose
@@ -215,6 +259,7 @@ Every page request is recorded under one traffic class: `sign-in`, `dashboard-re
 | `session_seconds`        | How long a user session lasted, by scenario                                              |
 | `notifications_started`  | Notifications started, tagged by `notification_type`                                     |
 | `document_scan_duration` | Milliseconds from a document's upload response until its scan settled                    |
+| `background_volume`      | The background volume each datastore held when the run started, tagged by `datastore`    |
 
 `setup()` logs the target, `Request mix target: dashboard reads 25% of page requests (D7)`, so the achieved share sits beside it. The mix is reported, not gated: the share comes from the pages the frontends need, and a threshold on it would be run-wide, while every threshold here is scoped to a scenario, and response times to an endpoint as well.
 
@@ -232,7 +277,7 @@ Thresholds live in `src/config/thresholds.js`. The interim values come from the 
 | Checks                      | More than 99% pass, so a failed check fails the run                        |
 | Dropped iterations          | Under 1 per scenario, so a run that could not apply its arrival rate fails |
 
-Every threshold is scoped to its scenario, and response times are also scoped to an endpoint tag from the catalogue in `src/config/endpoints.js`. Scoping to the scenario keeps the readiness wait in `setup()` out of the measurement. A breached response-time, failed-request or check threshold aborts the run, after a 30 second evaluation delay. Dropped iterations are judged at the end of the run: they do not abort it, but they fail it. So is the document scan: a slow scan fails the run rather than cutting it short. The `notifications_started` thresholds (`count>=0`) are reporting-only and can never fail: they exist so the summary prints the split by notification type.
+Every threshold is scoped to its scenario, and response times are also scoped to an endpoint tag from the catalogue in `src/config/endpoints.js`. Scoping to the scenario keeps the readiness wait in `setup()` out of the measurement. A breached response-time, failed-request or check threshold aborts the run, after a 30 second evaluation delay. Dropped iterations are judged at the end of the run: they do not abort it, but they fail it. So is the document scan: a slow scan fails the run rather than cutting it short. The `notifications_started` thresholds (`count>=0`) are reporting-only and can never fail: they exist so the summary prints the split by notification type. The `background_volume` thresholds (`value>=0`) are reporting-only in the same way: they print each datastore's background volume. The background-volume run gates on failed requests, checks and dropped iterations only, never on response times.
 
 ## Add a suite
 
@@ -240,8 +285,9 @@ Every threshold is scoped to its scenario, and response times are also scoped to
 2. Get service URLs from `resolveServiceUrl(__ENV, '<service-name>')` in `src/config/target.js`.
 3. Give each scenario its thresholds with `scenarioThresholds` in `src/config/thresholds.js`. Tag requests with an endpoint from the catalogue in `src/config/endpoints.js`, which also sets the `name` tag. Follow the workspace's k6 best practices.
 4. Put any logic worth testing in `src/config/` (or a new folder under `src/`) with a `*.test.js` beside it.
-5. Run it with `npm run k6:local -- run --no-usage-report src/suites/<suite>.k6.js`.
-6. To make CDP run it by default in an environment, change `default_suite` in `entrypoint.sh`. Otherwise set `TEST_SUITE` to `<suite>` on the run.
+5. A suite that measures load reports the background volume and calls `requireBackgroundVolume` in `setup()` (both in `src/k6/background-volume.js`), so it never measures an empty environment.
+6. Run it with `npm run k6:local -- run --no-usage-report src/suites/<suite>.k6.js`.
+7. To make CDP run it by default in an environment, change `default_suite` in `entrypoint.sh`. Otherwise set `TEST_SUITE` to `<suite>` on the run.
 
 ## Licence
 

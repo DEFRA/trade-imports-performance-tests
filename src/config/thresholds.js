@@ -28,6 +28,18 @@ const durationLimits = (kind) => {
   ]
 }
 
+const scenarioHealthThresholds = (scenario) => ({
+  [`http_req_failed{scenario:${scenario}}`]: withAbort([
+    `rate<${INTERIM_TARGETS.maxFailureRate}`
+  ]),
+  [`checks{scenario:${scenario}}`]: withAbort([
+    `rate>${INTERIM_TARGETS.minCheckPassRate}`
+  ]),
+  [`dropped_iterations{scenario:${scenario}}`]: [
+    `count<${MAX_DROPPED_ITERATIONS}`
+  ]
+})
+
 /**
  * Builds the named thresholds for one scenario.
  *
@@ -49,18 +61,7 @@ export const scenarioThresholds = (scenario, endpoints) => {
     ])
   )
 
-  return {
-    ...durations,
-    [`http_req_failed{scenario:${scenario}}`]: withAbort([
-      `rate<${INTERIM_TARGETS.maxFailureRate}`
-    ]),
-    [`checks{scenario:${scenario}}`]: withAbort([
-      `rate>${INTERIM_TARGETS.minCheckPassRate}`
-    ]),
-    [`dropped_iterations{scenario:${scenario}}`]: [
-      `count<${MAX_DROPPED_ITERATIONS}`
-    ]
-  }
+  return { ...durations, ...scenarioHealthThresholds(scenario) }
 }
 
 /**
@@ -75,6 +76,39 @@ export const smokeThresholds = (scenarios) =>
     ...Object.entries(scenarios).map(([scenario, { endpoints }]) =>
       scenarioThresholds(scenario, endpoints)
     )
+  )
+
+/**
+ * Builds the thresholds of the background-volume run, one set per scenario.
+ *
+ * They gate correctness only, never speed: the run is set-up with no think
+ * time, so it measures nothing. Failed requests and failed checks abort the
+ * run. A dropped iteration fails it at the end, so a run that could not finish
+ * its batch in time says so.
+ *
+ * @param {string[]} scenarios - The scenario names.
+ * @returns {Record<string, Array<string | { threshold: string, abortOnFail: boolean, delayAbortEval: string }>>} k6 thresholds.
+ */
+export const backgroundVolumeThresholds = (scenarios) =>
+  Object.assign({}, ...scenarios.map(scenarioHealthThresholds))
+
+/**
+ * Builds one threshold per datastore, so k6 prints the background volume each
+ * held when the run started.
+ *
+ * These can never fail: `value>=0` is always true. They exist only so the
+ * end-of-test summary states each count. Every gating threshold stays tied to
+ * a figure.
+ *
+ * @param {string[]} datastores - The datastore names.
+ * @returns {Record<string, string[]>} k6 thresholds.
+ */
+export const backgroundVolumeReportThresholds = (datastores) =>
+  Object.fromEntries(
+    datastores.map((datastore) => [
+      `background_volume{datastore:${datastore}}`,
+      ['value>=0']
+    ])
   )
 
 /**
