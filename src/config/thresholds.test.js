@@ -51,8 +51,20 @@ describe('scenarioThresholds', () => {
     expect(limitsOf(`checks{scenario:${SCENARIO}}`)).toEqual(['rate>0.99'])
   })
 
-  test('aborts the run on a breach after 30s', () => {
-    for (const entries of Object.values(thresholds)) {
+  test('fails the run when the open model could not start an iteration on time', () => {
+    expect(thresholds[`dropped_iterations{scenario:${SCENARIO}}`]).toEqual([
+      'count<1'
+    ])
+  })
+
+  test('aborts the run on a breach after 30s, for every key but dropped iterations', () => {
+    const aborting = Object.entries(thresholds).filter(
+      ([key]) => !key.startsWith('dropped_iterations')
+    )
+
+    expect(aborting.length).toBeGreaterThan(0)
+
+    for (const [, entries] of aborting) {
       for (const entry of entries) {
         expect(entry).toMatchObject({
           abortOnFail: true,
@@ -60,6 +72,14 @@ describe('scenarioThresholds', () => {
         })
       }
     }
+  })
+
+  test('has no other key without an abort', () => {
+    const plain = Object.keys(thresholds).filter((key) =>
+      thresholds[key].every((entry) => typeof entry === 'string')
+    )
+
+    expect(plain).toEqual([`dropped_iterations{scenario:${SCENARIO}}`])
   })
 
   test('throws for an endpoint outside the catalogue', () => {

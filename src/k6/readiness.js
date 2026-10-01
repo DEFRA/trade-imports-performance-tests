@@ -5,10 +5,13 @@ import { READINESS } from '../config/smoke.js'
 import { createBrowserSession } from './browser-session.js'
 
 const HTTP_OK = 200
-const READINESS_TAGS = { phase: 'readiness', name: 'readiness' }
 const MS_PER_SECOND = 1000
 
-const ignoreStaleRedirects = { add: () => {} }
+/** The tags that keep a readiness request out of every threshold. */
+export const READINESS_TAGS = { phase: 'readiness', name: 'readiness' }
+
+/** A stale-redirect counter that counts nothing, for requests outside the run. */
+export const ignoreStaleRedirects = { add: () => {} }
 
 const readBackend = (url) =>
   http.get(url, { tags: READINESS_TAGS }).status === HTTP_OK

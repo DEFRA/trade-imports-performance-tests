@@ -1,8 +1,11 @@
+import exec from 'k6/execution'
 import { Counter } from 'k6/metrics'
 
+import { mixTargetLine } from '../config/request-mix.js'
 import {
   IDENTITY,
   JOURNEYS,
+  PERF_ADDRESS,
   SCENARIOS,
   SETUP_TIMEOUT,
   STUB_PROFILE,
@@ -15,11 +18,15 @@ import {
   resolveLocalhostAlias,
   resolveServiceUrl
 } from '../config/target.js'
-import { createBrowserSession } from '../k6/browser-session.js'
+import { SMOKE_PROFILE, resolveTrafficModel } from '../config/traffic.js'
 import {
-  draftJourney,
-  insFrontDoor as visitInsFrontDoor
-} from '../k6/journeys.js'
+  addressBookSession,
+  dashboardOnlySession,
+  ensurePerfAddress
+} from '../k6/front-door.js'
+import { HIGH_RISK_PLANTS_STEPS } from '../k6/high-risk-plants.js'
+import { notificationJourney } from '../k6/journeys.js'
+import { LIVE_ANIMALS_STEPS } from '../k6/live-animals.js'
 import { waitForReadiness } from '../k6/readiness.js'
 
 const environment = resolveEnvironment(__ENV)
@@ -28,6 +35,7 @@ const credentials = {
   crn: IDENTITY.crn,
   password: resolvePassword(__ENV)
 }
+const model = resolveTrafficModel(__ENV, SMOKE_PROFILE)
 const staleRedirects = new Counter('stale_concurrency_redirects')
 
 const animals = JOURNEYS['live-animals']
@@ -43,52 +51,80 @@ const urls = {
 }
 
 export const options = {
-  scenarios: smokeScenarios(),
+  scenarios: smokeScenarios(model),
   thresholds: smokeThresholds(SCENARIOS),
   setupTimeout: SETUP_TIMEOUT,
   tags: { environment, stub_profile: STUB_PROFILE }
 }
 
-const sessionOn = (baseUrl) =>
-  createBrowserSession({ baseUrl, localhostAlias, credentials, staleRedirects })
-
-// Each session has to outlive the iterations of its virtual user.
-let insSession
-let animalsSession
-let plantsSession
-
 export function setup() {
   console.log(`Smoke run in ${environment} with stub profile ${STUB_PROFILE}`)
+  console.log(`Traffic model: ${JSON.stringify(model)}`)
+  console.log(mixTargetLine(model))
 
   waitForReadiness({ urls, localhostAlias, credentials })
+  ensurePerfAddress({
+    insUrl: urls.ins,
+    localhostAlias,
+    credentials,
+    address: PERF_ADDRESS
+  })
+
+  return { addressName: PERF_ADDRESS.name }
 }
+
+const frontDoorOptions = () => ({
+  urls,
+  model,
+  credentials,
+  localhostAlias,
+  staleRedirects,
+  vu: exec.vu.idInTest,
+  iteration: exec.scenario.iterationInTest
+})
 
 export function insFrontDoor() {
-  insSession ??= sessionOn(urls.ins)
-
-  visitInsFrontDoor(insSession, __ITER)
+  dashboardOnlySession(frontDoorOptions())
 }
 
-export function liveAnimals() {
-  animalsSession ??= sessionOn(urls.animalsFrontend)
-
-  draftJourney({
-    journey: animals,
-    session: animalsSession,
-    backendUrl: urls.animalsBackend,
-    vu: __VU,
-    iteration: __ITER
-  })
+export function insAddressBook() {
+  addressBookSession(frontDoorOptions())
 }
 
-export function highRiskPlants() {
-  plantsSession ??= sessionOn(urls.plantsFrontend)
+const journeyOptions = ({ journey, steps, frontend, backend, data }) => ({
+  journey,
+  steps,
+  model,
+  backendUrl: backend,
+  urls: { ins: urls.ins, frontend },
+  credentials,
+  localhostAlias,
+  staleRedirects,
+  addressName: data.addressName,
+  vu: exec.vu.idInTest,
+  iterationInTest: exec.scenario.iterationInTest
+})
 
-  draftJourney({
-    journey: plants,
-    session: plantsSession,
-    backendUrl: urls.plantsBackend,
-    vu: __VU,
-    iteration: __ITER
-  })
+export function liveAnimals(data) {
+  notificationJourney(
+    journeyOptions({
+      journey: animals,
+      steps: LIVE_ANIMALS_STEPS,
+      frontend: urls.animalsFrontend,
+      backend: urls.animalsBackend,
+      data
+    })
+  )
+}
+
+export function highRiskPlants(data) {
+  notificationJourney(
+    journeyOptions({
+      journey: plants,
+      steps: HIGH_RISK_PLANTS_STEPS,
+      frontend: urls.plantsFrontend,
+      backend: urls.plantsBackend,
+      data
+    })
+  )
 }

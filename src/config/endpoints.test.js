@@ -16,6 +16,10 @@ describe('kindOf', () => {
     expect(kindOf('ins-dashboard')).toBe('page')
   })
 
+  test('returns page for an address-book form save', () => {
+    expect(kindOf('ins-address-add-save')).toBe('page')
+  })
+
   test('returns api for a backend call', () => {
     expect(kindOf('animals-backend-replace')).toBe('api')
   })
