@@ -58,6 +58,17 @@ const backendParams = (endpoint, headers = {}) => ({
   tags: { endpoint, kind: 'api', name: endpoint }
 })
 
+const checkSignedInThroughDefraId = (session, iteration) => {
+  if (iteration !== 0) {
+    return
+  }
+
+  check(session, {
+    'sign-in went through Defra ID': (signedInSession) =>
+      signedInSession.signedInThroughIdentityProvider()
+  })
+}
+
 /**
  * Opens the INS dashboard, signing in on the way.
  *
@@ -72,12 +83,7 @@ export const insFrontDoor = (session, iteration) => {
       dashboardPage.status === HTTP_OK && dashboardPage.heading === 'Dashboard'
   })
 
-  if (iteration === 0) {
-    check(page, {
-      'sign-in went through Defra ID': () =>
-        session.signedInThroughIdentityProvider()
-    })
-  }
+  checkSignedInThroughDefraId(session, iteration)
 
   think()
 }
@@ -146,7 +152,7 @@ const replayCapturedSave = ({ journey, backendUrl, id }) => {
  * @param {object} options.session - A browser session on the journey's frontend.
  * @param {string} options.backendUrl - The journey backend's base URL.
  * @param {number} options.vu - The virtual user number.
- * @param {number} options.iteration - The iteration number.
+ * @param {number} options.iteration - The iteration number. The first one must have signed in through Defra ID.
  */
 export const draftJourney = ({
   journey,
@@ -164,6 +170,7 @@ export const draftJourney = ({
     'journey dashboard opens with a crumb': (page) =>
       page.status === HTTP_OK && page.crumb !== ''
   })
+  checkSignedInThroughDefraId(session, iteration)
   think()
 
   const created = session.post(

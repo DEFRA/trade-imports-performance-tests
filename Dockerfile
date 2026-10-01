@@ -16,6 +16,5 @@ COPY --chown=k6:k6 src/ ./src/
 COPY --chown=k6:k6 --chmod=755 entrypoint.sh .
 
 ENV S3_ENDPOINT=https://s3.eu-west-2.amazonaws.com
-ENV TEST_SUITE=health-check
 
 ENTRYPOINT [ "./entrypoint.sh" ]

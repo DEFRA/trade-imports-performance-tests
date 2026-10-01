@@ -90,15 +90,15 @@ Merging to `main` publishes the image. Run it from the CDP Portal.
 
 The image reads these environment variables:
 
-| Variable                 | Set by          | Purpose                                                                                        |
-| ------------------------ | --------------- | ---------------------------------------------------------------------------------------------- |
-| `ENVIRONMENT`            | CDP Portal      | The environment to test, for example `perf-test`. Suites build service URLs from it            |
-| `RESULTS_OUTPUT_S3_PATH` | CDP Portal      | Where the report goes. The run fails if it is not set                                          |
-| `S3_ENDPOINT`            | image           | Defaults to AWS S3 in `eu-west-2`. Compose points it at LocalStack                             |
-| `TEST_SUITE`             | image           | The suite to run, as a file name in `src/suites/` without `.k6.js`. Defaults to `health-check` |
-| `<SERVICE_NAME>_URL`     | you, optionally | Overrides a service's URL, for example `TRADE_IMPORTS_INS_FRONTEND_URL`                        |
-| `LOCALHOST_ALIAS`        | Compose         | The host a container uses for the machine's `localhost`, for example `host.docker.internal`    |
-| `AUTH_PASSWORD`          | you, optionally | The Defra ID stub's password. Defaults to `Password123`                                        |
+| Variable                 | Set by          | Purpose                                                                                                                                                              |
+| ------------------------ | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ENVIRONMENT`            | CDP Portal      | The environment to test, for example `perf-test`. Suites build service URLs from it. `prod` is refused                                                               |
+| `RESULTS_OUTPUT_S3_PATH` | CDP Portal      | Where the report goes. The run fails if it is not set                                                                                                                |
+| `S3_ENDPOINT`            | image           | Defaults to AWS S3 in `eu-west-2`. Compose points it at LocalStack                                                                                                   |
+| `TEST_SUITE`             | you, optionally | The suite to run, as a file name in `src/suites/` without `.k6.js`. Defaults to `smoke` in `dev` and `test`, and to `health-check` everywhere else                   |
+| `<SERVICE_NAME>_URL`     | you, optionally | Overrides a service's URL, for example `TRADE_IMPORTS_INS_FRONTEND_URL`                                                                                              |
+| `LOCALHOST_ALIAS`        | Compose         | The host a container uses for the machine's `localhost`, for example `host.docker.internal`                                                                          |
+| `AUTH_PASSWORD`          | you, optionally | The Defra ID stub's password. Defaults to `Password123`. In CDP, set it as a test-suite secret in the Portal when the stub in that environment uses another password |
 
 Without an override, a service's URL is `https://<service-name>.<ENVIRONMENT>.cdp-int.defra.cloud`. When `ENVIRONMENT` is `local`, it is the workspace Docker stack's host port for the service, on `localhost` or on `LOCALHOST_ALIAS` when that is set.
 
@@ -108,6 +108,19 @@ The image writes 2 files and copies them to `RESULTS_OUTPUT_S3_PATH`:
 - `summary.json` — k6's end-of-test summary
 
 The image exits with k6's exit code, so a failed threshold (code 99) fails the run. The report is still published first. The image exits with code 1 if `RESULTS_OUTPUT_S3_PATH` is not set, the suite does not exist, the report was not written or the upload failed.
+
+### Smoke run in CDP dev and test
+
+The same smoke suite runs in CDP `dev` and `test`, chosen by `ENVIRONMENT` alone. A Portal run with no variables set runs `smoke` there, and the log includes `Running suite smoke in dev` (or `test`).
+
+- Sign-in goes through the real OIDC flow against the Defra ID stub deployed in that environment, with the secure cookies and the CSRF crumb the platform requires. Every scenario checks `sign-in went through Defra ID` on each virtual user's first iteration, so a run that bypassed Defra ID fails the `checks` threshold.
+- SNS and SQS are the CDP-provisioned ones, reached through animals saves, which publish a notification event.
+- cdp-uploader is not exercised yet. The smoke run uploads no document, so it arrives with the document increment.
+- Systems outside the INS boundary answer from the stubs deployed in that environment.
+- `prod` is refused: the run fails at start without a report.
+- The report (`index.html` and `summary.json`) is published with every run, even when a threshold fails.
+
+To run it after each deploy to `dev`, set an automatic test run in the CDP Portal, on the `trade-imports-performance-tests` test suite page, for environment `dev`. Trigger it on deployments of `trade-imports-ins-frontend`, `trade-imports-animals-frontend`, `trade-imports-plants-frontend`, `trade-imports-animals-backend`, `trade-imports-plants-backend` and `trade-imports-reference-data`. This is Portal configuration, not code.
 
 ## Smoke run on pull requests
 
@@ -144,7 +157,7 @@ Every threshold is scoped to its scenario, and response times are also scoped to
 3. Give each scenario its thresholds with `scenarioThresholds` in `src/config/thresholds.js`. Tag requests with an endpoint from the catalogue in `src/config/endpoints.js`, which also sets the `name` tag. Follow the workspace's k6 best practices.
 4. Put any logic worth testing in `src/config/` (or a new folder under `src/`) with a `*.test.js` beside it.
 5. Run it with `npm run k6:local -- run --no-usage-report src/suites/<suite>.k6.js`.
-6. To make CDP run it, change `TEST_SUITE` in the `Dockerfile` to `<suite>`.
+6. To make CDP run it by default in an environment, change `default_suite` in `entrypoint.sh`. Otherwise set `TEST_SUITE` to `<suite>` on the run.
 
 ## Licence
 

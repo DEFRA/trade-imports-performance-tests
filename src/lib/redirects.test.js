@@ -11,6 +11,12 @@ import {
 
 const FROM = 'http://localhost:3000/live-animals'
 const ALIAS = 'host.docker.internal'
+const CDP_STUB = 'https://trade-imports-defra-id-stub.dev.cdp-int.defra.cloud'
+const CDP_FRONTEND =
+  'https://trade-imports-animals-frontend.dev.cdp-int.defra.cloud'
+const CDP_AUTHORIZE = `${CDP_STUB}/dcidmtest.onmicrosoft.com/b2c_1a_cui_cpdev_signupsigninsfi/oauth2/v2.0/authorize?x=1`
+const CDP_AUTHRESP = `${CDP_STUB}/dcidmtest.onmicrosoft.com/oauth2/authresp`
+const CDP_CALLBACK = `${CDP_FRONTEND}/auth/callback?code=c&state=s`
 
 describe('originOf', () => {
   test('returns the scheme, host and port', () => {
@@ -55,6 +61,21 @@ describe('absoluteLocation', () => {
     ).toBe('http://localhost.example.test/a')
   })
 
+  test('joins a root-relative Location to the https origin of a CDP stub', () => {
+    expect(
+      absoluteLocation(
+        CDP_AUTHORIZE,
+        '/dcidmtest.onmicrosoft.com/oauth2/authresp'
+      )
+    ).toBe(CDP_AUTHRESP)
+  })
+
+  test('keeps an absolute CDP callback Location, even when an alias is given', () => {
+    expect(absoluteLocation(CDP_AUTHRESP, CDP_CALLBACK, ALIAS)).toBe(
+      CDP_CALLBACK
+    )
+  })
+
   test('throws for a relative Location', () => {
     expect(() => absoluteLocation(FROM, 'next')).toThrow(
       'Relative redirect Location is not supported: next'
@@ -83,6 +104,10 @@ describe('isIdentitySignInPage', () => {
     ).toBe(true)
   })
 
+  test('is true for the CDP identity provider sign-in path over https', () => {
+    expect(isIdentitySignInPage(CDP_AUTHRESP)).toBe(true)
+  })
+
   test('is false for a journey page', () => {
     expect(isIdentitySignInPage('http://localhost:3000/live-animals')).toBe(
       false
@@ -99,7 +124,11 @@ describe('endpointForHop', () => {
     ],
     ['http://localhost:3007/organisations', 'sign-in'],
     ['http://localhost:3007/idphub/b2c/x', 'sign-in'],
-    ['http://localhost:3000/live-animals', 'animals-dashboard']
+    ['http://localhost:3000/live-animals', 'animals-dashboard'],
+    [CDP_AUTHORIZE, 'sign-in'],
+    [`${CDP_STUB}/organisations`, 'sign-in'],
+    [CDP_CALLBACK, 'sign-in'],
+    [`${CDP_FRONTEND}/live-animals`, 'animals-dashboard']
   ])('%s is %s', (url, expected) => {
     expect(endpointForHop(url, 'animals-dashboard')).toBe(expected)
   })

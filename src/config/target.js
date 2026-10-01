@@ -1,5 +1,6 @@
 const CDP_DOMAIN = 'cdp-int.defra.cloud'
 const LOCAL_ENVIRONMENT = 'local'
+const PROD_ENVIRONMENT = 'prod'
 const DEFAULT_LOCALHOST = 'localhost'
 
 const LOCAL_PORTS = Object.freeze({
@@ -25,6 +26,7 @@ const LOCAL_PORTS = Object.freeze({
  *
  * @param {Record<string, string | undefined>} env - k6's `__ENV`, or any map of environment variables.
  * @returns {string} The environment name.
+ * @throws {Error} When ENVIRONMENT is blank, or names production.
  */
 export function resolveEnvironment(env) {
   const environment = env.ENVIRONMENT?.trim()
@@ -32,6 +34,12 @@ export function resolveEnvironment(env) {
   if (!environment) {
     throw new Error(
       'ENVIRONMENT is not set. Set it to a CDP environment name, or to "local".'
+    )
+  }
+
+  if (environment.toLowerCase() === PROD_ENVIRONMENT) {
+    throw new Error(
+      'Refusing to run against prod. Set ENVIRONMENT to a non-production environment.'
     )
   }
 
