@@ -1,9 +1,13 @@
 import { kindOf } from './endpoints.js'
 
+// Pages that upload and scan a document: DR-EUDP-005 section 4.7, SYN-28, SYN-29.
+const UPLOAD_PAGE_ALLOWANCE_MS = 60_000
+
 // Interim targets until INS sets its own: c-004 default, DR-EUDP-005 section 4.7.
 export const INTERIM_TARGETS = Object.freeze({
   page: Object.freeze({ p95Ms: 2000, p99Ms: 5000 }),
   api: Object.freeze({ p95Ms: 200, p99Ms: 1200 }),
+  upload: Object.freeze({ p99Ms: UPLOAD_PAGE_ALLOWANCE_MS }),
   maxFailureRate: 0.01,
   minCheckPassRate: 0.99
 })
@@ -18,7 +22,10 @@ const withAbort = (limits) =>
 const durationLimits = (kind) => {
   const { p95Ms, p99Ms } = INTERIM_TARGETS[kind]
 
-  return [`p(95)<${p95Ms}`, `p(99)<${p99Ms}`]
+  return [
+    ...(p95Ms === undefined ? [] : [`p(95)<${p95Ms}`]),
+    ...(p99Ms === undefined ? [] : [`p(99)<${p99Ms}`])
+  ]
 }
 
 /**
@@ -68,4 +75,38 @@ export const smokeThresholds = (scenarios) =>
     ...Object.entries(scenarios).map(([scenario, { endpoints }]) =>
       scenarioThresholds(scenario, endpoints)
     )
+  )
+
+/**
+ * Builds the threshold on how long a document's virus scan takes.
+ *
+ * The scan is held to the upload page allowance, P99 under 60 seconds. It is
+ * judged at the end of the run and never aborts it, because a slow scan should
+ * fail the run, not cut it short.
+ *
+ * @param {string} scenario - The scenario that uploads documents.
+ * @returns {Record<string, string[]>} k6 thresholds.
+ */
+export const documentScanThresholds = (scenario) => ({
+  [`document_scan_duration{scenario:${scenario}}`]: [
+    `p(99)<${UPLOAD_PAGE_ALLOWANCE_MS}`
+  ]
+})
+
+/**
+ * Builds one threshold per notification type, so k6 prints each split of the load.
+ *
+ * These can never fail: `count>=0` is always true. They exist only so the
+ * end-of-test summary states how many notifications of each type started.
+ * Every gating threshold stays tied to a figure.
+ *
+ * @param {Array<[string, string]>} splits - Pairs of scenario name and notification type.
+ * @returns {Record<string, string[]>} k6 thresholds.
+ */
+export const notificationSplitThresholds = (splits) =>
+  Object.fromEntries(
+    splits.map(([scenario, notificationType]) => [
+      `notifications_started{scenario:${scenario},notification_type:${notificationType}}`,
+      ['count>=0']
+    ])
   )

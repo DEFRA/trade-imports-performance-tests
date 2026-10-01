@@ -12,6 +12,7 @@ const postSubmissionReads = new Counter('post_submission_reads')
 const amendmentPages = new Counter('amendment_pages')
 const pagesPerNotification = new Trend('pages_per_notification')
 const sessionSeconds = new Trend('session_seconds')
+const notificationsStarted = new Counter('notifications_started')
 
 const pathOf = (url) => url.replace(/^https?:\/\/[^/?#]+/, '').split(/[?#]/)[0]
 
@@ -42,6 +43,14 @@ export const recordNotificationPages = (count) =>
   pagesPerNotification.add(count)
 
 /**
+ * Counts a notification started, split by its type.
+ *
+ * @param {string} notificationType - `live-animals`, or a high-risk plants commodity type.
+ */
+export const recordNotificationStarted = (notificationType) =>
+  notificationsStarted.add(1, { notification_type: notificationType })
+
+/**
  * Records how long a user session lasted.
  *
  * @param {number} seconds - Wall-clock seconds, including think time.
@@ -52,7 +61,9 @@ export const recordSession = (seconds) => sessionSeconds.add(seconds)
  * Wraps a browser session so every page request is classified and followed by think time.
  *
  * Every navigation a scenario makes goes through here, which is what keeps the
- * request mix honest and the load paced like a person's.
+ * request mix honest and the load paced like a person's. `upload` posts a
+ * multipart form with one file and calls `onLanded` with the landing page
+ * before the think time, so scan polling starts when the upload lands.
  *
  * @param {object} options - Walker settings.
  * @param {object} options.session - A browser session.
@@ -82,6 +93,14 @@ export const createWalker = ({ session, thinkMean, trafficClass, counter }) => {
   const submit = (page, answers, endpoint) =>
     settle(session.submitForm(page, answers, endpoint))
 
+  const upload = (page, answers, file, endpoint, onLanded) => {
+    const landed = session.submitMultipart(page, answers, file, endpoint)
+
+    onLanded(landed)
+
+    return settle(landed)
+  }
+
   const reach = (current, path, endpoint) =>
     current?.status === HTTP_OK && pathOf(current.url) === path
       ? current
@@ -92,6 +111,7 @@ export const createWalker = ({ session, thinkMean, trafficClass, counter }) => {
     open,
     post,
     submit,
+    upload,
     reach,
     record: recordPage,
     withClass: (nextClass) =>

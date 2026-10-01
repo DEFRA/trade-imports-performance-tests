@@ -2,8 +2,9 @@ import { check } from 'k6'
 
 import { TRAFFIC_CLASSES } from '../config/request-mix.js'
 import { ADDRESS_BOOK_LOAD_NAME_PREFIX, PERF_ADDRESS } from '../config/smoke.js'
-import { frontDoorThinkSecondsMean } from '../config/traffic.js'
-import { addressIdFrom } from '../lib/address-book.js'
+import { WORST_CASE_SEARCH_LENGTH } from '../config/test-data.js'
+import { frontDoorThinkSecondsMean, isChosen } from '../config/traffic.js'
+import { addressIdFrom, worstCaseSearchTerm } from '../lib/address-book.js'
 import { createBrowserSession } from './browser-session.js'
 import { createWalker, recordSession } from './pages.js'
 import { READINESS_TAGS, ignoreStaleRedirects } from './readiness.js'
@@ -156,11 +157,27 @@ const deleteAddress = (walker, id) => {
   return walker.submit(confirmation, {}, 'ins-address-delete-save')
 }
 
+const searchWorstCaseWhenChosen = (walker, { iteration, model }) => {
+  if (!isChosen(iteration, model.addressBook.worstCaseSearchShare)) {
+    return
+  }
+
+  const searched = walker.open(
+    searchPath(worstCaseSearchTerm(WORST_CASE_SEARCH_LENGTH)),
+    'ins-address-book-search'
+  )
+
+  check(searched, {
+    'worst-case address search answered': (page) => page.status === HTTP_OK
+  })
+}
+
 /**
  * Runs an address-book session: add an address, find it, view, edit and delete it.
  *
  * Makes the nine address-book page requests after the sign-in and dashboard,
- * and leaves nothing behind in the book.
+ * or ten when the session also runs a worst-case search, and leaves nothing
+ * behind in the book.
  *
  * @param {object} options - Session settings.
  * @param {Record<string, string>} options.urls - Service base URLs, with `ins`.
@@ -182,6 +199,7 @@ export const addressBookSession = (options) => {
 
   openInsDashboard(dashboard)
   walker.open(ADDRESS_BOOK, 'ins-address-book')
+  searchWorstCaseWhenChosen(walker, options)
   addAddress(walker, name)
 
   const found = walker.open(searchPath(name), 'ins-address-book-search')

@@ -16,17 +16,17 @@ CDP builds this repo into a Docker image. The CDP Portal runs the image, and the
 
 ## Layout
 
-| Path                 | What it holds                                                                                                                                                                                                                                                                                              |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/suites/`        | One k6 script per suite, named `<suite>.k6.js`                                                                                                                                                                                                                                                             |
-| `src/config/`        | Environment and service URLs, the endpoint catalogue, thresholds and smoke values, the traffic model (`traffic.js`), the journeys' endpoint names (`journey-endpoints.js`) and the request-mix classes (`request-mix.js`)                                                                                  |
-| `src/lib/`           | Pure helpers with unit tests, shared by suites, with no k6 imports                                                                                                                                                                                                                                         |
-| `src/k6/`            | k6-only modules: the browser-like session, the notification driver (`journeys.js`), the two journeys' steps (`live-animals.js`, `high-risk-plants.js`), the front door (`front-door.js`), shared step helpers (`journey-pages.js`), page requests and the request mix (`pages.js`), and the readiness wait |
-| `entrypoint.sh`      | What the image runs: one suite, then the S3 upload                                                                                                                                                                                                                                                         |
-| `Dockerfile`         | The image CDP runs, based on `grafana/k6` with the AWS CLI added                                                                                                                                                                                                                                           |
-| `compose.yml`        | Local runs: LocalStack for S3 and `target`, a stand-in service that has `/health`                                                                                                                                                                                                                          |
-| `compose/`           | LocalStack set-up and the stand-in service's nginx config                                                                                                                                                                                                                                                  |
-| `.github/workflows/` | Pull request checks, and the CDP publish on merge to `main`                                                                                                                                                                                                                                                |
+| Path                 | What it holds                                                                                                                                                                                                                                                                                                                                                |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/suites/`        | One k6 script per suite, named `<suite>.k6.js`                                                                                                                                                                                                                                                                                                               |
+| `src/config/`        | Environment and service URLs, the endpoint catalogue, thresholds and smoke values, the traffic model (`traffic.js`), the journeys' endpoint names (`journey-endpoints.js`), the request-mix classes (`request-mix.js`) and the stated facts the test data rests on (`test-data.js`)                                                                          |
+| `src/lib/`           | Pure helpers with unit tests, shared by suites, with no k6 imports                                                                                                                                                                                                                                                                                           |
+| `src/k6/`            | k6-only modules: the browser-like session, the notification driver (`journeys.js`), the two journeys' steps (`live-animals.js`, `high-risk-plants.js`), the live-animals documents step (`documents.js`), the front door (`front-door.js`), shared step helpers (`journey-pages.js`), page requests and the request mix (`pages.js`), and the readiness wait |
+| `entrypoint.sh`      | What the image runs: one suite, then the S3 upload                                                                                                                                                                                                                                                                                                           |
+| `Dockerfile`         | The image CDP runs, based on `grafana/k6` with the AWS CLI added                                                                                                                                                                                                                                                                                             |
+| `compose.yml`        | Local runs: LocalStack for S3 and `target`, a stand-in service that has `/health`                                                                                                                                                                                                                                                                            |
+| `compose/`           | LocalStack set-up and the stand-in service's nginx config                                                                                                                                                                                                                                                                                                    |
+| `.github/workflows/` | Pull request checks, and the CDP publish on merge to `main`                                                                                                                                                                                                                                                                                                  |
 
 Suites import shared modules with relative paths. k6 and Vitest both load them, so keep them free of Node-only and k6-only APIs. Pass k6's `__ENV` in rather than reading it inside the module.
 
@@ -77,6 +77,8 @@ The run waits for the stack to be functionally ready (up to 5 minutes), makes su
 - `ins-front-door` runs dashboard-only sessions: sign in, then keep checking the INS dashboard
 - `ins-address-book` runs address-book sessions: add an address, find it, view it, edit it and delete it, so the book does not grow
 
+The journeys draw their answers from the pages, not from fixed values: origin, port of entry, transit country, document type, plants category, genus and potato place of landing are each picked at random from the options the page offers. High-risk plants builds notifications of 1 to 50 commodity lines of each of its three commodity types, and live animals uploads 0 to 3 documents, so the smoke run uploads one document through the real cdp-uploader container and waits for its scan. See [Test data](#test-data).
+
 The smoke profile starts 20 notifications an hour for each journey, one in the two-minute window and compresses a session to 1 minute, so the gate sees save and return, submit, read-back, amendment and cancel-amendment in about 2.5 minutes. The design-figure rates are in `src/config/traffic.js` and no suite runs them yet.
 
 It reaches the stack through `host.docker.internal` and sets `ENVIRONMENT=local`, so it can never reach a CDP environment. It prints k6's summary and uploads nothing. It exits with k6's exit code, so a breached threshold exits with code 99.
@@ -121,7 +123,7 @@ The same smoke suite runs in CDP `dev` and `test`, chosen by `ENVIRONMENT` alone
 
 - Sign-in goes through the real OIDC flow against the Defra ID stub deployed in that environment, with the secure cookies and the CSRF crumb the platform requires. Every session checks `sign-in went through Defra ID` when it opens the INS dashboard, so a run that bypassed Defra ID fails the `checks` threshold.
 - SNS and SQS are the CDP-provisioned ones, reached through animals saves, which publish a notification event.
-- cdp-uploader is not exercised yet. The smoke run uploads no document, so it arrives with the document increment.
+- Live-animals uploads go through the real cdp-uploader and its antivirus scan, and the run measures the scan: `document_scan_duration` is judged against the upload page allowance of P99 under 60 seconds.
 - Systems outside the INS boundary answer from the stubs deployed in that environment.
 - `prod` is refused: the run fails at start without a report.
 - The report (`index.html` and `summary.json`) is published with every run, even when a threshold fails.
@@ -147,27 +149,33 @@ The stubs answer without added delay, which is the zero-delay profile. The quest
 
 The load is a model, held as values in `src/config/traffic.js` and never fixed in the scripts. Every figure is a working figure from the INS volumetrics page and is still to be confirmed, so a revised figure changes a value, not a script.
 
-| Parameter                                        | Default | Source                                 | Smoke |
-| ------------------------------------------------ | ------- | -------------------------------------- | ----- |
-| `liveAnimals.notificationsPerHour`               | 44      | design target, section 6.3             | 20    |
-| `liveAnimals.pagesPerNotification`               | 40      | AG1                                    | 40    |
-| `liveAnimals.sessionsPerNotification`            | 1.5     | A2                                     | 1.5   |
-| `liveAnimals.sessionMinutes`                     | 20      | AG2                                    | 1     |
-| `liveAnimals.amendShare`                         | 1       | every notification is amended          | 1     |
-| `liveAnimals.cancelAmendShare`                   | 0.5     | share of amendments that are cancelled | 1     |
-| `highRiskPlants.notificationsPerHour`            | 36      | design target, section 7.3             | 20    |
-| `highRiskPlants.pagesPerNotification`            | 50      | PP1                                    | 50    |
-| `highRiskPlants.sessionsPerNotification`         | 1.5     | A2                                     | 1.5   |
-| `highRiskPlants.sessionMinutes`                  | 25      | PP2                                    | 1     |
-| `highRiskPlants.amendShare`                      | 1       | every notification is amended          | 1     |
-| `highRiskPlants.cancelAmendShare`                | 0.5     | share of amendments that are cancelled | 0     |
-| `frontDoor.corePagesPerJourneySession`           | 6       | C1                                     | 6     |
-| `frontDoor.dashboardOnlySessionsPerNotification` | 1       | C2                                     | 1     |
-| `frontDoor.dashboardOnlySessionMinutes`          | 5       | C3                                     | 0.25  |
-| `frontDoor.pagesPerDashboardOnlySession`         | 8       | C4                                     | 8     |
-| `frontDoor.addressBookSessionsPerNotification`   | 0.25    | interim, no volumetrics figure         | 0.25  |
-| `mix.dashboardReadShareTarget`                   | 0.25    | D7                                     | 0.25  |
-| `duration`                                       | `2m`    | the length of the run                  | `2m`  |
+| Parameter                                        | Default  | Source                                                | Smoke |
+| ------------------------------------------------ | -------- | ----------------------------------------------------- | ----- |
+| `liveAnimals.notificationsPerHour`               | 44       | design target, section 6.3                            | 20    |
+| `liveAnimals.pagesPerNotification`               | 40       | AG1                                                   | 40    |
+| `liveAnimals.sessionsPerNotification`            | 1.5      | A2                                                    | 1.5   |
+| `liveAnimals.sessionMinutes`                     | 20       | AG2                                                   | 1     |
+| `liveAnimals.amendShare`                         | 0.2      | c-012: share of notifications amended                 | 1     |
+| `liveAnimals.cancelAmendShare`                   | 0.05     | c-012: share of amendments cancelled                  | 1     |
+| `liveAnimals.documentsPerNotification`           | buckets  | c-012: 0–3 documents, mean 1                          | same  |
+| `liveAnimals.documentKilobytes`                  | 100–5000 | c-012: 100KB to 5MB, under the 10MB cap               | same  |
+| `liveAnimals.documentTypes`                      | buckets  | c-012: PDF or JPEG, 50% each                          | same  |
+| `highRiskPlants.notificationsPerHour`            | 36       | design target, section 7.3                            | 20    |
+| `highRiskPlants.pagesPerNotification`            | 50       | PP1                                                   | 50    |
+| `highRiskPlants.sessionsPerNotification`         | 1.5      | A2                                                    | 1.5   |
+| `highRiskPlants.sessionMinutes`                  | 25       | PP2                                                   | 1     |
+| `highRiskPlants.amendShare`                      | 0.2      | c-012: share of notifications amended                 | 1     |
+| `highRiskPlants.cancelAmendShare`                | 0.05     | c-012: share of amendments cancelled                  | 0     |
+| `highRiskPlants.commodityLinesPerNotification`   | buckets  | NFR-VOL-PP-07: 50% 1–3, 30% 4–10, 15% 11–25, 5% 26–50 | same  |
+| `highRiskPlants.commodityTypes`                  | buckets  | interim even split, no volumetrics figure             | same  |
+| `addressBook.worstCaseSearchShare`               | 0.25     | interim, no volumetrics figure                        | 1     |
+| `frontDoor.corePagesPerJourneySession`           | 6        | C1                                                    | 6     |
+| `frontDoor.dashboardOnlySessionsPerNotification` | 1        | C2                                                    | 1     |
+| `frontDoor.dashboardOnlySessionMinutes`          | 5        | C3                                                    | 0.25  |
+| `frontDoor.pagesPerDashboardOnlySession`         | 8        | C4                                                    | 8     |
+| `frontDoor.addressBookSessionsPerNotification`   | 0.25     | interim, no volumetrics figure                        | 0.25  |
+| `mix.dashboardReadShareTarget`                   | 0.25     | D7                                                    | 0.25  |
+| `duration`                                       | `2m`     | the length of the run                                 | `2m`  |
 
 Override any value with `TRAFFIC_MODEL`, a JSON object laid over the defaults and the smoke profile. An unknown key, bad JSON or a value that is not allowed fails the run at start and names the key. The effective model is logged in `setup()`.
 
@@ -176,6 +184,20 @@ TRAFFIC_MODEL='{"liveAnimals":{"pagesPerNotification":45}}' npm run test:docker-
 ```
 
 In a CDP Portal run, set `TRAFFIC_MODEL` to the same JSON as an environment variable on the run.
+
+### Test data
+
+Each notification draws its content from distributions held in the traffic model, so the run does not resubmit one static notification.
+
+- A distribution is a list of buckets: `{ share, min, max }` for a count and `{ share, value }` for a value. The shares add up to 1. `TRAFFIC_MODEL` replaces a distribution whole, for example `'{"highRiskPlants":{"commodityLinesPerNotification":[{"share":1,"min":50,"max":50}]}}'` makes every plants notification a 50-line one.
+- Buckets are spread over notifications, not drawn by chance, so over 100 plants notifications exactly 5 are in the 26–50 bucket, and the first notification in that bucket has exactly 50 lines. A run of 8 or more plants notifications always includes the 50-line large-consignment case. If a frontend refuses a 50-line save (the payload limit, req-068), the `commodity-line saved` check fails and the run fails: the case is reported, not dropped.
+- High-risk plants splits its load by commodity type, which is its notification type. Potatoes, and wood and cut trees, ask different pages from plants for planting, so those steps apply only to the types that have them. Every notification is counted in `notifications_started`, tagged `notification_type`.
+- Live-animals species vary within the Cow commodity, the only one whose pages match the step list. Horse, cat, dog and fish are not covered.
+- Plants origins are drawn from the page's options, narrowed to the countries every category of the commodity type accepts. Plants commodity codes stay free text, since the form offers no list.
+- Documents are PDF or JPEG files built to the stated size, under the 10MB cap. The scan is timed from the upload response to the first status poll with nothing pending, polling every 3 seconds as the browser does. A scan still pending after 120 seconds is recorded as 120,000ms and fails `document scan settled`.
+- The worst-case address search is a 255-character term (the longest searchable field) that matches no address, so the address book scans every address of the organisation. A share of notifications runs one on their first picker, and the same share of INS address-book sessions runs one on the list page.
+- Every virtual user signs in as the one stubbed user, so all addresses are in one organisation: the heaviest case for the dashboard and address-book queries.
+- When `ENVIRONMENT` is `local`, `setup()` logs the stand-ins the results depend on: floci for SNS and SQS, and the stack's cdp-uploader container with a mock antivirus scan that takes 3 seconds. The scan latency measured locally is the mock's, not CDP's.
 
 Think time between pages is the session length divided by the pages in a session that are followed by a wait, where a session has the pages per notification divided by the sessions per notification, plus the INS core pages, less the sign-in, which has no wait. Each wait is drawn evenly from half to one and a half times that mean. The session length is spread over the journey pages and the INS core pages of the session (the dashboard and status checks), so the waits add up to the session length. Sessions per notification are spread so the average is exactly the figure: 1.5 gives 2, 1, 2, 1 and so on, and the first notification has 2, so a smoke run always exercises save and return. The amend and cancel choices are spread the same way. A notification that needs fewer pages than the target re-edits answered pages until it reaches it, and one that needs more is left as it is and the pages it took are reported.
 
@@ -191,6 +213,8 @@ Every page request is recorded under one traffic class: `sign-in`, `dashboard-re
 | `amendment_pages`        | Pages requested while amending                                                           |
 | `pages_per_notification` | Journey pages one notification took, by scenario                                         |
 | `session_seconds`        | How long a user session lasted, by scenario                                              |
+| `notifications_started`  | Notifications started, tagged by `notification_type`                                     |
+| `document_scan_duration` | Milliseconds from a document's upload response until its scan settled                    |
 
 `setup()` logs the target, `Request mix target: dashboard reads 25% of page requests (D7)`, so the achieved share sits beside it. The mix is reported, not gated: the share comes from the pages the frontends need, and a threshold on it would be run-wide, while every threshold here is scoped to a scenario, and response times to an endpoint as well.
 
@@ -202,11 +226,13 @@ Thresholds live in `src/config/thresholds.js`. The interim values come from the 
 | --------------------------- | -------------------------------------------------------------------------- |
 | Backend API response time   | P95 under 200ms, P99 under 1,200ms                                         |
 | Frontend page response time | P95 under 2,000ms, P99 under 5,000ms                                       |
+| Upload page response time   | P99 under 60,000ms (section 4.7: pages that upload and scan a document)    |
+| Document scan               | P99 under 60,000ms, judged at the end of the run (section 4.7, SYN-28/29)  |
 | Failed requests             | Under 1%                                                                   |
 | Checks                      | More than 99% pass, so a failed check fails the run                        |
 | Dropped iterations          | Under 1 per scenario, so a run that could not apply its arrival rate fails |
 
-Every threshold is scoped to its scenario, and response times are also scoped to an endpoint tag from the catalogue in `src/config/endpoints.js`. Scoping to the scenario keeps the readiness wait in `setup()` out of the measurement. A breached response-time, failed-request or check threshold aborts the run, after a 30 second evaluation delay. Dropped iterations are judged at the end of the run: they do not abort it, but they fail it.
+Every threshold is scoped to its scenario, and response times are also scoped to an endpoint tag from the catalogue in `src/config/endpoints.js`. Scoping to the scenario keeps the readiness wait in `setup()` out of the measurement. A breached response-time, failed-request or check threshold aborts the run, after a 30 second evaluation delay. Dropped iterations are judged at the end of the run: they do not abort it, but they fail it. So is the document scan: a slow scan fails the run rather than cutting it short. The `notifications_started` thresholds (`count>=0`) are reporting-only and can never fail: they exist so the summary prints the split by notification type.
 
 ## Add a suite
 

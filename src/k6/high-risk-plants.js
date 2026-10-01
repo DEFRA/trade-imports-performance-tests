@@ -1,20 +1,36 @@
 import { STEP_ENDPOINTS } from '../config/journey-endpoints.js'
-import { arrivalDateText, blankFieldAnswers } from '../lib/form-fill.js'
 import {
+  PLANT_ORIGINS_BY_COMMODITY_TYPE,
+  POTATO_ARRIVAL_TIME
+} from '../config/test-data.js'
+import { countAt, valueAt } from '../lib/distributions.js'
+import {
+  blankFieldAnswers,
+  hasField,
+  selectOptions,
+  slashDateText
+} from '../lib/form-fill.js'
+import {
+  choiceValues,
   identityOf,
   pagePath,
   pickAddress,
+  pickFrom,
   reachAndSubmit,
   saved
 } from './journey-pages.js'
 
 const ENDPOINTS = STEP_ENDPOINTS['high-risk-plants']
 
-const COMMODITY_TYPE = 'plants-for-planting'
-const CATEGORY = 'plants-for-planting'
-const ORIGIN_EU_MEMBER_STATE = 'DE'
 const ARRIVAL_DAYS_AHEAD = 7
 const NOT_YET_ARRIVED = 'not-yet-arrived'
+// The commodity types whose arrival status and consignor pages are asked: plants-frontend obligations/sections/arrival.js and parties.js.
+const POST_ARRIVAL_TYPES = ['plants-for-planting', 'wood-and-cut-trees']
+
+const onlyFor = (step, types) => ({
+  ...step,
+  appliesTo: ({ notificationType }) => types.includes(notificationType)
+})
 
 const picker = (name, slug, field) => ({
   name,
@@ -30,33 +46,45 @@ const picker = (name, slug, field) => ({
     )
 })
 
-const commodityLine = {
+const lineAnswers = (context, revealed, category) => ({
+  category,
+  ...blankFieldAnswers(revealed.formInputs, identityOf(context), (options) =>
+    pickFrom(context, options)
+  )
+})
+
+const saveLine = (context, entry, isLast) => {
+  const { walker } = context
+  const endpoints = ENDPOINTS['commodity-line']
+  const category = pickFrom(context, choiceValues(entry, 'category'))
+  const revealed = walker.submit(entry, { category }, endpoints.categorySave)
+  const answers = lineAnswers(context, revealed, category)
+
+  return saved(
+    'commodity-line',
+    walker.submit(
+      revealed,
+      isLast ? answers : { ...answers, action: 'add' },
+      endpoints.save
+    )
+  )
+}
+
+const commodityLines = {
   name: 'commodity-line',
   run: (context, landed) => {
-    const { walker } = context
-    const endpoints = ENDPOINTS['commodity-line']
-    const entry = walker.reach(
+    const lines = context.plan.commodityLines
+    let page = context.walker.reach(
       landed,
       pagePath(context, 'commodities/details'),
-      endpoints.open
-    )
-    const revealed = walker.submit(
-      entry,
-      { category: CATEGORY },
-      endpoints.categorySave
+      ENDPOINTS['commodity-line'].open
     )
 
-    return saved(
-      'commodity-line',
-      walker.submit(
-        revealed,
-        {
-          category: CATEGORY,
-          ...blankFieldAnswers(revealed.formInputs, identityOf(context))
-        },
-        endpoints.save
-      )
-    )
+    for (let line = 1; line <= lines; line += 1) {
+      page = saveLine(context, page, line === lines)
+    }
+
+    return page
   }
 }
 
@@ -75,43 +103,75 @@ const identificationNumbers = reachAndSubmit(
   })
 )
 
+const originAnswers = (context, page) => {
+  const allowed = PLANT_ORIGINS_BY_COMMODITY_TYPE[context.plan.notificationType]
+  const offered = selectOptions(page.formInputs, 'countryOfOrigin').filter(
+    (code) => allowed.includes(code)
+  )
+
+  return { countryOfOrigin: pickFrom(context, offered) ?? allowed[0] }
+}
+
+const arrivalDetailsAnswers = (context, page) => {
+  const places = selectOptions(page.formInputs, 'proposedPlaceOfLanding')
+
+  return {
+    arrivalDate: slashDateText(context.now, ARRIVAL_DAYS_AHEAD),
+    ...(hasField(page.formInputs, 'arrivalTime')
+      ? { arrivalTime: POTATO_ARRIVAL_TIME }
+      : {}),
+    ...(places.length > 0
+      ? { proposedPlaceOfLanding: pickFrom(context, places) }
+      : {})
+  }
+}
+
 export const HIGH_RISK_PLANTS_STEPS = Object.freeze({
   draft: [
     reachAndSubmit(
       'commodity-type',
       'commodity-type',
       ENDPOINTS['commodity-type'],
-      () => ({ commodityType: COMMODITY_TYPE })
+      ({ plan }) => ({ commodityType: plan.notificationType })
     ),
-    commodityLine,
+    commodityLines,
     reachAndSubmit(
       'commodities',
       'commodities',
       ENDPOINTS.commodities,
       () => ({})
     ),
-    reachAndSubmit('origin', 'origin', ENDPOINTS.origin, () => ({
-      countryOfOrigin: ORIGIN_EU_MEMBER_STATE
-    })),
-    reachAndSubmit(
-      'arrival-status',
-      'arrival-status',
-      ENDPOINTS['arrival-status'],
-      () => ({ arrivalStatus: NOT_YET_ARRIVED })
+    reachAndSubmit('origin', 'origin', ENDPOINTS.origin, originAnswers),
+    onlyFor(
+      reachAndSubmit(
+        'arrival-status',
+        'arrival-status',
+        ENDPOINTS['arrival-status'],
+        () => ({ arrivalStatus: NOT_YET_ARRIVED })
+      ),
+      POST_ARRIVAL_TYPES
     ),
     reachAndSubmit(
       'arrival-details',
       'arrival-details',
       ENDPOINTS['arrival-details'],
-      ({ now }) => ({
-        arrivalDate: arrivalDateText(now, ARRIVAL_DAYS_AHEAD)
-      })
+      arrivalDetailsAnswers
     ),
     picker('destination', 'destinations/select', 'placeOfDestination'),
-    picker('consignor', 'consignors/select', 'consignor'),
+    onlyFor(
+      picker('consignor', 'consignors/select', 'consignor'),
+      POST_ARRIVAL_TYPES
+    ),
     identificationNumbers,
     picker('contact', 'consignment/contact/select', 'contactAddress')
   ],
   reEdit: ['origin', 'arrival-details', 'identification-numbers', 'contact'],
-  amendEdit: 'identification-numbers'
+  amendEdit: 'identification-numbers',
+  planFor: (journeyModel, iteration) => ({
+    notificationType: valueAt(iteration, journeyModel.commodityTypes),
+    commodityLines: countAt(
+      iteration,
+      journeyModel.commodityLinesPerNotification
+    )
+  })
 })

@@ -1,8 +1,28 @@
 import { describe, expect, test } from 'vitest'
 
 import { ENDPOINTS } from './endpoints.js'
-import { SCENARIOS, resolvePassword, smokeScenarios } from './smoke.js'
-import { SMOKE_PROFILE, resolveTrafficModel } from './traffic.js'
+import {
+  SCENARIOS,
+  notificationSplits,
+  resolvePassword,
+  smokeScenarios
+} from './smoke.js'
+import {
+  SMOKE_PROFILE,
+  TRAFFIC_DEFAULTS,
+  resolveTrafficModel
+} from './traffic.js'
+
+describe('notificationSplits', () => {
+  test('is live animals plus each high-risk plants commodity type', () => {
+    expect(notificationSplits(TRAFFIC_DEFAULTS)).toEqual([
+      ['live-animals', 'live-animals'],
+      ['high-risk-plants', 'plants-for-planting'],
+      ['high-risk-plants', 'potatoes'],
+      ['high-risk-plants', 'wood-and-cut-trees']
+    ])
+  })
+})
 
 const JOURNEY_SCENARIOS = [
   ['live-animals', 'animals'],

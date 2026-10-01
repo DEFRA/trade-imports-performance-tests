@@ -28,6 +28,7 @@ describe('STEP_ENDPOINTS', () => {
       'identification',
       'import-reason',
       'additional-details',
+      'documents',
       'addresses',
       'cph-number',
       'port-of-entry',

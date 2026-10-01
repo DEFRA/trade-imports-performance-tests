@@ -1,6 +1,11 @@
 import { describe, expect, test } from 'vitest'
 
-import { scenarioThresholds, smokeThresholds } from './thresholds.js'
+import {
+  documentScanThresholds,
+  notificationSplitThresholds,
+  scenarioThresholds,
+  smokeThresholds
+} from './thresholds.js'
 
 const SCENARIO = 'live-animals'
 const ENDPOINTS = ['ins-dashboard', 'animals-backend-list']
@@ -86,6 +91,44 @@ describe('scenarioThresholds', () => {
     expect(() => scenarioThresholds(SCENARIO, ['no-such-endpoint'])).toThrow(
       'Unknown endpoint "no-such-endpoint"'
     )
+  })
+})
+
+describe('upload endpoints', () => {
+  const upload = scenarioThresholds(SCENARIO, ['animals-documents-upload'])
+
+  test('are held to P99 under 60000ms only, with abort', () => {
+    expect(
+      upload[
+        `http_req_duration{scenario:${SCENARIO},endpoint:animals-documents-upload}`
+      ]
+    ).toEqual([
+      { threshold: 'p(99)<60000', abortOnFail: true, delayAbortEval: '30s' }
+    ])
+  })
+})
+
+describe('documentScanThresholds', () => {
+  test('is one key, scoped to the scenario, P99 under 60000ms and never aborting', () => {
+    expect(documentScanThresholds('live-animals')).toEqual({
+      'document_scan_duration{scenario:live-animals}': ['p(99)<60000']
+    })
+  })
+})
+
+describe('notificationSplitThresholds', () => {
+  test('gives each pair a reporting-only count threshold', () => {
+    expect(
+      notificationSplitThresholds([
+        ['live-animals', 'live-animals'],
+        ['high-risk-plants', 'potatoes']
+      ])
+    ).toEqual({
+      'notifications_started{scenario:live-animals,notification_type:live-animals}':
+        ['count>=0'],
+      'notifications_started{scenario:high-risk-plants,notification_type:potatoes}':
+        ['count>=0']
+    })
   })
 })
 

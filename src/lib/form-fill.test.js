@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'vitest'
 
-import { arrivalDateText, blankFieldAnswers, firstOption } from './form-fill.js'
+import {
+  blankFieldAnswers,
+  firstOption,
+  hasField,
+  selectOptions,
+  slashDateText
+} from './form-fill.js'
 
 const IDENTITY = { vu: 3, iteration: 7 }
 
@@ -74,22 +80,57 @@ describe('blankFieldAnswers', () => {
   })
 })
 
-describe('arrivalDateText', () => {
-  test('writes d/m/yyyy with no zero padding', () => {
-    expect(arrivalDateText(new Date('2026-03-04T10:00:00Z'), 1)).toBe(
-      '5/3/2026'
+describe('blankFieldAnswers with an option chooser', () => {
+  test('answers an empty select with the option the chooser picks', () => {
+    expect(
+      blankFieldAnswers(
+        [{ name: 'genus', type: 'select', value: '', options: ['', 'A', 'B'] }],
+        IDENTITY,
+        (options) => options.at(-1)
+      )
+    ).toEqual({ genus: 'B' })
+  })
+})
+
+describe('selectOptions', () => {
+  const inputs = [
+    text('free'),
+    { name: 'port', type: 'select', value: '', options: ['GB ABD', 'GB LHR'] }
+  ]
+
+  test('reads the options of the named select', () => {
+    expect(selectOptions(inputs, 'port')).toEqual(['GB ABD', 'GB LHR'])
+  })
+
+  test('returns an empty list for a field that is not a select or is missing', () => {
+    expect(selectOptions(inputs, 'free')).toEqual([])
+    expect(selectOptions(inputs, 'nothing')).toEqual([])
+  })
+})
+
+describe('hasField', () => {
+  test('tells whether the form has the input', () => {
+    expect(hasField([text('arrivalTime')], 'arrivalTime')).toBe(true)
+    expect(hasField([text('arrivalTime')], 'arrivalDate')).toBe(false)
+  })
+})
+
+describe('slashDateText', () => {
+  test('writes a past date for a negative offset', () => {
+    expect(slashDateText(new Date('2026-03-04T10:00:00Z'), -30)).toBe(
+      '2/2/2026'
     )
+  })
+
+  test('writes d/m/yyyy with no zero padding', () => {
+    expect(slashDateText(new Date('2026-03-04T10:00:00Z'), 1)).toBe('5/3/2026')
   })
 
   test('crosses a month end', () => {
-    expect(arrivalDateText(new Date('2026-01-30T10:00:00Z'), 7)).toBe(
-      '6/2/2026'
-    )
+    expect(slashDateText(new Date('2026-01-30T10:00:00Z'), 7)).toBe('6/2/2026')
   })
 
   test('crosses a year end', () => {
-    expect(arrivalDateText(new Date('2026-12-28T10:00:00Z'), 7)).toBe(
-      '4/1/2027'
-    )
+    expect(slashDateText(new Date('2026-12-28T10:00:00Z'), 7)).toBe('4/1/2027')
   })
 })

@@ -1,10 +1,12 @@
 import { check } from 'k6'
+import exec from 'k6/execution'
 import http from 'k6/http'
 
 import { sharedEndpoints } from '../config/journey-endpoints.js'
 import { TRAFFIC_CLASSES } from '../config/request-mix.js'
 import {
   amendmentPlan,
+  isChosen,
   sessionsFor,
   thinkSecondsMean
 } from '../config/traffic.js'
@@ -21,6 +23,7 @@ import { pagePath } from './journey-pages.js'
 import {
   createWalker,
   recordNotificationPages,
+  recordNotificationStarted,
   recordSession
 } from './pages.js'
 
@@ -164,7 +167,11 @@ const contextFor = (run, walker, id, suffix = '') => ({
   vu: run.vu,
   iteration: run.iterationInTest,
   now: new Date(),
-  suffix
+  suffix,
+  plan: run.plan,
+  journeyModel: run.journeyModel,
+  worstCaseSearch: run.worstCaseSearch,
+  random: Math.random
 })
 
 const runSteps = (context, steps, landed) => {
@@ -205,12 +212,12 @@ const runDraftChunk = (run, context, chunk, landed, replayAfterFirst) => {
 const reEditUntilTarget = (run, context) => {
   const tail = run.tailPages
   const names = reEditPlan(
-    run.steps.reEdit,
+    run.reEditNames,
     run.counter.count,
     run.journeyModel.pagesPerNotification - tail
   )
   const steps = names.map((name) =>
-    run.steps.draft.find((step) => step.name === name)
+    run.draftSteps.find((step) => step.name === name)
   )
 
   return runSteps(context, steps, undefined)
@@ -304,7 +311,7 @@ const amend = (run, walker, crumb) => {
     return
   }
 
-  const edit = run.steps.draft.find((step) => step.name === run.steps.amendEdit)
+  const edit = run.draftSteps.find((step) => step.name === run.steps.amendEdit)
   const edited = runSteps(context, [edit], undefined)
 
   if (!edited.ok) {
@@ -404,12 +411,24 @@ const prepareRun = (options) => {
     iterationInTest,
     journeyModel
   )
+  const plan = options.steps.planFor(journeyModel, iterationInTest)
+  const draftSteps = options.steps.draft.filter(
+    (step) => step.appliesTo?.(plan) ?? true
+  )
 
   return {
     ...options,
     urls: { ...options.urls, backend: options.backendUrl },
     shared: sharedEndpoints(journey.endpointPrefix),
     journeyModel,
+    plan,
+    draftSteps,
+    reEditNames: options.steps.reEdit.filter((name) =>
+      draftSteps.some((step) => step.name === name)
+    ),
+    worstCaseSearch: {
+      pending: isChosen(iterationInTest, model.addressBook.worstCaseSearchShare)
+    },
     thinkMean: thinkSecondsMean(journeyModel, model.frontDoor),
     counter: { count: 0 },
     id: '',
@@ -431,9 +450,15 @@ const prepareRun = (options) => {
  * navigation goes through a walker, so it is classified for the request mix and
  * followed by think time. A step that does not land ends the iteration.
  *
+ * What each notification carries comes from the traffic model's distributions:
+ * `steps.planFor` draws its type, commodity lines and documents, and steps
+ * marked `appliesTo` are left out of notification types that do not ask them.
+ * Answers that come from reference data are drawn at random from the options
+ * each page offers.
+ *
  * @param {object} options - Journey settings.
  * @param {object} options.journey - An entry of `JOURNEYS`.
- * @param {{ draft: object[], reEdit: string[], amendEdit: string }} options.steps - The journey's step definitions.
+ * @param {{ draft: object[], reEdit: string[], amendEdit: string, planFor: (journeyModel: object, iteration: number) => object }} options.steps - The journey's step definitions.
  * @param {object} options.model - A resolved traffic model.
  * @param {string} options.backendUrl - The journey backend's base URL.
  * @param {{ ins: string, frontend: string }} options.urls - The INS and journey frontend base URLs.
@@ -450,7 +475,10 @@ export const notificationJourney = (options) => {
     1,
     sessionsFor(run.iterationInTest, run.journeyModel.sessionsPerNotification)
   )
-  const chunks = chunkEvenly(run.steps.draft, sessions)
+  const chunks = chunkEvenly(run.draftSteps, sessions)
+
+  exec.vu.metrics.tags.notification_type = run.plan.notificationType
+  recordNotificationStarted(run.plan.notificationType)
 
   for (const [index, chunk] of chunks.entries()) {
     const finished = runUserSession(run, {

@@ -10,9 +10,18 @@ import {
   SETUP_TIMEOUT,
   STUB_PROFILE,
   resolvePassword,
+  notificationSplits,
   smokeScenarios
 } from '../config/smoke.js'
-import { smokeThresholds } from '../config/thresholds.js'
+import {
+  documentScanThresholds,
+  notificationSplitThresholds,
+  smokeThresholds
+} from '../config/thresholds.js'
+import {
+  documentScanAllowanceLine,
+  standInCaveat
+} from '../config/test-data.js'
 import {
   resolveEnvironment,
   resolveLocalhostAlias,
@@ -52,7 +61,12 @@ const urls = {
 
 export const options = {
   scenarios: smokeScenarios(model),
-  thresholds: smokeThresholds(SCENARIOS),
+  thresholds: {
+    ...smokeThresholds(SCENARIOS),
+    ...documentScanThresholds('live-animals'),
+    ...notificationSplitThresholds(notificationSplits(model))
+  },
+  summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'],
   setupTimeout: SETUP_TIMEOUT,
   tags: { environment, stub_profile: STUB_PROFILE }
 }
@@ -61,6 +75,13 @@ export function setup() {
   console.log(`Smoke run in ${environment} with stub profile ${STUB_PROFILE}`)
   console.log(`Traffic model: ${JSON.stringify(model)}`)
   console.log(mixTargetLine(model))
+  console.log(documentScanAllowanceLine())
+
+  const caveat = standInCaveat(environment)
+
+  if (caveat) {
+    console.log(caveat)
+  }
 
   waitForReadiness({ urls, localhostAlias, credentials })
   ensurePerfAddress({
