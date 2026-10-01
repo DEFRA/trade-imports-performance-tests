@@ -1,0 +1,105 @@
+name: Smoke run
+
+on:
+  workflow_call:
+    inputs:
+      branch:
+        description: 'Branch name to probe for service images and for matching workspace and performance-test branches'
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch name to probe for service images'
+        required: false
+        type: string
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Smoke run
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Resolve refs
+        id: refs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED: ${{ inputs.branch }}
+        run: |
+          ref_enc=$(printf 'heads/%s' "$REQUESTED" | jq -sRr @uri)
+          for repo in trade-imports-workspace trade-imports-performance-tests; do
+            if gh api "repos/DEFRA/${repo}/git/ref/${ref_enc}" >/dev/null 2>&1; then
+              echo "${repo}=${REQUESTED}" >> "$GITHUB_OUTPUT"
+              echo "${repo} ref: ${REQUESTED}"
+            else
+              echo "${repo}=main" >> "$GITHUB_OUTPUT"
+              echo "${repo} ref: main (no branch ${REQUESTED})"
+            fi
+          done
+
+      - name: Check out the workspace
+        uses: actions/checkout@v4
+        with:
+          repository: DEFRA/trade-imports-workspace
+          ref: ${{ steps.refs.outputs.trade-imports-workspace }}
+          path: workspace
+
+      - name: Check out the performance tests
+        uses: actions/checkout@v4
+        with:
+          repository: DEFRA/trade-imports-performance-tests
+          ref: ${{ steps.refs.outputs.trade-imports-performance-tests }}
+          path: perftests
+
+      - name: Start stack
+        working-directory: workspace
+        env:
+          BRANCH: ${{ inputs.branch }}
+        run: ./scripts/stack/run-stack.sh --branch "$BRANCH"
+
+      - name: Make the results bucket
+        env:
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_DEFAULT_REGION: eu-west-2
+        run: aws --endpoint-url=http://localhost:4566 s3 mb s3://perf-results
+
+      - name: Build the image
+        run: docker build -t trade-imports-performance-tests:smoke perftests
+
+      - name: Run the smoke suite
+        run: |
+          docker run --rm \
+            --network host \
+            --user root \
+            --env-file perftests/compose/aws.env \
+            -e ENVIRONMENT=local \
+            -e TEST_SUITE=smoke \
+            -e S3_ENDPOINT=http://localhost:4566 \
+            -e RESULTS_OUTPUT_S3_PATH=s3://perf-results/${{ github.run_id }} \
+            -v "${{ github.workspace }}/perf-reports:/opt/perftest/reports" \
+            trade-imports-performance-tests:smoke
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-report
+          path: perf-reports/
+          retention-days: 14
+
+      - name: Capture stack logs
+        if: failure()
+        run: docker compose -p trade-imports logs --no-color --timestamps > stack-logs.txt 2>&1 || true
+
+      - name: Upload stack logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stack-logs
+          path: stack-logs.txt
+          retention-days: 14

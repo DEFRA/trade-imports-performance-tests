@@ -7,6 +7,8 @@ CDP builds this repo into a Docker image. The CDP Portal runs the image, and the
 - [Layout](#layout)
 - [Run locally](#run-locally)
 - [Run in CDP](#run-in-cdp)
+- [Smoke run on pull requests](#smoke-run-on-pull-requests)
+- [Thresholds](#thresholds)
 - [Add a suite](#add-a-suite)
 - [Licence](#licence)
 
@@ -15,7 +17,9 @@ CDP builds this repo into a Docker image. The CDP Portal runs the image, and the
 | Path                 | What it holds                                                                     |
 | -------------------- | --------------------------------------------------------------------------------- |
 | `src/suites/`        | One k6 script per suite, named `<suite>.k6.js`                                    |
-| `src/config/`        | Plain JavaScript modules shared by suites, with their unit tests (`*.test.js`)    |
+| `src/config/`        | Environment and service URLs, the endpoint catalogue, thresholds and smoke values |
+| `src/lib/`           | Pure helpers with unit tests, shared by suites, with no k6 imports                |
+| `src/k6/`            | k6-only modules: the browser-like session, the journeys and the readiness wait    |
 | `entrypoint.sh`      | What the image runs: one suite, then the S3 upload                                |
 | `Dockerfile`         | The image CDP runs, based on `grafana/k6` with the AWS CLI added                  |
 | `compose.yml`        | Local runs: LocalStack for S3 and `target`, a stand-in service that has `/health` |
@@ -63,7 +67,14 @@ This builds the image, runs it against the stand-in service and uploads the repo
 npm run test:docker-compose
 ```
 
-This runs `src/suites/health-check.k6.js` from source against the trade imports workspace stack (`tim docker dev`), which must already be running. It calls the INS frontend's `/health` on host port 3002, through `host.docker.internal`. It sets `ENVIRONMENT=local` and the service URL override, so it can never reach a CDP environment. It prints k6's summary and uploads nothing. It exits with k6's exit code, so a breached threshold, or a stack that is not running, exits with code 99.
+This runs `src/suites/smoke.k6.js` from source against the trade imports workspace stack, which must already be running. Start it with `tim docker up`, not `tim docker dev`. `up` is production-like: template caching is on and sign-in goes through the Defra ID stub. `dev` turns caching off, so it measures something other than CDP. The build loop's gate runs this same suite against a `--dev` stack, so its timings are not production-like; the pull-request run in `smoke.yml` is the production-like one.
+
+The run waits for the stack to be functionally ready (up to 5 minutes), then runs 3 scenarios at once for about 2 minutes with 5 virtual users in total:
+
+- `ins-front-door` signs in to INS and opens the dashboard
+- `live-animals` and `high-risk-plants` each create a draft through the frontend, save a page, read it back, replay the captured save against the backend, and read it back again
+
+It reaches the stack through `host.docker.internal` and sets `ENVIRONMENT=local`, so it can never reach a CDP environment. It prints k6's summary and uploads nothing. It exits with k6's exit code, so a breached threshold exits with code 99.
 
 Tear down afterwards:
 
@@ -79,15 +90,17 @@ Merging to `main` publishes the image. Run it from the CDP Portal.
 
 The image reads these environment variables:
 
-| Variable                 | Set by          | Purpose                                                                                                       |
-| ------------------------ | --------------- | ------------------------------------------------------------------------------------------------------------- |
-| `ENVIRONMENT`            | CDP Portal      | The environment to test, for example `perf-test`. Suites build service URLs from it                           |
-| `RESULTS_OUTPUT_S3_PATH` | CDP Portal      | Where the report goes. The run fails if it is not set                                                         |
-| `S3_ENDPOINT`            | image           | Defaults to AWS S3 in `eu-west-2`. Compose points it at LocalStack                                            |
-| `TEST_SUITE`             | image           | The suite to run, as a file name in `src/suites/` without `.k6.js`. Defaults to `health-check`                |
-| `<SERVICE_NAME>_URL`     | you, optionally | Overrides a service's URL, for example `TRADE_IMPORTS_INS_FRONTEND_URL`. Needed when `ENVIRONMENT` is `local` |
+| Variable                 | Set by          | Purpose                                                                                        |
+| ------------------------ | --------------- | ---------------------------------------------------------------------------------------------- |
+| `ENVIRONMENT`            | CDP Portal      | The environment to test, for example `perf-test`. Suites build service URLs from it            |
+| `RESULTS_OUTPUT_S3_PATH` | CDP Portal      | Where the report goes. The run fails if it is not set                                          |
+| `S3_ENDPOINT`            | image           | Defaults to AWS S3 in `eu-west-2`. Compose points it at LocalStack                             |
+| `TEST_SUITE`             | image           | The suite to run, as a file name in `src/suites/` without `.k6.js`. Defaults to `health-check` |
+| `<SERVICE_NAME>_URL`     | you, optionally | Overrides a service's URL, for example `TRADE_IMPORTS_INS_FRONTEND_URL`                        |
+| `LOCALHOST_ALIAS`        | Compose         | The host a container uses for the machine's `localhost`, for example `host.docker.internal`    |
+| `AUTH_PASSWORD`          | you, optionally | The Defra ID stub's password. Defaults to `Password123`                                        |
 
-Without an override, a service's URL is `https://<service-name>.<ENVIRONMENT>.cdp-int.defra.cloud`.
+Without an override, a service's URL is `https://<service-name>.<ENVIRONMENT>.cdp-int.defra.cloud`. When `ENVIRONMENT` is `local`, it is the workspace Docker stack's host port for the service, on `localhost` or on `LOCALHOST_ALIAS` when that is set.
 
 The image writes 2 files and copies them to `RESULTS_OUTPUT_S3_PATH`:
 
@@ -96,11 +109,39 @@ The image writes 2 files and copies them to `RESULTS_OUTPUT_S3_PATH`:
 
 The image exits with k6's exit code, so a failed threshold (code 99) fails the run. The report is still published first. The image exits with code 1 if `RESULTS_OUTPUT_S3_PATH` is not set, the suite does not exist, the report was not written or the upload failed.
 
+## Smoke run on pull requests
+
+`.github/workflows/smoke.yml` stands up the workspace stack without `--dev`, builds this image and runs it with `TEST_SUITE=smoke`. The check fails on any breached threshold. It uploads the k6 report as the `smoke-report` artifact.
+
+It runs on every pull request that is ready for review. Draft pull requests skip it, and it runs when a draft is marked ready for review. Another repo's workflow can call it:
+
+```yaml
+smoke:
+  uses: DEFRA/trade-imports-performance-tests/.github/workflows/smoke.yml@main
+  with:
+    branch: ${{ github.head_ref }}
+```
+
+The stubs answer without added delay, which is the zero-delay profile. The question the pull request run asks is whether the change made INS slower.
+
+## Thresholds
+
+Thresholds live in `src/config/thresholds.js`. The interim values come from the open question c-004 and DR-EUDP-005 section 4.7, until INS sets its own:
+
+| What                        | Limit                                               |
+| --------------------------- | --------------------------------------------------- |
+| Backend API response time   | P95 under 200ms, P99 under 1,200ms                  |
+| Frontend page response time | P95 under 2,000ms, P99 under 5,000ms                |
+| Failed requests             | Under 1%                                            |
+| Checks                      | More than 99% pass, so a failed check fails the run |
+
+Every threshold is scoped to its scenario, and response times are also scoped to an endpoint tag from the catalogue in `src/config/endpoints.js`. Scoping to the scenario keeps the readiness wait in `setup()` out of the measurement. A breached threshold aborts the run, after a 30 second evaluation delay.
+
 ## Add a suite
 
 1. Add `src/suites/<suite>.k6.js`. Name it after the test type and what it covers, for example `load-notification-submit.k6.js`.
 2. Get service URLs from `resolveServiceUrl(__ENV, '<service-name>')` in `src/config/target.js`.
-3. Give it thresholds, tag requests with a `name`, and put a threshold on `checks`. Follow the workspace's k6 best practices.
+3. Give each scenario its thresholds with `scenarioThresholds` in `src/config/thresholds.js`. Tag requests with an endpoint from the catalogue in `src/config/endpoints.js`, which also sets the `name` tag. Follow the workspace's k6 best practices.
 4. Put any logic worth testing in `src/config/` (or a new folder under `src/`) with a `*.test.js` beside it.
 5. Run it with `npm run k6:local -- run --no-usage-report src/suites/<suite>.k6.js`.
 6. To make CDP run it, change `TEST_SUITE` in the `Dockerfile` to `<suite>`.
