@@ -26,6 +26,8 @@ import {
   recordNotificationStarted,
   recordSession
 } from './pages.js'
+import { markPhase } from './phase.js'
+import { recordServerError, recordTransportError } from './server-errors.js'
 
 const HTTP_OK = 200
 const JSON_HEADERS = { 'content-type': 'application/json' }
@@ -37,10 +39,21 @@ const CANCEL_AMEND_PAGES = 2
 const RESUBMIT_AMEND_PAGES = 3
 const AMENDMENT_SUFFIX = '-A'
 
-const backendParams = (endpoint, headers = {}) => ({
-  headers,
-  tags: { endpoint, kind: 'api', name: endpoint }
-})
+const backendParams = (endpoint, headers = {}) => {
+  markPhase()
+
+  return {
+    headers,
+    tags: { endpoint, kind: 'api', name: endpoint }
+  }
+}
+
+const recorded = (response) => {
+  recordServerError(response)
+  recordTransportError(response)
+
+  return response
+}
 
 const capturedBodyFrom = (fulfilments, list) => {
   try {
@@ -54,13 +67,17 @@ const replayCapturedSave = ({ journey, backendUrl, id }) => {
   const prefix = journey.endpointPrefix
   const notificationUrl = `${backendUrl}/notifications/${id}`
 
-  const fulfilments = http.get(
-    `${notificationUrl}/fulfilments`,
-    backendParams(`${prefix}-backend-fulfilments`)
+  const fulfilments = recorded(
+    http.get(
+      `${notificationUrl}/fulfilments`,
+      backendParams(`${prefix}-backend-fulfilments`)
+    )
   )
-  const list = http.get(
-    `${backendUrl}/notifications?referenceNumber=${id}`,
-    backendParams(`${prefix}-backend-list`)
+  const list = recorded(
+    http.get(
+      `${backendUrl}/notifications?referenceNumber=${id}`,
+      backendParams(`${prefix}-backend-list`)
+    )
   )
 
   check(fulfilments, {
@@ -85,10 +102,12 @@ const replayCapturedSave = ({ journey, backendUrl, id }) => {
     return
   }
 
-  const replace = http.put(
-    notificationUrl,
-    JSON.stringify(body),
-    backendParams(`${prefix}-backend-replace`, JSON_HEADERS)
+  const replace = recorded(
+    http.put(
+      notificationUrl,
+      JSON.stringify(body),
+      backendParams(`${prefix}-backend-replace`, JSON_HEADERS)
+    )
   )
 
   check(replace, {
@@ -114,13 +133,15 @@ const startUserSession = (run) => {
   const ins = createWalker({
     session: sessionOn(run.urls.ins),
     thinkMean: run.thinkMean,
-    trafficClass: TRAFFIC_CLASSES.DASHBOARD_READ
+    trafficClass: TRAFFIC_CLASSES.DASHBOARD_READ,
+    frontend: 'ins'
   })
   const walker = createWalker({
     session: sessionOn(run.urls.frontend),
     thinkMean: run.thinkMean,
     trafficClass: TRAFFIC_CLASSES.JOURNEY,
-    counter: run.counter
+    counter: run.counter,
+    frontend: run.journey.endpointPrefix
   })
 
   openInsDashboard(ins)
@@ -393,7 +414,13 @@ const runUserSession = (run, { index, chunk, last }) => {
   }
 
   const context = contextFor(run, user.walker, run.id)
-  const drafted = runDraftChunk(run, context, chunk, landed, index === 0)
+  const drafted = runDraftChunk(
+    run,
+    context,
+    chunk,
+    landed,
+    index === 0 && run.replaysCapturedSave
+  )
 
   if (!drafted.ok || (last && !finishNotification(run, context))) {
     return false
@@ -429,7 +456,11 @@ const prepareRun = (options) => {
     worstCaseSearch: {
       pending: isChosen(iterationInTest, model.addressBook.worstCaseSearchShare)
     },
-    thinkMean: thinkSecondsMean(journeyModel, model.frontDoor),
+    thinkMean:
+      options.paced === false
+        ? 0
+        : thinkSecondsMean(journeyModel, model.frontDoor),
+    replaysCapturedSave: options.replaysCapturedSave ?? true,
     counter: { count: 0 },
     id: '',
     amends,
@@ -468,6 +499,8 @@ const prepareRun = (options) => {
  * @param {string} options.addressName - The name of the address the pickers choose.
  * @param {number} options.vu - The virtual user number.
  * @param {number} options.iterationInTest - The iteration number across the whole scenario.
+ * @param {boolean} [options.paced] - False waits no think time, for set-up runs that measure nothing. Defaults to true.
+ * @param {boolean} [options.replaysCapturedSave] - False skips the backend replay of the first save. Defaults to true.
  */
 export const notificationJourney = (options) => {
   const run = prepareRun(options)

@@ -2,17 +2,24 @@ import { describe, expect, test } from 'vitest'
 
 import { SCENARIOS } from './smoke.js'
 import {
+  BACKGROUND_VOLUME_PROFILE,
   SMOKE_PROFILE,
   TRAFFIC_DEFAULTS,
   amendmentPlan,
   arrivalScenarios,
+  durationSeconds,
+  durationText,
   frontDoorThinkSecondsMean,
+  gracefulStopFor,
   isChosen,
   iterationSeconds,
+  iuuThinkSecondsMean,
   resolveTrafficModel,
+  scenarioPagesPerHour,
   scenarioRates,
   sessionsFor,
-  thinkSecondsMean
+  thinkSecondsMean,
+  virtualUsersFor
 } from './traffic.js'
 
 const MAX_SMOKE_VUS = 5
@@ -42,10 +49,50 @@ describe('TRAFFIC_DEFAULTS', () => {
     ['highRiskPlants.amendShare', 0.2],
     ['highRiskPlants.cancelAmendShare', 0.05],
     ['addressBook.worstCaseSearchShare', 0.25],
+    ['backgroundVolume.liveAnimalsNotifications', 42000],
+    ['backgroundVolume.highRiskPlantsNotifications', 34000],
+    ['backgroundVolume.addressBookEntries', 500],
+    ['backgroundVolume.maxCreatedPerRun', 42000],
+    ['backgroundVolume.virtualUsers', 10],
+    ['backgroundVolume.maxDuration', '24h'],
     ['liveAnimals.documentKilobytes.min', 100],
-    ['liveAnimals.documentKilobytes.max', 5000]
+    ['liveAnimals.documentKilobytes.max', 5000],
+    ['iuu.notificationsPerHour', 229],
+    ['iuu.sessionsPerNotification', 1.5],
+    ['iuu.sessionMinutes', 30],
+    ['sustainedPeak.rampDuration', '3h'],
+    ['sustainedPeak.holdDuration', '7h'],
+    ['p99Burst.peakDuration', '30m'],
+    ['p99Burst.burstDuration', '60s'],
+    ['p99Burst.burstFactor', 1.5],
+    ['averageLoad.hourDuration', '1h'],
+    ['averageLoad.seasonalPeakFactor', 2],
+    ['averageLoad.designHeadroom', 2],
+    ['spikeRecovery.baselineDuration', '5m'],
+    ['spikeRecovery.spikeDuration', '10s'],
+    ['spikeRecovery.recoveryDuration', '60s'],
+    ['spikeRecovery.recoveredDuration', '2m'],
+    ['spikeRecovery.capacityRps.ins', 5],
+    ['spikeRecovery.capacityRps.animals', 5],
+    ['spikeRecovery.capacityRps.plants', 5],
+    ['spikeRecovery.capacityRps.iuu', 15],
+    ['endurance.holdDuration', '8h'],
+    ['endurance.comparisonWindow', '1h'],
+    ['endurance.sessionExpiry', 'frontend'],
+    ['endurance.sessionLifetime', '4h'],
+    ['endurance.visitInterval', '10m'],
+    ['endurance.returningUsersPerFrontend', 1]
   ])('%s is %s', (path, expected) => {
     expect(pathOf(TRAFFIC_DEFAULTS, path)).toBe(expected)
+  })
+
+  test('holds 24 weekday shares, busiest at 11:00 with 8%, adding up to 100.7%', () => {
+    const shares = TRAFFIC_DEFAULTS.averageLoad.hourlyShares
+
+    expect(shares).toHaveLength(24)
+    expect(Math.max(...shares)).toBe(0.08)
+    expect(shares.indexOf(0.08)).toBe(11)
+    expect(shares.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1.007, 6)
   })
 
   test.each([
@@ -95,6 +142,60 @@ describe('SMOKE_PROFILE', () => {
     expect(model.liveAnimals.amendShare).toBe(1)
     expect(model.highRiskPlants.amendShare).toBe(1)
     expect(model.addressBook.worstCaseSearchShare).toBe(1)
+  })
+})
+
+describe('BACKGROUND_VOLUME_PROFILE', () => {
+  const model = resolveTrafficModel({}, BACKGROUND_VOLUME_PROFILE)
+
+  test('resolves, with no documents, one session and one page for each notification', () => {
+    expect(model.liveAnimals.documentsPerNotification).toEqual([
+      { share: 1, min: 0, max: 0 }
+    ])
+    expect(model.liveAnimals.sessionsPerNotification).toBe(1)
+    expect(model.highRiskPlants.sessionsPerNotification).toBe(1)
+    expect(model.liveAnimals.pagesPerNotification).toBe(1)
+    expect(model.highRiskPlants.pagesPerNotification).toBe(1)
+  })
+
+  test('runs no worst-case search and no extra INS status check', () => {
+    expect(model.addressBook.worstCaseSearchShare).toBe(0)
+    expect(model.frontDoor.corePagesPerJourneySession).toBe(2)
+  })
+
+  test('leaves amendments, commodity types and commodity lines as journey traffic has them', () => {
+    expect(model.liveAnimals.amendShare).toBe(0.2)
+    expect(model.liveAnimals.cancelAmendShare).toBe(0.05)
+    expect(model.highRiskPlants.amendShare).toBe(0.2)
+    expect(model.highRiskPlants.commodityTypes).toEqual(
+      TRAFFIC_DEFAULTS.highRiskPlants.commodityTypes
+    )
+    expect(model.highRiskPlants.commodityLinesPerNotification).toEqual(
+      TRAFFIC_DEFAULTS.highRiskPlants.commodityLinesPerNotification
+    )
+  })
+
+  test.each([
+    [
+      '{"backgroundVolume":{"maxDuration":"1 day"}}',
+      'Traffic model value "backgroundVolume.maxDuration" must be a duration such as 2m'
+    ],
+    [
+      '{"backgroundVolume":{"virtualUsers":2.5}}',
+      'Traffic model value "backgroundVolume.virtualUsers" must be a whole number'
+    ],
+    [
+      '{"backgroundVolume":{"maxCreatedPerRun":0}}',
+      'Traffic model value "backgroundVolume.maxCreatedPerRun" must be a positive number'
+    ],
+    [
+      '{"backgroundVolume":{"addressBookEntries":-1}}',
+      'Traffic model value "backgroundVolume.addressBookEntries" must be a positive number'
+    ]
+  ])('rejects %s', (text, message) => {
+    expect(() =>
+      resolveTrafficModel({ TRAFFIC_MODEL: text }, BACKGROUND_VOLUME_PROFILE)
+    ).toThrow(message)
   })
 })
 
@@ -242,9 +343,122 @@ describe('resolveTrafficModel', () => {
     [
       '{"duration":"soon"}',
       'Traffic model value "duration" must be a duration such as 2m'
+    ],
+    [
+      '{"p99Burst":{"burstDuration":"1 minute"}}',
+      'Traffic model value "p99Burst.burstDuration" must be a duration such as 2m'
+    ],
+    [
+      '{"iuu":{"notificationsPerHour":228.6}}',
+      'Traffic model value "iuu.notificationsPerHour" must be a whole number'
     ]
   ])('rejects %s', (text, message) => {
     expect(() => resolveTrafficModel({ TRAFFIC_MODEL: text })).toThrow(message)
+  })
+
+  test('rejects a spike shorter than two seconds', () => {
+    expect(() =>
+      resolveTrafficModel({
+        TRAFFIC_MODEL: '{"spikeRecovery":{"spikeDuration":"1s"}}'
+      })
+    ).toThrow(
+      "TRAFFIC_MODEL spikeRecovery.spikeDuration must be at least 2s, got '1s'"
+    )
+  })
+
+  test('rejects comparison windows that overlap', () => {
+    expect(() =>
+      resolveTrafficModel({
+        TRAFFIC_MODEL: '{"endurance":{"comparisonWindow":"5h"}}'
+      })
+    ).toThrow(
+      "TRAFFIC_MODEL endurance.comparisonWindow must be at most half of endurance.holdDuration, got '5h' and '8h'"
+    )
+  })
+
+  test('rejects a session expiry that is neither frontend nor client', () => {
+    expect(() =>
+      resolveTrafficModel({
+        TRAFFIC_MODEL: '{"endurance":{"sessionExpiry":"never"}}'
+      })
+    ).toThrow(
+      'Traffic model value "endurance.sessionExpiry" must be one of frontend, client'
+    )
+  })
+
+  test('rejects a fractional number of returning users', () => {
+    expect(() =>
+      resolveTrafficModel({
+        TRAFFIC_MODEL: '{"endurance":{"returningUsersPerFrontend":1.5}}'
+      })
+    ).toThrow(
+      'Traffic model value "endurance.returningUsersPerFrontend" must be a whole number'
+    )
+  })
+
+  test.each(['0s', '1s'])('rejects a burst duration of %s', (duration) => {
+    expect(() =>
+      resolveTrafficModel({
+        TRAFFIC_MODEL: JSON.stringify({ p99Burst: { burstDuration: duration } })
+      })
+    ).toThrow(
+      `TRAFFIC_MODEL p99Burst.burstDuration must be at least 2s, got '${duration}'`
+    )
+  })
+
+  test('accepts a burst duration of 2s', () => {
+    expect(
+      resolveTrafficModel({
+        TRAFFIC_MODEL: '{"p99Burst":{"burstDuration":"2s"}}'
+      }).p99Burst.burstDuration
+    ).toBe('2s')
+  })
+
+  test.each([
+    JSON.stringify({ averageLoad: { hourlyShares: [0.5] } }),
+    JSON.stringify({
+      averageLoad: { hourlyShares: [...Array(23).fill(0.04), 1.5] }
+    }),
+    JSON.stringify({ averageLoad: { hourlyShares: Array(24).fill(0) } }),
+    JSON.stringify({
+      averageLoad: { hourlyShares: [...Array(23).fill(0.04), -0.1] }
+    }),
+    JSON.stringify({ averageLoad: { hourlyShares: 0.04 } }),
+    JSON.stringify({ averageLoad: { hourlyShares: 'flat' } })
+  ])('rejects the weekday shares in %s', (text) => {
+    expect(() => resolveTrafficModel({ TRAFFIC_MODEL: text })).toThrow(
+      'Traffic model value "averageLoad.hourlyShares" must be 24 shares from 0 to 1, at least one above 0'
+    )
+  })
+
+  test('accepts a whole replacement list of 24 weekday shares', () => {
+    const hourlyShares = Array(24).fill(0.04)
+
+    expect(
+      resolveTrafficModel({
+        TRAFFIC_MODEL: JSON.stringify({ averageLoad: { hourlyShares } })
+      }).averageLoad.hourlyShares
+    ).toEqual(hourlyShares)
+  })
+
+  test('rejects an hour that is not a duration', () => {
+    expect(() =>
+      resolveTrafficModel({
+        TRAFFIC_MODEL: '{"averageLoad":{"hourDuration":"an hour"}}'
+      })
+    ).toThrow(
+      'Traffic model value "averageLoad.hourDuration" must be a duration such as 2m'
+    )
+  })
+
+  test('rejects an hour of 1s', () => {
+    expect(() =>
+      resolveTrafficModel({
+        TRAFFIC_MODEL: '{"averageLoad":{"hourDuration":"1s"}}'
+      })
+    ).toThrow(
+      "TRAFFIC_MODEL averageLoad.hourDuration must be at least 2s, got '1s'"
+    )
   })
 
   test('accepts a share of 0', () => {
@@ -375,7 +589,10 @@ describe('scenarioRates', () => {
       'live-animals': 44,
       'high-risk-plants': 36,
       'ins-front-door': 80,
-      'ins-address-book': 20
+      'ins-address-book': 20,
+      'iuu-journey-sessions': 344,
+      'iuu-front-door': 229,
+      'iuu-address-book': 57
     })
   })
 
@@ -389,6 +606,20 @@ describe('scenarioRates', () => {
   })
 })
 
+describe('scenarioPagesPerHour', () => {
+  test('counts the page requests each scenario puts on each frontend at the design rates', () => {
+    expect(scenarioPagesPerHour(resolveTrafficModel({}))).toEqual({
+      'live-animals': { animals: 1760, ins: 396 },
+      'high-risk-plants': { plants: 1800, ins: 324 },
+      'ins-front-door': { ins: 640 },
+      'ins-address-book': { ins: 240 },
+      'iuu-journey-sessions': { iuu: 2064 },
+      'iuu-front-door': { iuu: 1832 },
+      'iuu-address-book': { iuu: 684 }
+    })
+  })
+})
+
 describe('iterationSeconds', () => {
   test('lasts as many sessions as the journey can have', () => {
     const seconds = iterationSeconds(resolveTrafficModel({}))
@@ -396,6 +627,52 @@ describe('iterationSeconds', () => {
     expect(seconds['live-animals']).toBe(2 * 20 * SECONDS_PER_MINUTE)
     expect(seconds['high-risk-plants']).toBe(2 * 25 * SECONDS_PER_MINUTE)
     expect(seconds['ins-front-door']).toBe(5 * SECONDS_PER_MINUTE)
+    expect(seconds['iuu-journey-sessions']).toBe(1800)
+  })
+})
+
+describe('durationSeconds', () => {
+  test.each([
+    ['60s', 60],
+    ['2m', 120],
+    ['3h', 10_800]
+  ])('reads %s as %s seconds', (duration, seconds) => {
+    expect(durationSeconds(duration)).toBe(seconds)
+  })
+
+  test('throws for a value that is not a duration', () => {
+    expect(() => durationSeconds('soon')).toThrow(
+      '"soon" is not a duration such as 2m'
+    )
+  })
+})
+
+describe('durationText', () => {
+  test.each([
+    [7200, '2h'],
+    [1800, '30m'],
+    [90, '90s']
+  ])('writes %d seconds as %s', (seconds, text) => {
+    expect(durationText(seconds)).toBe(text)
+  })
+})
+
+describe('iuuThinkSecondsMean', () => {
+  test('spreads the IUU session over its status checks, the sign-in having no wait', () => {
+    expect(iuuThinkSecondsMean(resolveTrafficModel({}))).toBe(360)
+  })
+})
+
+describe('virtualUsersFor and gracefulStopFor', () => {
+  test('sizes the users from the rate and the longest iteration', () => {
+    expect(virtualUsersFor(44, 2400)).toEqual({
+      preAllocatedVUs: 30,
+      maxVUs: 60
+    })
+  })
+
+  test('allows twice the longest iteration to finish', () => {
+    expect(gracefulStopFor(2400)).toBe('4800s')
   })
 })
 

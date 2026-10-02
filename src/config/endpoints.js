@@ -1,10 +1,11 @@
 export const ENDPOINT_KINDS = Object.freeze({
   PAGE: 'page',
   API: 'api',
-  UPLOAD: 'upload'
+  UPLOAD: 'upload',
+  STUB: 'stub'
 })
 
-const { PAGE, API, UPLOAD } = ENDPOINT_KINDS
+const { PAGE, API, UPLOAD, STUB } = ENDPOINT_KINDS
 
 const ofKind = (kind, names) => names.map((name) => [name, kind])
 
@@ -115,8 +116,24 @@ const BACKEND_APIS = [
   'plants-backend-replace'
 ]
 
+const STUB_CALLS = [
+  'stub-trade-token',
+  'stub-mdm-countries',
+  'stub-mdm-ports',
+  'stub-defra-id-well-known',
+  'stub-defra-id-authorize',
+  'stub-defra-id-sign-in-page',
+  'stub-defra-id-sign-in',
+  'stub-defra-id-organisations',
+  'stub-defra-id-organisation-choice',
+  'stub-defra-id-token',
+  'stub-defra-id-keys',
+  'stub-defra-id-sign-out'
+]
+
 export const ENDPOINTS = Object.freeze(
   Object.fromEntries([
+    ...ofKind(STUB, STUB_CALLS),
     ...ofKind(PAGE, INS_PAGES),
     ...ofKind(PAGE, ANIMALS_PAGES),
     ...ofKind(UPLOAD, ANIMALS_UPLOADS),

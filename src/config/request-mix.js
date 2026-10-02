@@ -6,7 +6,12 @@ export const TRAFFIC_CLASSES = Object.freeze({
   JOURNEY: 'journey',
   POST_SUBMISSION_READ: 'post-submission-read',
   AMENDMENT: 'amendment',
-  ADDRESS_BOOK: 'address-book'
+  ADDRESS_BOOK: 'address-book',
+  RE_AUTHENTICATION: 're-authentication'
+})
+
+export const RE_AUTHENTICATION_TAG = Object.freeze({
+  auth: TRAFFIC_CLASSES.RE_AUTHENTICATION
 })
 
 /**

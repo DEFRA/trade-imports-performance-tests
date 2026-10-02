@@ -39,6 +39,19 @@ const insSignsIn = ({ insUrl, localhostAlias, credentials }) => {
   return page.status === HTTP_OK && page.heading === 'Dashboard'
 }
 
+const insAddressBookAnswers = ({ insUrl, localhostAlias, credentials }) => {
+  const session = createBrowserSession({
+    baseUrl: insUrl,
+    localhostAlias,
+    credentials,
+    staleRedirects: ignoreStaleRedirects,
+    extraTags: READINESS_TAGS
+  })
+  const page = session.open('/address-book', 'ins-address-book')
+
+  return page.status === HTTP_OK && page.heading === 'Address book'
+}
+
 const attempt = (probe) => {
   try {
     return probe()
@@ -54,8 +67,12 @@ const failedProbes = ({ urls, localhostAlias, credentials }) => {
       readBackend(`${urls.animalsBackend}/notifications?page=1`),
     'plants backend read': () =>
       readBackend(`${urls.plantsBackend}/notifications?page=1`),
+    'INS backend read': () =>
+      readBackend(`${urls.insBackend}/notifications?page=1`),
     'INS signed-in page': () =>
-      insSignsIn({ insUrl: urls.ins, localhostAlias, credentials })
+      insSignsIn({ insUrl: urls.ins, localhostAlias, credentials }),
+    'address book read': () =>
+      insAddressBookAnswers({ insUrl: urls.ins, localhostAlias, credentials })
   }
 
   return Object.entries(probes)
@@ -66,11 +83,14 @@ const failedProbes = ({ urls, localhostAlias, credentials }) => {
 /**
  * Waits until the stack is functionally ready, rather than trusting health endpoints.
  *
- * Ready means a signed-in page, a backend read for each journey and a
- * reference-data read all succeed in one pass. Throws when the timeout passes.
+ * Ready means a signed-in page, a backend read for each journey, a
+ * reference-data read, a read of the dashboard read model and a read of the
+ * address book all succeed in one pass. Each service that owns a datastore
+ * builds its indexes before it answers, so a pass also means the indexes are
+ * built. Throws when the timeout passes.
  *
  * @param {object} options - Readiness settings.
- * @param {Record<string, string>} options.urls - `ins`, `animalsBackend`, `plantsBackend` and `referenceData` base URLs.
+ * @param {Record<string, string>} options.urls - `ins`, `animalsBackend`, `plantsBackend`, `insBackend` and `referenceData` base URLs.
  * @param {string} options.localhostAlias - The host that stands in for `localhost` in redirects.
  * @param {{ crn: string, password: string }} options.credentials - The stub identity to sign in with.
  */

@@ -1,6 +1,7 @@
 import http from 'k6/http'
 
 import { kindOf } from '../config/endpoints.js'
+import { RE_AUTHENTICATION_TAG } from '../config/request-mix.js'
 import { MAX_REDIRECT_HOPS } from '../config/smoke.js'
 import { encodeForm, formFields, prefilledFields } from '../lib/forms.js'
 import {
@@ -10,7 +11,10 @@ import {
   isStaleActionRedirect,
   originOf
 } from '../lib/redirects.js'
+import { markPhase } from './phase.js'
+import { recordServerError, recordTransportError } from './server-errors.js'
 
+const SIGN_IN_ENDPOINT = 'sign-in'
 const FORM_ENCODED = 'application/x-www-form-urlencoded'
 const HTTP_OK = 200
 const HTTP_REDIRECT_MIN = 300
@@ -18,6 +22,13 @@ const HTTP_REDIRECT_MAX = 399
 
 const isRedirect = (status) =>
   status >= HTTP_REDIRECT_MIN && status <= HTTP_REDIRECT_MAX
+
+const recorded = (response) => {
+  recordServerError(response)
+  recordTransportError(response)
+
+  return response
+}
 
 const hiddenFieldsOf = (form) =>
   Object.fromEntries(
@@ -131,7 +142,7 @@ const toPage = (response, url, outcome) => {
  * @param {{ add: (value: number) => void }} options.staleRedirects - Counts handled stale-concurrency redirects.
  * @param {object} [options.jar] - A cookie jar to share with another session, as one browser does across frontends.
  * @param {Record<string, string>} [options.extraTags] - Tags added to every request, overriding the defaults.
- * @returns {{ open: Function, post: Function, submitForm: Function, submitMultipart: Function, getJson: Function, signedInThroughIdentityProvider: () => boolean }} The session. `submitMultipart` posts a form with one file; `getJson` reads a JSON route, returning undefined unless it answers 200 with JSON.
+ * @returns {{ open: Function, post: Function, submitForm: Function, submitMultipart: Function, getJson: Function, signedInThroughIdentityProvider: () => boolean, signIns: () => number }} The session. `submitMultipart` posts a form with one file; `getJson` reads a JSON route, returning undefined unless it answers 200 with JSON; `signIns` counts the redirect chains that went through a sign-in, and once it is above 0 every later sign-in hop is tagged `auth: re-authentication`.
  */
 export const createBrowserSession = ({
   baseUrl,
@@ -142,19 +153,37 @@ export const createBrowserSession = ({
   extraTags = {}
 }) => {
   let signedIn = false
+  let completedSignIns = 0
 
-  const paramsFor = (endpoint, headers = {}) => ({
-    jar,
-    redirects: 0,
-    headers,
-    tags: { endpoint, kind: kindOf(endpoint), name: endpoint, ...extraTags }
-  })
+  const authTagFor = (endpoint) =>
+    endpoint === SIGN_IN_ENDPOINT && completedSignIns > 0
+      ? RE_AUTHENTICATION_TAG
+      : {}
+
+  const paramsFor = (endpoint, headers = {}) => {
+    markPhase()
+
+    return {
+      jar,
+      redirects: 0,
+      headers,
+      tags: {
+        endpoint,
+        kind: kindOf(endpoint),
+        name: endpoint,
+        ...authTagFor(endpoint),
+        ...extraTags
+      }
+    }
+  }
 
   const postForm = (url, fields, endpoint) =>
-    http.post(
-      url,
-      encodeForm(fields),
-      paramsFor(endpoint, { 'content-type': FORM_ENCODED })
+    recorded(
+      http.post(
+        url,
+        encodeForm(fields),
+        paramsFor(endpoint, { 'content-type': FORM_ENCODED })
+      )
     )
 
   const follow = (first, firstUrl, endpoint) => {
@@ -162,6 +191,8 @@ export const createBrowserSession = ({
     let url = firstUrl
     let hops = 0
     let staleActionHandled = false
+    let chainSignedIn = false
+    let passedThroughSignIn = false
 
     while (isRedirect(response.status) && hops < MAX_REDIRECT_HOPS) {
       const location = response.headers.Location
@@ -172,13 +203,23 @@ export const createBrowserSession = ({
       }
 
       url = absoluteLocation(url, location, localhostAlias)
-      response = http.get(url, paramsFor(endpointForHop(url, endpoint)))
+
+      const hopEndpoint = endpointForHop(url, endpoint)
+
+      response = recorded(http.get(url, paramsFor(hopEndpoint)))
       hops += 1
+      passedThroughSignIn =
+        passedThroughSignIn || hopEndpoint === SIGN_IN_ENDPOINT
 
       if (response.status === HTTP_OK && isIdentitySignInPage(url)) {
-        response = postForm(url, credentials, 'sign-in')
+        response = postForm(url, credentials, SIGN_IN_ENDPOINT)
         signedIn = true
+        chainSignedIn = true
       }
+    }
+
+    if ((chainSignedIn || passedThroughSignIn) && response.status === HTTP_OK) {
+      completedSignIns += 1
     }
 
     return toPage(response, url, {
@@ -190,7 +231,7 @@ export const createBrowserSession = ({
   const open = (path, endpoint) => {
     const url = `${baseUrl}${path}`
 
-    return follow(http.get(url, paramsFor(endpoint)), url, endpoint)
+    return follow(recorded(http.get(url, paramsFor(endpoint))), url, endpoint)
   }
 
   const post = (path, fields, endpoint) => {
@@ -217,16 +258,18 @@ export const createBrowserSession = ({
     )
 
     return follow(
-      http.post(url, { ...fields, file }, paramsFor(endpoint)),
+      recorded(http.post(url, { ...fields, file }, paramsFor(endpoint))),
       url,
       endpoint
     )
   }
 
   const getJson = (path, endpoint) => {
-    const response = http.get(
-      `${baseUrl}${path}`,
-      paramsFor(endpoint, { accept: 'application/json' })
+    const response = recorded(
+      http.get(
+        `${baseUrl}${path}`,
+        paramsFor(endpoint, { accept: 'application/json' })
+      )
     )
 
     if (response.status !== HTTP_OK) {
@@ -246,6 +289,7 @@ export const createBrowserSession = ({
     submitForm,
     submitMultipart,
     getJson,
-    signedInThroughIdentityProvider: () => signedIn
+    signedInThroughIdentityProvider: () => signedIn,
+    signIns: () => completedSignIns
   }
 }

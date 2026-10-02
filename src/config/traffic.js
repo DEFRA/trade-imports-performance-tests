@@ -16,16 +16,77 @@ const C012_CANCELLED_SHARE_OF_AMENDED = 0.05
 const INTERIM_WORST_CASE_SEARCH_SHARE = 0.25
 const DOCUMENT_CAP_KILOBYTES = 10_000
 const DEFAULT_DURATION = '2m'
+const GBN_AG_ANNUAL_NOTIFICATIONS = 42_000
+const GBN_PP_ANNUAL_NOTIFICATIONS = 34_000
+const INTERIM_ADDRESS_BOOK_ENTRIES = 500
+const BACKGROUND_VIRTUAL_USERS = 10
+const BACKGROUND_MAX_DURATION = '24h'
 
-const ADDRESS_BOOK_SESSION_PAGES = 12
+// Peak hour 114.3 notifications (volumetrics section 8.2) times A3's factor of 2, rounded up.
+const IUU_NOTIFICATIONS_PER_HOUR = 229
+const IUU2_SESSION_MINUTES = 30
+const IUU3_SESSIONS_PER_NOTIFICATION = A2_SESSIONS_PER_NOTIFICATION
+// DR-EUDP-005 'Scenario shapes' row 1: ramp over 3 hours, hold over the 7-hour 09:00 to 16:00 window.
+const T1_RAMP_DURATION = '3h'
+const T1_HOLD_DURATION = '7h'
+// DR-EUDP-005 'Scenario shapes' row 2 and volumetrics section 4.2 T5: 30 minutes at peak, then 60 seconds at 1.5 times.
+const BURST_PEAK_DURATION = '30m'
+const BURST_DURATION = '60s'
+const T5_BURST_FACTOR = 1.5
+// Volumetrics section 4.4 A1 and A3: the seasonal peak-day factor and the design headroom the average weekday leaves out.
+const A1_SEASONAL_PEAK_FACTOR = 2
+const A3_DESIGN_HEADROOM = 2
+const AVERAGE_LOAD_HOUR_DURATION = '1h'
+// Volumetrics section 4.3 daily profile, each row read hour by hour and interpolated linearly: the 09:00 to 16:00 window sums to 54.4% against T2's "about 54%", and the busiest hour, 11:00, is T2's 8%.
+const WEEKDAY_HOURLY_SHARES = [
+  0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.019, 0.036, 0.053, 0.077, 0.078,
+  0.08, 0.078, 0.077, 0.077, 0.077, 0.072, 0.058, 0.041, 0.036, 0.031, 0.026,
+  0.021, 0.016
+]
+
+// DR-EUDP-005 'Scenario shapes' row 3 and volumetrics section 4.2: five minutes at peak, then a ten-second spike.
+const SPIKE_BASELINE_DURATION = '5m'
+const SPIKE_DURATION = '10s'
+// c-004 default: P95 back within 10% of the pre-spike baseline within 60 seconds.
+const SPIKE_RECOVERY_DURATION = '60s'
+// Interim: the window judged once the minute c-004 allows has passed.
+const SPIKE_RECOVERED_DURATION = '2m'
+// Volumetrics section 4.2 Spike capacities rows 1 and 2: proposals pending open item 2.
+const FRONTEND_SPIKE_CAPACITY_RPS = 5
+const IUU_SPIKE_CAPACITY_RPS = 15
+// DR-EUDP-005 'Scenario shapes' row 4: eight hours at the design-target peak.
+const ENDURANCE_HOLD_DURATION = '8h'
+// c-004 default: the final hour's P95 against the first hour's.
+const ENDURANCE_COMPARISON_WINDOW = '1h'
+// The frontends' session.cache.ttl default (four hours), set at sign-in and not sliding.
+const FRONTEND_SESSION_LIFETIME = '4h'
+// Interim: how often a returning user visits its frontend, and how many there are for each.
+const RETURNING_VISIT_INTERVAL = '10m'
+const RETURNING_USERS_PER_FRONTEND = 1
+const SESSION_EXPIRIES = ['frontend', 'client']
+
+export const ADDRESS_BOOK_SESSION_PAGES = 12
 const SECONDS_PER_MINUTE = 60
 const SIGN_IN_PAGES_WITHOUT_WAIT = 1
-const SECONDS_PER_HOUR = 3600
+export const SECONDS_PER_HOUR = 3600
 const GRACEFUL_STOP_FACTOR = 2
 const MAX_VUS_FACTOR = 2
 const DURATION_FORMAT = /^\d+[smh]$/
+// The burst stage list spends one second ramping to the burst rate, then holds it.
+const MIN_BURST_SECONDS = 2
+// Each hour after the first spends one second stepping to its rate, then holds it.
+const MIN_HOUR_SECONDS = 2
+const HALF_DENOMINATOR = 2
 
-const freezeDeep = (value) => {
+export const HOURS_PER_DAY = 24
+
+/**
+ * Freezes a value and everything inside it.
+ *
+ * @param {unknown} value - Any value; only objects and arrays are frozen.
+ * @returns {unknown} The same value.
+ */
+export const freezeDeep = (value) => {
   if (value && typeof value === 'object') {
     Object.values(value).forEach(freezeDeep)
     Object.freeze(value)
@@ -83,7 +144,55 @@ export const TRAFFIC_DEFAULTS = freezeDeep({
     addressBookSessionsPerNotification:
       INTERIM_ADDRESS_BOOK_SESSIONS_PER_NOTIFICATION
   },
+  iuu: {
+    notificationsPerHour: IUU_NOTIFICATIONS_PER_HOUR,
+    sessionsPerNotification: IUU3_SESSIONS_PER_NOTIFICATION,
+    sessionMinutes: IUU2_SESSION_MINUTES
+  },
+  sustainedPeak: {
+    rampDuration: T1_RAMP_DURATION,
+    holdDuration: T1_HOLD_DURATION
+  },
+  p99Burst: {
+    peakDuration: BURST_PEAK_DURATION,
+    burstDuration: BURST_DURATION,
+    burstFactor: T5_BURST_FACTOR
+  },
+  averageLoad: {
+    hourDuration: AVERAGE_LOAD_HOUR_DURATION,
+    hourlyShares: WEEKDAY_HOURLY_SHARES,
+    seasonalPeakFactor: A1_SEASONAL_PEAK_FACTOR,
+    designHeadroom: A3_DESIGN_HEADROOM
+  },
+  spikeRecovery: {
+    baselineDuration: SPIKE_BASELINE_DURATION,
+    spikeDuration: SPIKE_DURATION,
+    recoveryDuration: SPIKE_RECOVERY_DURATION,
+    recoveredDuration: SPIKE_RECOVERED_DURATION,
+    capacityRps: {
+      ins: FRONTEND_SPIKE_CAPACITY_RPS,
+      animals: FRONTEND_SPIKE_CAPACITY_RPS,
+      plants: FRONTEND_SPIKE_CAPACITY_RPS,
+      iuu: IUU_SPIKE_CAPACITY_RPS
+    }
+  },
+  endurance: {
+    holdDuration: ENDURANCE_HOLD_DURATION,
+    comparisonWindow: ENDURANCE_COMPARISON_WINDOW,
+    sessionExpiry: 'frontend',
+    sessionLifetime: FRONTEND_SESSION_LIFETIME,
+    visitInterval: RETURNING_VISIT_INTERVAL,
+    returningUsersPerFrontend: RETURNING_USERS_PER_FRONTEND
+  },
   mix: { dashboardReadShareTarget: D7_DASHBOARD_READ_SHARE },
+  backgroundVolume: {
+    liveAnimalsNotifications: GBN_AG_ANNUAL_NOTIFICATIONS,
+    highRiskPlantsNotifications: GBN_PP_ANNUAL_NOTIFICATIONS,
+    addressBookEntries: INTERIM_ADDRESS_BOOK_ENTRIES,
+    maxCreatedPerRun: GBN_AG_ANNUAL_NOTIFICATIONS,
+    virtualUsers: BACKGROUND_VIRTUAL_USERS,
+    maxDuration: BACKGROUND_MAX_DURATION
+  },
   duration: DEFAULT_DURATION
 })
 
@@ -111,7 +220,56 @@ export const SMOKE_PROFILE = freezeDeep({
   }
 })
 
-const WHOLE_NUMBER_KEYS = new Set(['notificationsPerHour'])
+const BACKGROUND_MINIMAL_PAGES = 1
+const BACKGROUND_CORE_PAGES = 2
+const BACKGROUND_SESSIONS_PER_NOTIFICATION = 1
+const BACKGROUND_WORST_CASE_SEARCH_SHARE = 0
+
+/**
+ * What the background-volume suite lays over the defaults: each notification
+ * is one page and one session with no documents, and no address-book search
+ * or extra INS status check, because the run is set-up and measures nothing.
+ */
+export const BACKGROUND_VOLUME_PROFILE = freezeDeep({
+  liveAnimals: {
+    pagesPerNotification: BACKGROUND_MINIMAL_PAGES,
+    sessionsPerNotification: BACKGROUND_SESSIONS_PER_NOTIFICATION,
+    documentsPerNotification: [{ share: 1, min: 0, max: 0 }]
+  },
+  highRiskPlants: {
+    pagesPerNotification: BACKGROUND_MINIMAL_PAGES,
+    sessionsPerNotification: BACKGROUND_SESSIONS_PER_NOTIFICATION
+  },
+  addressBook: { worstCaseSearchShare: BACKGROUND_WORST_CASE_SEARCH_SHARE },
+  frontDoor: { corePagesPerJourneySession: BACKGROUND_CORE_PAGES }
+})
+
+const WHOLE_NUMBER_KEYS = new Set([
+  'notificationsPerHour',
+  'liveAnimalsNotifications',
+  'highRiskPlantsNotifications',
+  'addressBookEntries',
+  'maxCreatedPerRun',
+  'virtualUsers',
+  'returningUsersPerFrontend'
+])
+const DURATION_KEYS = new Set([
+  'duration',
+  'maxDuration',
+  'rampDuration',
+  'holdDuration',
+  'peakDuration',
+  'burstDuration',
+  'hourDuration',
+  'baselineDuration',
+  'spikeDuration',
+  'recoveryDuration',
+  'recoveredDuration',
+  'comparisonWindow',
+  'sessionLifetime',
+  'visitInterval'
+])
+const CHOICE_KEYS = { sessionExpiry: SESSION_EXPIRIES }
 const SHARE_KEYS = new Set([
   'amendShare',
   'cancelAmendShare',
@@ -164,7 +322,13 @@ const deepMerge = (base, override, parent = '') => {
 }
 
 const failureFor = (key, value) => {
-  if (key === 'duration') {
+  if (key in CHOICE_KEYS) {
+    return CHOICE_KEYS[key].includes(value)
+      ? undefined
+      : `one of ${CHOICE_KEYS[key].join(', ')}`
+  }
+
+  if (DURATION_KEYS.has(key)) {
     return typeof value === 'string' && DURATION_FORMAT.test(value)
       ? undefined
       : 'a duration such as 2m'
@@ -248,9 +412,28 @@ const kilobyteRangeFailure = ({ min, max }) =>
     ? undefined
     : `a range from min to max of at most ${DOCUMENT_CAP_KILOBYTES}`
 
+const isShare = (value) =>
+  typeof value === 'number' &&
+  Number.isFinite(value) &&
+  value >= 0 &&
+  value <= 1
+
+const hourlySharesFailure = (shares) =>
+  Array.isArray(shares) &&
+  shares.length === HOURS_PER_DAY &&
+  shares.every(isShare) &&
+  shares.some((share) => share > 0)
+    ? undefined
+    : `${HOURS_PER_DAY} shares from 0 to 1, at least one above 0`
+
 const validate = (model, parent = '') => {
   for (const [key, value] of Object.entries(model)) {
     const path = joinPath(parent, key)
+
+    if (key === 'hourlyShares') {
+      failIfAny(path, hourlySharesFailure(value))
+      continue
+    }
 
     if (isDistributionKey(key)) {
       failIfAny(path, distributionFailure(key, value))
@@ -295,6 +478,41 @@ const overrideFrom = (env) => {
   return parsed
 }
 
+const failIfBurstTooShort = (burstDuration) => {
+  if (durationSeconds(burstDuration) < MIN_BURST_SECONDS) {
+    throw new Error(
+      `TRAFFIC_MODEL p99Burst.burstDuration must be at least ${MIN_BURST_SECONDS}s, got '${burstDuration}'`
+    )
+  }
+}
+
+const failIfHourTooShort = (hourDuration) => {
+  if (durationSeconds(hourDuration) < MIN_HOUR_SECONDS) {
+    throw new Error(
+      `TRAFFIC_MODEL averageLoad.hourDuration must be at least ${MIN_HOUR_SECONDS}s, got '${hourDuration}'`
+    )
+  }
+}
+
+const failIfSpikeTooShort = (spikeDuration) => {
+  if (durationSeconds(spikeDuration) < MIN_BURST_SECONDS) {
+    throw new Error(
+      `TRAFFIC_MODEL spikeRecovery.spikeDuration must be at least ${MIN_BURST_SECONDS}s, got '${spikeDuration}'`
+    )
+  }
+}
+
+const failIfWindowsOverlap = ({ holdDuration, comparisonWindow }) => {
+  if (
+    durationSeconds(comparisonWindow) * HALF_DENOMINATOR >
+    durationSeconds(holdDuration)
+  ) {
+    throw new Error(
+      `TRAFFIC_MODEL endurance.comparisonWindow must be at most half of endurance.holdDuration, got '${comparisonWindow}' and '${holdDuration}'`
+    )
+  }
+}
+
 /**
  * Works out the traffic model a run applies.
  *
@@ -312,6 +530,13 @@ export const resolveTrafficModel = (env, profile = {}) => {
   const model = deepMerge(withProfile, overrideFrom(env))
 
   validate(model)
+  failIfBurstTooShort(model.p99Burst.burstDuration)
+  failIfHourTooShort(model.averageLoad.hourDuration)
+  failIfSpikeTooShort(model.spikeRecovery.spikeDuration)
+  failIfWindowsOverlap({
+    holdDuration: model.endurance.holdDuration,
+    comparisonWindow: model.endurance.comparisonWindow
+  })
 
   return freezeDeep(model)
 }
@@ -342,6 +567,59 @@ export const thinkSecondsMean = (journeyModel, frontDoor) =>
 export const frontDoorThinkSecondsMean = (frontDoor) =>
   (frontDoor.dashboardOnlySessionMinutes * SECONDS_PER_MINUTE) /
   frontDoor.pagesPerDashboardOnlySession
+
+/**
+ * The mean wait between two front-door pages of a synthetic IUU journey
+ * session, which holds its sign-in and status checks across the IUU session
+ * length. The sign-in has no wait.
+ *
+ * @param {{ iuu: { sessionMinutes: number }, frontDoor: { corePagesPerJourneySession: number } }} model - A resolved traffic model.
+ * @returns {number} Seconds.
+ */
+export const iuuThinkSecondsMean = (model) =>
+  (model.iuu.sessionMinutes * SECONDS_PER_MINUTE) /
+  (model.frontDoor.corePagesPerJourneySession - SIGN_IN_PAGES_WITHOUT_WAIT)
+
+const DURATION_UNIT_SECONDS = {
+  s: 1,
+  m: SECONDS_PER_MINUTE,
+  h: SECONDS_PER_HOUR
+}
+
+/**
+ * Converts a duration such as `90s`, `2m` or `3h` to seconds.
+ *
+ * @param {string} duration - A whole number followed by s, m or h.
+ * @returns {number} Seconds.
+ * @throws {Error} When the value is not such a duration.
+ */
+export const durationSeconds = (duration) => {
+  if (typeof duration !== 'string' || !DURATION_FORMAT.test(duration)) {
+    throw new Error(`"${duration}" is not a duration such as 2m`)
+  }
+
+  return (
+    Number(duration.slice(0, -1)) * DURATION_UNIT_SECONDS[duration.slice(-1)]
+  )
+}
+
+/**
+ * Writes seconds as the largest whole unit that holds them exactly.
+ *
+ * @param {number} seconds - A length of time.
+ * @returns {string} For example `2h`, `30m` or `90s`.
+ */
+export const durationText = (seconds) => {
+  if (seconds % SECONDS_PER_HOUR === 0) {
+    return `${seconds / SECONDS_PER_HOUR}h`
+  }
+
+  if (seconds % SECONDS_PER_MINUTE === 0) {
+    return `${seconds / SECONDS_PER_MINUTE}m`
+  }
+
+  return `${seconds}s`
+}
 
 /**
  * Spreads sessions over notifications so the average is exactly the figure.
@@ -386,6 +664,9 @@ const rateFromJourneys = (perNotification, { liveAnimals, highRiskPlants }) =>
   perNotification *
   (liveAnimals.notificationsPerHour + highRiskPlants.notificationsPerHour)
 
+const rateFromIuu = (perNotification, { iuu }) =>
+  Math.max(1, Math.round(perNotification * iuu.notificationsPerHour))
+
 /**
  * The arrival rate of each scenario, in iterations an hour.
  *
@@ -412,8 +693,69 @@ export const scenarioRates = (model) => ({
         model
       )
     )
+  ),
+  'iuu-journey-sessions': rateFromIuu(model.iuu.sessionsPerNotification, model),
+  'iuu-front-door': rateFromIuu(
+    model.frontDoor.dashboardOnlySessionsPerNotification,
+    model
+  ),
+  'iuu-address-book': rateFromIuu(
+    model.frontDoor.addressBookSessionsPerNotification,
+    model
   )
 })
+
+const journeyPagesPerHour = ({ rate, journeyModel, frontend, model }) => ({
+  [frontend]: rate * journeyModel.pagesPerNotification,
+  ins:
+    rate *
+    journeyModel.sessionsPerNotification *
+    model.frontDoor.corePagesPerJourneySession
+})
+
+/**
+ * The page requests an hour each scenario puts on each frontend at its steady
+ * rate. The IUU scenarios' pages are counted as `iuu`, though they land on the
+ * INS host, because they count against IUU's own capacity (c-007).
+ *
+ * @param {object} model - A resolved traffic model.
+ * @returns {Record<string, Record<string, number>>} Pages an hour by scenario name, then by frontend.
+ */
+export const scenarioPagesPerHour = (model) => {
+  const rates = scenarioRates(model)
+  const { frontDoor } = model
+  const iuuSessionPages = frontDoor.corePagesPerJourneySession
+
+  return {
+    'live-animals': journeyPagesPerHour({
+      rate: rates['live-animals'],
+      journeyModel: model.liveAnimals,
+      frontend: 'animals',
+      model
+    }),
+    'high-risk-plants': journeyPagesPerHour({
+      rate: rates['high-risk-plants'],
+      journeyModel: model.highRiskPlants,
+      frontend: 'plants',
+      model
+    }),
+    'ins-front-door': {
+      ins: rates['ins-front-door'] * frontDoor.pagesPerDashboardOnlySession
+    },
+    'ins-address-book': {
+      ins: rates['ins-address-book'] * ADDRESS_BOOK_SESSION_PAGES
+    },
+    'iuu-journey-sessions': {
+      iuu: rates['iuu-journey-sessions'] * iuuSessionPages
+    },
+    'iuu-front-door': {
+      iuu: rates['iuu-front-door'] * frontDoor.pagesPerDashboardOnlySession
+    },
+    'iuu-address-book': {
+      iuu: rates['iuu-address-book'] * ADDRESS_BOOK_SESSION_PAGES
+    }
+  }
+}
 
 /**
  * The longest one iteration of each scenario can run, in seconds.
@@ -433,26 +775,48 @@ export const iterationSeconds = (model) => ({
   'ins-front-door':
     model.frontDoor.dashboardOnlySessionMinutes * SECONDS_PER_MINUTE,
   'ins-address-book':
+    ADDRESS_BOOK_SESSION_PAGES * frontDoorThinkSecondsMean(model.frontDoor),
+  'iuu-journey-sessions': model.iuu.sessionMinutes * SECONDS_PER_MINUTE,
+  'iuu-front-door':
+    model.frontDoor.dashboardOnlySessionMinutes * SECONDS_PER_MINUTE,
+  'iuu-address-book':
     ADDRESS_BOOK_SESSION_PAGES * frontDoorThinkSecondsMean(model.frontDoor)
 })
 
-const arrivalScenario = ({ rate, seconds, duration, exec }) => {
+/**
+ * Sizes an open-model scenario's virtual users with Little's law.
+ *
+ * @param {number} ratePerHour - Iterations an hour.
+ * @param {number} seconds - The longest one iteration can run.
+ * @returns {{ preAllocatedVUs: number, maxVUs: number }} Users held ready, and twice as many as the ceiling.
+ */
+export const virtualUsersFor = (ratePerHour, seconds) => {
   const preAllocatedVUs = Math.max(
     1,
-    Math.ceil((rate / SECONDS_PER_HOUR) * seconds)
+    Math.ceil((ratePerHour / SECONDS_PER_HOUR) * seconds)
   )
 
-  return {
-    executor: 'constant-arrival-rate',
-    rate,
-    timeUnit: '1h',
-    duration,
-    preAllocatedVUs,
-    maxVUs: MAX_VUS_FACTOR * preAllocatedVUs,
-    gracefulStop: `${Math.ceil(GRACEFUL_STOP_FACTOR * seconds)}s`,
-    exec
-  }
+  return { preAllocatedVUs, maxVUs: MAX_VUS_FACTOR * preAllocatedVUs }
 }
+
+/**
+ * How long k6 lets running iterations finish when a scenario ends.
+ *
+ * @param {number} seconds - The longest one iteration can run.
+ * @returns {string} Twice that, as a k6 duration in seconds.
+ */
+export const gracefulStopFor = (seconds) =>
+  `${Math.ceil(GRACEFUL_STOP_FACTOR * seconds)}s`
+
+const arrivalScenario = ({ rate, seconds, duration, exec }) => ({
+  executor: 'constant-arrival-rate',
+  rate,
+  timeUnit: '1h',
+  duration,
+  ...virtualUsersFor(rate, seconds),
+  gracefulStop: gracefulStopFor(seconds),
+  exec
+})
 
 /**
  * Builds the k6 `scenarios` option: one open-model scenario per entry.

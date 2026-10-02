@@ -1,8 +1,6 @@
 import { journeyEndpoints } from './journey-endpoints.js'
 import { arrivalScenarios } from './traffic.js'
 
-export const STUB_PROFILE = 'zero-delay'
-
 const DEFAULT_STUB_PASSWORD = 'Password123'
 
 export const IDENTITY = Object.freeze({ crn: '2100010101' })

@@ -29,13 +29,10 @@ if [ ! -f "$SUITE_FILE" ]; then
   exit 1
 fi
 
-K6_WEB_DASHBOARD=true \
-K6_WEB_DASHBOARD_EXPORT="$REPORTS_DIR/index.html" \
-K6_WEB_DASHBOARD_PERIOD=${K6_WEB_DASHBOARD_PERIOD:-1s} \
-k6 run --no-usage-report --summary-export="$REPORTS_DIR/summary.json" "$SUITE_FILE"
+REPORTS_DIR="$REPORTS_DIR" sh "$PERFTEST_HOME/scripts/run-suite.sh" "$SUITE_FILE"
 test_exit_code=$?
 
-echo "k6 exited with code $test_exit_code"
+echo "The suite exited with code $test_exit_code"
 
 if [ ! -f "$REPORTS_DIR/index.html" ]; then
   echo "$REPORTS_DIR/index.html is not found"
