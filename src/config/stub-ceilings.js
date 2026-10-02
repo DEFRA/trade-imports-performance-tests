@@ -1,3 +1,5 @@
+import { freezeDeep } from './traffic.js'
+
 // A stub carries at most half its ceiling: the factor the volumetrics page
 // applies to its design targets (confluence:6608160092).
 export const HEADROOM_FACTOR = 2
@@ -52,15 +54,6 @@ export const CEILING_GROUPS = Object.freeze([
   'defra-id-target',
   'defra-id'
 ])
-
-const freezeDeep = (value) => {
-  if (value && typeof value === 'object') {
-    Object.values(value).forEach(freezeDeep)
-    Object.freeze(value)
-  }
-
-  return value
-}
 
 const JAVA_STUB_LADDER = [
   10, 25, 50, 100, 200, 300, 400, 600, 800, 1200, 1600, 2400

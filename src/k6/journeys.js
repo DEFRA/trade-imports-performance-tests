@@ -26,6 +26,8 @@ import {
   recordNotificationStarted,
   recordSession
 } from './pages.js'
+import { markPhase } from './phase.js'
+import { recordServerError } from './server-errors.js'
 
 const HTTP_OK = 200
 const JSON_HEADERS = { 'content-type': 'application/json' }
@@ -37,10 +39,20 @@ const CANCEL_AMEND_PAGES = 2
 const RESUBMIT_AMEND_PAGES = 3
 const AMENDMENT_SUFFIX = '-A'
 
-const backendParams = (endpoint, headers = {}) => ({
-  headers,
-  tags: { endpoint, kind: 'api', name: endpoint }
-})
+const backendParams = (endpoint, headers = {}) => {
+  markPhase()
+
+  return {
+    headers,
+    tags: { endpoint, kind: 'api', name: endpoint }
+  }
+}
+
+const recorded = (response) => {
+  recordServerError(response)
+
+  return response
+}
 
 const capturedBodyFrom = (fulfilments, list) => {
   try {
@@ -54,13 +66,17 @@ const replayCapturedSave = ({ journey, backendUrl, id }) => {
   const prefix = journey.endpointPrefix
   const notificationUrl = `${backendUrl}/notifications/${id}`
 
-  const fulfilments = http.get(
-    `${notificationUrl}/fulfilments`,
-    backendParams(`${prefix}-backend-fulfilments`)
+  const fulfilments = recorded(
+    http.get(
+      `${notificationUrl}/fulfilments`,
+      backendParams(`${prefix}-backend-fulfilments`)
+    )
   )
-  const list = http.get(
-    `${backendUrl}/notifications?referenceNumber=${id}`,
-    backendParams(`${prefix}-backend-list`)
+  const list = recorded(
+    http.get(
+      `${backendUrl}/notifications?referenceNumber=${id}`,
+      backendParams(`${prefix}-backend-list`)
+    )
   )
 
   check(fulfilments, {
@@ -85,10 +101,12 @@ const replayCapturedSave = ({ journey, backendUrl, id }) => {
     return
   }
 
-  const replace = http.put(
-    notificationUrl,
-    JSON.stringify(body),
-    backendParams(`${prefix}-backend-replace`, JSON_HEADERS)
+  const replace = recorded(
+    http.put(
+      notificationUrl,
+      JSON.stringify(body),
+      backendParams(`${prefix}-backend-replace`, JSON_HEADERS)
+    )
   )
 
   check(replace, {
@@ -114,13 +132,15 @@ const startUserSession = (run) => {
   const ins = createWalker({
     session: sessionOn(run.urls.ins),
     thinkMean: run.thinkMean,
-    trafficClass: TRAFFIC_CLASSES.DASHBOARD_READ
+    trafficClass: TRAFFIC_CLASSES.DASHBOARD_READ,
+    frontend: 'ins'
   })
   const walker = createWalker({
     session: sessionOn(run.urls.frontend),
     thinkMean: run.thinkMean,
     trafficClass: TRAFFIC_CLASSES.JOURNEY,
-    counter: run.counter
+    counter: run.counter,
+    frontend: run.journey.endpointPrefix
   })
 
   openInsDashboard(ins)

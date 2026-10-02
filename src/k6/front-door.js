@@ -3,7 +3,11 @@ import { check } from 'k6'
 import { TRAFFIC_CLASSES } from '../config/request-mix.js'
 import { ADDRESS_BOOK_LOAD_NAME_PREFIX, PERF_ADDRESS } from '../config/smoke.js'
 import { WORST_CASE_SEARCH_LENGTH } from '../config/test-data.js'
-import { frontDoorThinkSecondsMean, isChosen } from '../config/traffic.js'
+import {
+  frontDoorThinkSecondsMean,
+  isChosen,
+  iuuThinkSecondsMean
+} from '../config/traffic.js'
 import { addressIdFrom, worstCaseSearchTerm } from '../lib/address-book.js'
 import { createBrowserSession } from './browser-session.js'
 import { createWalker, recordSession } from './pages.js'
@@ -71,7 +75,8 @@ const startInsSession = ({
   localhostAlias,
   staleRedirects,
   model,
-  trafficClass
+  trafficClass,
+  thinkMean = frontDoorThinkSecondsMean(model.frontDoor)
 }) =>
   createWalker({
     session: createBrowserSession({
@@ -80,8 +85,9 @@ const startInsSession = ({
       credentials,
       staleRedirects
     }),
-    thinkMean: frontDoorThinkSecondsMean(model.frontDoor),
-    trafficClass
+    thinkMean,
+    trafficClass,
+    frontend: 'ins'
   })
 
 /**
@@ -117,6 +123,43 @@ export const dashboardOnlySession = (options) => {
 
   const further =
     options.model.frontDoor.pagesPerDashboardOnlySession -
+    SIGN_IN_AND_DASHBOARD_PAGES
+
+  for (let view = 0; view < further; view += 1) {
+    walker.open('/', 'ins-dashboard')
+  }
+
+  recordSession(secondsSince(startedAt))
+}
+
+/**
+ * Runs a synthetic IUU-shaped session: the front-door pages of an IUU journey
+ * session, held for the IUU session length.
+ *
+ * No IUU journey exists here (c-007), so the session signs in, opens the
+ * dashboard and checks it `corePagesPerJourneySession` pages in all, paced
+ * across the IUU session length, the way an IUU user in their own journey
+ * would hold a signed-in session.
+ *
+ * @param {object} options - The same settings as `dashboardOnlySession`.
+ * @param {Record<string, string>} options.urls - Service base URLs, with `ins`.
+ * @param {object} options.model - A resolved traffic model.
+ * @param {{ crn: string, password: string }} options.credentials - The stub identity to sign in with.
+ * @param {string} options.localhostAlias - The host that stands in for `localhost` in redirects.
+ * @param {{ add: (value: number) => void }} options.staleRedirects - Counts handled stale-concurrency redirects.
+ */
+export const iuuJourneySession = (options) => {
+  const startedAt = Date.now()
+  const walker = startInsSession({
+    ...options,
+    trafficClass: TRAFFIC_CLASSES.DASHBOARD_READ,
+    thinkMean: iuuThinkSecondsMean(options.model)
+  })
+
+  openInsDashboard(walker)
+
+  const further =
+    options.model.frontDoor.corePagesPerJourneySession -
     SIGN_IN_AND_DASHBOARD_PAGES
 
   for (let view = 0; view < further; view += 1) {

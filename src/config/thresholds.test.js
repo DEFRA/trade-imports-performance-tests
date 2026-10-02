@@ -3,8 +3,12 @@ import { describe, expect, test } from 'vitest'
 import { DATASTORES } from './background-volume.js'
 import { STUBBED_INTEGRATIONS } from './stub-profiles.js'
 import {
+  INTERIM_TARGETS,
+  asReportingOnly,
   backgroundVolumeReportThresholds,
   backgroundVolumeThresholds,
+  designTargetReportThresholds,
+  designTargetThresholds,
   documentScanThresholds,
   notificationSplitThresholds,
   scenarioThresholds,
@@ -12,7 +16,8 @@ import {
   smokeThresholds,
   stubCeilingStepThresholds,
   stubHeadroomReportThresholds,
-  stubProfileReportThresholds
+  stubProfileReportThresholds,
+  subMetricKey
 } from './thresholds.js'
 
 const SCENARIO = 'live-animals'
@@ -373,5 +378,201 @@ describe('stubHeadroomReportThresholds', () => {
     expect(
       Object.values(stubHeadroomReportThresholds(STUBBED_INTEGRATIONS)).flat()
     ).toEqual(Array(13).fill('value>=0'))
+  })
+})
+
+describe('subMetricKey', () => {
+  test('spells a sub-metric the way k6 keys its summary', () => {
+    expect(
+      subMetricKey('http_req_duration', {
+        scenario: 'a',
+        endpoint: 'b',
+        phase: 'hold'
+      })
+    ).toBe('http_req_duration{scenario:a,endpoint:b,phase:hold}')
+  })
+})
+
+describe('scenarioThresholds with a phase', () => {
+  const scoped = scenarioThresholds(SCENARIO, ENDPOINTS, 'hold')
+
+  test('scopes every response time key to the phase', () => {
+    const durationKeys = Object.keys(scoped).filter((key) =>
+      key.startsWith('http_req_duration')
+    )
+
+    expect(durationKeys).toHaveLength(ENDPOINTS.length)
+
+    for (const key of durationKeys) {
+      expect(key.endsWith(',phase:hold}')).toBe(true)
+    }
+  })
+
+  test('leaves the health keys as they are without a phase', () => {
+    const health = (set) =>
+      Object.entries(set).filter(
+        ([key]) => !key.startsWith('http_req_duration')
+      )
+
+    expect(health(scoped)).toEqual(health(thresholds))
+  })
+})
+
+describe('asReportingOnly', () => {
+  test('maps each metric to a limit that can never fail', () => {
+    expect(
+      asReportingOnly({
+        'http_req_duration{scenario:a}': [],
+        'session_seconds{phase:hold}': [],
+        'document_scan_duration{scenario:a}': [],
+        'http_req_failed{scenario:a}': [],
+        'checks{scenario:a}': [],
+        'server_errors{scenario:a}': [],
+        'dashboard_read_share{phase:hold}': [],
+        'dropped_iterations{scenario:a}': [],
+        'page_requests{scenario:a}': [],
+        'notifications_started{scenario:a}': [],
+        run_trusted: []
+      })
+    ).toEqual({
+      'http_req_duration{scenario:a}': ['p(95)>=0'],
+      'session_seconds{phase:hold}': ['p(95)>=0'],
+      'document_scan_duration{scenario:a}': ['p(95)>=0'],
+      'http_req_failed{scenario:a}': ['rate>=0'],
+      'checks{scenario:a}': ['rate>=0'],
+      'server_errors{scenario:a}': ['rate>=0'],
+      'dashboard_read_share{phase:hold}': ['rate>=0'],
+      'dropped_iterations{scenario:a}': ['count>=0'],
+      'page_requests{scenario:a}': ['count>=0'],
+      'notifications_started{scenario:a}': ['count>=0'],
+      run_trusted: ['value>=0']
+    })
+  })
+})
+
+describe('designTargetThresholds', () => {
+  const scenarioSet = { [SCENARIO]: { endpoints: ENDPOINTS } }
+
+  test('judges sustained-peak response times in the hold phase without aborting, and still aborts on failed requests', () => {
+    const set = designTargetThresholds({
+      shape: 'sustained-peak',
+      scenarioSet,
+      gating: true
+    })
+    const key = `http_req_duration{scenario:${SCENARIO},endpoint:ins-dashboard,phase:hold}`
+
+    expect(set[key]).toEqual(['p(95)<2000', 'p(99)<5000'])
+    expect(set[key].some((entry) => entry.abortOnFail)).toBe(false)
+    expect(set[`http_req_failed{scenario:${SCENARIO}}`][0].abortOnFail).toBe(
+      true
+    )
+  })
+
+  test('judges sustained-peak failures, checks and dropped iterations over the whole scenario', () => {
+    const set = designTargetThresholds({
+      shape: 'sustained-peak',
+      scenarioSet,
+      gating: true
+    })
+
+    expect(Object.keys(set)).toEqual(
+      expect.arrayContaining([
+        `http_req_failed{scenario:${SCENARIO}}`,
+        `checks{scenario:${SCENARIO}}`,
+        `dropped_iterations{scenario:${SCENARIO}}`
+      ])
+    )
+  })
+
+  test('gates the burst run on 5xx in the burst minute, checks and dropped iterations', () => {
+    const set = designTargetThresholds({
+      shape: 'p99-burst',
+      scenarioSet,
+      gating: true
+    })
+
+    expect(set[`server_errors{scenario:${SCENARIO},phase:burst}`]).toEqual([
+      'rate<0.01'
+    ])
+    expect(set[`checks{scenario:${SCENARIO}}`]).toEqual(['rate>0.99'])
+    expect(set[`dropped_iterations{scenario:${SCENARIO}}`]).toEqual(['count<1'])
+  })
+
+  test('only reports the burst run peak-phase response times, and never aborts', () => {
+    const set = designTargetThresholds({
+      shape: 'p99-burst',
+      scenarioSet,
+      gating: true
+    })
+    const key = `http_req_duration{scenario:${SCENARIO},endpoint:ins-dashboard,phase:peak}`
+
+    expect(set[key]).toEqual(['p(95)>=0'])
+
+    for (const limits of Object.values(set)) {
+      expect(limits.every((limit) => typeof limit === 'string')).toBe(true)
+    }
+  })
+
+  test.each(['sustained-peak', 'p99-burst'])(
+    'can never fail %s when it is not gating',
+    (shape) => {
+      const set = designTargetThresholds({
+        shape,
+        scenarioSet,
+        gating: false
+      })
+
+      for (const limits of Object.values(set)) {
+        expect(limits).toHaveLength(1)
+        expect(limits[0].endsWith('>=0')).toBe(true)
+      }
+    }
+  )
+})
+
+describe('designTargetReportThresholds', () => {
+  const set = designTargetReportThresholds({
+    scenarioSet: {
+      [SCENARIO]: { endpoints: ['animals-origin', 'animals-backend-list'] }
+    },
+    phases: ['peak', 'burst']
+  })
+
+  test('holds the run-wide frontend and sign-in keys for each phase', () => {
+    for (const phase of ['peak', 'burst']) {
+      expect(set).toHaveProperty([`page_requests{frontend:ins,phase:${phase}}`])
+      expect(set).toHaveProperty([
+        `page_requests{frontend:animals,phase:${phase}}`
+      ])
+      expect(set).toHaveProperty([
+        `page_requests{traffic_class:sign-in,phase:${phase}}`
+      ])
+    }
+  })
+
+  test('holds a key for each request kind the scenario makes', () => {
+    expect(set).toHaveProperty([
+      `http_req_duration{scenario:${SCENARIO},kind:page,phase:peak}`
+    ])
+    expect(set).toHaveProperty([
+      `http_req_duration{scenario:${SCENARIO},kind:api,phase:burst}`
+    ])
+  })
+
+  test('can never fail', () => {
+    for (const limits of Object.values(set)) {
+      expect(limits).toHaveLength(1)
+      expect(limits[0].endsWith('>=0')).toBe(true)
+    }
+  })
+})
+
+describe('INTERIM_TARGETS.burst', () => {
+  test('is c-004: 5xx under 1%, P95 within twice the peak, 10 samples to judge', () => {
+    expect(INTERIM_TARGETS.burst).toEqual({
+      maxServerErrorRate: 0.01,
+      p95FactorOverPeak: 2,
+      minSamples: 10
+    })
   })
 })

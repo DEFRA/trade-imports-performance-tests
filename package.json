@@ -19,12 +19,16 @@
     "test:docker-compose": "docker compose run --rm k6-workspace",
     "test:docker-compose:background-volume": "docker compose run --rm k6-workspace run --no-usage-report src/suites/background-volume.k6.js",
     "test:docker-compose:stub-ceilings": "docker compose run --rm k6-stub-ceilings",
+    "test:docker-compose:sustained-peak": "docker compose run --rm k6-design-target src/suites/sustained-peak.k6.js",
+    "test:docker-compose:p99-burst": "docker compose run --rm k6-design-target src/suites/p99-burst.k6.js",
     "k6:local": "docker compose run --rm k6-local",
     "k6:inspect": "docker compose run --rm k6-local inspect --include-system-env-vars --execution-requirements src/suites/smoke.k6.js",
     "k6:inspect:background-volume": "docker compose run --rm k6-local inspect --include-system-env-vars --execution-requirements src/suites/background-volume.k6.js",
     "k6:inspect:stub-ceilings": "docker compose run --rm k6-local inspect --include-system-env-vars --execution-requirements src/suites/breakpoint-stubs.k6.js",
+    "k6:inspect:sustained-peak": "docker compose run --rm k6-local inspect --include-system-env-vars --execution-requirements src/suites/sustained-peak.k6.js",
+    "k6:inspect:p99-burst": "docker compose run --rm k6-local inspect --include-system-env-vars --execution-requirements src/suites/p99-burst.k6.js",
     "k6:image": "docker compose up --build --exit-code-from development development",
-    "k6:down": "docker compose --profile local --profile workspace --profile stub-ceiling down"
+    "k6:down": "docker compose --profile local --profile workspace --profile stub-ceiling --profile design-target down"
   },
   "author": "Defra DDTS",
   "license": "OGL-UK-3.0",

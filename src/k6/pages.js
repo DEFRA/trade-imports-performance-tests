@@ -1,8 +1,8 @@
-import { sleep } from 'k6'
 import { Counter, Rate, Trend } from 'k6/metrics'
 
 import { TRAFFIC_CLASSES, isDashboardRead } from '../config/request-mix.js'
 import { thinkSeconds } from '../lib/traffic-shape.js'
+import { markPhase, pacedSleep } from './phase.js'
 
 const HTTP_OK = 200
 
@@ -20,9 +20,16 @@ const pathOf = (url) => url.replace(/^https?:\/\/[^/?#]+/, '').split(/[?#]/)[0]
  * Records a page request in the request mix, with no request and no wait.
  *
  * @param {string} trafficClass - A value of `TRAFFIC_CLASSES`.
+ * @param {string} [frontend] - The frontend the page is on, `ins`, `animals` or `plants`.
  */
-export const recordPage = (trafficClass) => {
-  pageRequests.add(1, { traffic_class: trafficClass })
+export const recordPage = (trafficClass, frontend) => {
+  markPhase()
+  pageRequests.add(
+    1,
+    frontend === undefined
+      ? { traffic_class: trafficClass }
+      : { traffic_class: trafficClass, frontend }
+  )
   dashboardReadShare.add(isDashboardRead(trafficClass))
 
   if (trafficClass === TRAFFIC_CLASSES.POST_SUBMISSION_READ) {
@@ -47,15 +54,20 @@ export const recordNotificationPages = (count) =>
  *
  * @param {string} notificationType - `live-animals`, or a high-risk plants commodity type.
  */
-export const recordNotificationStarted = (notificationType) =>
+export const recordNotificationStarted = (notificationType) => {
+  markPhase()
   notificationsStarted.add(1, { notification_type: notificationType })
+}
 
 /**
  * Records how long a user session lasted.
  *
  * @param {number} seconds - Wall-clock seconds, including think time.
  */
-export const recordSession = (seconds) => sessionSeconds.add(seconds)
+export const recordSession = (seconds) => {
+  markPhase()
+  sessionSeconds.add(seconds)
+}
 
 /**
  * Wraps a browser session so every page request is classified and followed by think time.
@@ -70,17 +82,24 @@ export const recordSession = (seconds) => sessionSeconds.add(seconds)
  * @param {number} options.thinkMean - The mean wait after a page, in seconds.
  * @param {string} options.trafficClass - The class page requests are recorded under.
  * @param {{ count: number }} [options.counter] - Counts the pages requested, shared across sessions.
+ * @param {string} [options.frontend] - The frontend the pages are on, ins, animals or plants.
  * @returns {object} The walker.
  */
-export const createWalker = ({ session, thinkMean, trafficClass, counter }) => {
+export const createWalker = ({
+  session,
+  thinkMean,
+  trafficClass,
+  counter,
+  frontend
+}) => {
   const settle = (page) => {
-    recordPage(trafficClass)
+    recordPage(trafficClass, frontend)
 
     if (counter) {
       counter.count += 1
     }
 
-    sleep(thinkSeconds(thinkMean, Math.random()))
+    pacedSleep(thinkSeconds(thinkMean, Math.random()))
 
     return page
   }
@@ -113,8 +132,14 @@ export const createWalker = ({ session, thinkMean, trafficClass, counter }) => {
     submit,
     upload,
     reach,
-    record: recordPage,
+    record: (nextClass) => recordPage(nextClass, frontend),
     withClass: (nextClass) =>
-      createWalker({ session, thinkMean, trafficClass: nextClass, counter })
+      createWalker({
+        session,
+        thinkMean,
+        trafficClass: nextClass,
+        counter,
+        frontend
+      })
   }
 }

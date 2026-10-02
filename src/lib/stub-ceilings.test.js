@@ -20,7 +20,6 @@ import {
   signInTargetLine,
   stepLine,
   stepVerdict,
-  thresholdLines,
   trustLine
 } from './stub-ceilings.js'
 
@@ -440,22 +439,6 @@ describe('signInTargetLine', () => {
     ).toBe(
       'Defra ID sign-in target (with IUU): did not carry (failed 4.10% of requests) 1540 sign-ins an hour plus a 5 a second spike for 10 seconds, failed 4.10%, checks 99.00%, p95 9ms, dropped 0'
     )
-  })
-})
-
-describe('thresholdLines', () => {
-  test('lists each threshold with its result', () => {
-    expect(
-      thresholdLines({
-        'checks{scenario:a}': {
-          thresholds: { 'rate>0.99': { ok: true }, 'rate>=0': { ok: false } }
-        },
-        iterations: { values: { count: 1 } }
-      })
-    ).toEqual([
-      'Threshold checks{scenario:a} rate>0.99: passed',
-      'Threshold checks{scenario:a} rate>=0: FAILED'
-    ])
   })
 })
 

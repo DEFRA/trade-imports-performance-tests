@@ -51,6 +51,31 @@ services:
       STUB_PROFILE: '${STUB_PROFILE:-zero-delay}'
       STUB_CEILINGS: '${STUB_CEILINGS:-}'
 
+  k6-design-target:
+    image: grafana/k6:2.3.0
+    profiles:
+      - design-target
+    user: root
+    working_dir: /opt/perftest
+    entrypoint: ['sh', 'scripts/run-suite.sh']
+    command: ['src/suites/sustained-peak.k6.js']
+    volumes:
+      - ./src:/opt/perftest/src:ro
+      - ./scripts:/opt/perftest/scripts:ro
+      - ./reports:/opt/perftest/reports
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    environment:
+      ENVIRONMENT: local
+      LOCALHOST_ALIAS: host.docker.internal
+      AUTH_PASSWORD: '${AUTH_PASSWORD:-Password123}'
+      TRAFFIC_MODEL: '${TRAFFIC_MODEL:-}'
+      STUB_PROFILE: '${STUB_PROFILE:-zero-delay}'
+      STUB_CEILINGS: '${STUB_CEILINGS:-}'
+      LOAD_PROFILE: '${LOAD_PROFILE:-}'
+      SCENARIO_LENGTH: '${SCENARIO_LENGTH:-}'
+      REPORTS_DIR: /opt/perftest/reports
+
   defra-id-stub-ceiling:
     image: defradigital/trade-imports-defra-id-stub:${TRADE_IMPORTS_DEFRA_ID_STUB:-latest}
     profiles:

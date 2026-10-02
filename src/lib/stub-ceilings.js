@@ -11,6 +11,7 @@ import { SLA_PROFILE, STUBBED_INTEGRATIONS } from '../config/stub-profiles.js'
 import { INTERIM_TARGETS } from '../config/thresholds.js'
 import { absoluteLocation } from './redirects.js'
 import { effectiveProfile } from './stub-profiles.js'
+import { thresholdLines } from './summary-text.js'
 
 const DEFRA_ID = 'defra-id'
 const HTTP_OK = 200
@@ -329,20 +330,6 @@ export const signInTargetLine = ({ label, perHour, verdict }) => {
 
   return `Defra ID sign-in target (${label}): ${outcome} ${perHour} sign-ins an hour plus a ${FRONT_DOOR_SPIKE_PER_SECOND} a second spike for ${SPIKE_SECONDS} seconds, ${figures}`
 }
-
-/**
- * Lists every threshold k6 evaluated, with its result.
- *
- * @param {Record<string, { thresholds?: Record<string, { ok: boolean }> }>} metrics - k6's summary metrics.
- * @returns {string[]} One line per threshold, in metric order.
- */
-export const thresholdLines = (metrics) =>
-  Object.entries(metrics).flatMap(([metric, { thresholds }]) =>
-    Object.entries(thresholds ?? {}).map(
-      ([expression, { ok }]) =>
-        `Threshold ${metric} ${expression}: ${ok ? 'passed' : 'FAILED'}`
-    )
-  )
 
 const profileOf = (setupData, integration) =>
   setupData?.profiles?.[integration] ?? { profile: SLA_PROFILE, fittedP95Ms: 0 }

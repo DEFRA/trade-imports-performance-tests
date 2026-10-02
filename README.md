@@ -11,6 +11,8 @@ CDP builds this repo into a Docker image. The CDP Portal runs the image, and the
 - [Background volume](#background-volume)
 - [Stub latency profiles](#stub-latency-profiles)
 - [Stub ceilings and headroom](#stub-ceilings-and-headroom)
+- [Design-target runs](#design-target-runs)
+- [Load generator](#load-generator)
 - [Traffic model](#traffic-model)
 - [Request mix](#request-mix)
 - [Thresholds](#thresholds)
@@ -19,17 +21,19 @@ CDP builds this repo into a Docker image. The CDP Portal runs the image, and the
 
 ## Layout
 
-| Path                 | What it holds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/suites/`        | One k6 script per suite, named `<suite>.k6.js`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `src/config/`        | Environment and service URLs, the endpoint catalogue, thresholds and smoke values, the traffic model (`traffic.js`), the journeys' endpoint names (`journey-endpoints.js`), the request-mix classes (`request-mix.js`) the stated facts the test data rests on (`test-data.js`) the background volume's targets, scenarios and index line (`background-volume.js`) and the stubbed integrations, their profiles, flags and conformance interval (`stub-profiles.js`), and the stub ceilings: recorded ceilings, ladders, the headroom factor and the sign-in targets (`stub-ceilings.js`) |
-| `src/lib/`           | Pure helpers with unit tests, shared by suites, with no k6 imports, including the stub profile lines and flags (`stub-profiles.js`) and the stub ceiling step verdicts, ceilings and headroom lines (`stub-ceilings.js`)                                                                                                                                                                                                                                                                                                                                                                  |
-| `src/k6/`            | k6-only modules: the browser-like session, the notification driver (`journeys.js`), the two journeys' steps (`live-animals.js`, `high-risk-plants.js`), the live-animals documents step (`documents.js`), the front door (`front-door.js`), shared step helpers (`journey-pages.js`), page requests and the request mix (`pages.js`), the readiness wait, the background volume's reads and address creation (`background-volume.js`), the stub profile reads and report (`stub-profiles.js`), and the stub calls, the Defra ID sign-in and the headroom report (`stub-ceilings.js`)      |
-| `entrypoint.sh`      | What the image runs: one suite, then the S3 upload                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `Dockerfile`         | The image CDP runs, based on `grafana/k6` with the AWS CLI added                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `compose.yml`        | Local runs: LocalStack for S3 and `target`, a stand-in service that has `/health`, and the `stub-ceiling` profile: its own Defra ID stub and the stub-ceiling runner                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `compose/`           | LocalStack set-up and the stand-in service's nginx config                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `.github/workflows/` | Pull request checks, and the CDP publish on merge to `main`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Path                 | What it holds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/suites/`        | One k6 script per suite, named `<suite>.k6.js`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `src/config/`        | Environment and service URLs, the endpoint catalogue, thresholds and smoke values, the traffic model (`traffic.js`), the journeys' endpoint names (`journey-endpoints.js`), the request-mix classes (`request-mix.js`) the stated facts the test data rests on (`test-data.js`) the background volume's targets, scenarios and index line (`background-volume.js`) and the stubbed integrations, their profiles, flags and conformance interval (`stub-profiles.js`), and the stub ceilings: recorded ceilings, ladders, the headroom factor and the sign-in targets (`stub-ceilings.js`), the design-target shapes, run lengths, load profiles, IUU scenarios and volumetrics targets (`design-target.js`) and the load generator's idle and memory allowances (`generator.js`) |
+| `src/lib/`           | Pure helpers with unit tests, shared by suites, with no k6 imports, including the stub profile lines and flags (`stub-profiles.js`), the stub ceiling step verdicts, ceilings and headroom lines (`stub-ceilings.js`), the phase clock (`phases.js`), the design-target report (`design-target-summary.js`), the generator verdict (`generator.js`) and the threshold lines (`summary-text.js`)                                                                                                                                                                                                                                                                                                                                                                                  |
+| `src/k6/`            | k6-only modules: the browser-like session, the notification driver (`journeys.js`), the two journeys' steps (`live-animals.js`, `high-risk-plants.js`), the live-animals documents step (`documents.js`), the front door (`front-door.js`), shared step helpers (`journey-pages.js`), page requests and the request mix (`pages.js`), the readiness wait, the background volume's reads and address creation (`background-volume.js`), the stub profile reads and report (`stub-profiles.js`), the stub calls, the Defra ID sign-in and the headroom report (`stub-ceilings.js`), the design-target run (`design-target.js`), the phase tag and paced waits (`phase.js`) and the 5xx rate (`server-errors.js`)                                                                   |
+| `src/generator/`     | The generator verdict run, a one-iteration k6 script that judges the sampler's file                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `scripts/`           | The run wrapper (`run-suite.sh`) and the generator sampler (`sample-generator.sh`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `entrypoint.sh`      | What the image runs: one suite through `scripts/run-suite.sh`, then the S3 upload                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `Dockerfile`         | The image CDP runs, based on `grafana/k6` with the AWS CLI added                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `compose.yml`        | Local runs: LocalStack for S3 and `target`, a stand-in service that has `/health`, the `stub-ceiling` profile: its own Defra ID stub and the stub-ceiling runner, and the `design-target` profile: the design-target runner                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `compose/`           | LocalStack set-up and the stand-in service's nginx config                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `.github/workflows/` | Pull request checks, and the CDP publish on merge to `main`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 Suites import shared modules with relative paths. k6 and Vitest both load them, so keep them free of Node-only and k6-only APIs. Pass k6's `__ENV` in rather than reading it inside the module.
 
@@ -82,7 +86,7 @@ The run waits for the stack to be functionally ready (up to 5 minutes). Ready no
 
 The journeys draw their answers from the pages, not from fixed values: origin, port of entry, transit country, document type, plants category, genus and potato place of landing are each picked at random from the options the page offers. High-risk plants builds notifications of 1 to 50 commodity lines of each of its three commodity types, and live animals uploads 0 to 3 documents, so the smoke run uploads one document through the real cdp-uploader container and waits for its scan. See [Test data](#test-data).
 
-The smoke profile starts 20 notifications an hour for each journey, one in the two-minute window and compresses a session to 1 minute, so the gate sees save and return, submit, read-back, amendment and cancel-amendment in about 2.5 minutes. The design-figure rates are in `src/config/traffic.js` and no suite runs them yet.
+The smoke profile starts 20 notifications an hour for each journey, one in the two-minute window and compresses a session to 1 minute, so the gate sees save and return, submit, read-back, amendment and cancel-amendment in about 2.5 minutes. The design-figure rates are in `src/config/traffic.js`. The [design-target runs](#design-target-runs) drive them.
 
 It reaches the stack through `host.docker.internal` and sets `ENVIRONMENT=local`, so it can never reach a CDP environment. It prints k6's summary and uploads nothing. It exits with k6's exit code, so a breached threshold exits with code 99.
 
@@ -114,15 +118,23 @@ The image reads these environment variables:
 | `STUB_CEILING_GROUPS`    | you, optionally | The groups the stub-ceiling suite runs, a comma list of `trade-token`, `mdm`, `defra-id-target` and `defra-id`. Unset runs all of them                                                                                         |
 | `STUB_CEILING_MODEL`     | you, optionally | JSON laid over the stub-ceiling suite's ladders and step settings — see Stub ceilings and headroom                                                                                                                             |
 | `STUB_CEILINGS`          | you, optionally | JSON laid over the ceilings recorded for the run's environment, by integration then profile — see Stub ceilings and headroom                                                                                                   |
+| `LOAD_PROFILE`           | you, optionally | `two-journeys` or `with-iuu`, for the design-target suites. Unset is `two-journeys` — see Design-target runs                                                                                                                   |
+| `SCENARIO_LENGTH`        | you, optionally | `full`, `nightly` or `local`, for the design-target suites. Unset follows the environment — see Design-target runs                                                                                                             |
+| `REPORTS_DIR`            | image           | Where the run writes its files. The image sets it to `/opt/perftest/reports`                                                                                                                                                   |
 
 Without an override, a service's URL is `https://<service-name>.<ENVIRONMENT>.cdp-int.defra.cloud`. When `ENVIRONMENT` is `local`, it is the workspace Docker stack's host port for the service, on `localhost` or on `LOCALHOST_ALIAS` when that is set.
 
-The image writes 2 files and copies them to `RESULTS_OUTPUT_S3_PATH`:
+The image writes these files and copies them to `RESULTS_OUTPUT_S3_PATH`:
 
-- `index.html` — the k6 web dashboard report, which the Portal shows
+- `index.html` — the k6 web dashboard report, which the Portal shows, at one-second resolution
 - `summary.json` — k6's end-of-test summary
+- `timeseries.json.gz` — every sample with its timestamp and tags, so a 10-second spike is visible
+- `generator-samples.txt` and `generator.json` — the load generator's CPU and memory, and its verdict (see [Load generator](#load-generator))
+- for design-target suites, `design-target.json` and `design-target.html` — the run's report per scenario and per endpoint, and `relative-thresholds-failed.txt` when the relative burst rule fails
 
-The image exits with k6's exit code, so a failed threshold (code 99) fails the run. The report is still published first. The image exits with code 1 if `RESULTS_OUTPUT_S3_PATH` is not set, the suite does not exist, the report was not written or the upload failed.
+`timeseries.json.gz` is written for every suite run through the image, smoke included. A long run makes a large file.
+
+The image exits with k6's exit code, so a failed threshold (code 99) fails the run. It also exits 99 when a design-target run's relative threshold fails. The report is still published first. The image exits with code 1 if `RESULTS_OUTPUT_S3_PATH` is not set, the suite does not exist, the report was not written or the upload failed.
 
 ### Smoke run in CDP dev and test
 
@@ -297,6 +309,111 @@ Run trust: untrusted: defra-id carried load not reported; mdm no headroom; mdm s
 
 The verdict is reported, never gated: it does not fail the run. The stub-ceiling suite itself logs `Run trust: not judged`, because it measures the stubs' own ceilings.
 
+## Design-target runs
+
+Two suites drive live animals, high-risk plants and the INS front door at the rates the volumetrics page sets: `sustained-peak` and `p99-burst`. Each is a few lines that call `createDesignTargetRun` in `src/k6/design-target.js`. The shapes, rates, phases and thresholds are configuration in `src/config/design-target.js` and `src/config/traffic.js`, so an agreed revision changes values, not scripts (c-006). The names follow DR-EUDP-005's scenario names.
+
+Each traffic scenario is one `ramping-arrival-rate` scenario, per hour, tagged `journey` (`live-animals`, `high-risk-plants`, `ins-front-door` or `iuu-synthetic`). The virtual users come from Little's law with twice as many as the ceiling, as in the smoke run. The scenarios are `live-animals`, `high-risk-plants`, `ins-front-door` (dashboard-only sessions) and `ins-address-book`.
+
+### Shapes and lengths
+
+`SCENARIO_LENGTH` is laid over the traffic model's defaults. Unset, it follows the environment: `local` gives `local`, `test` gives `nightly` (c-003's default), and any other environment gives `full`. `SCENARIO_LENGTH=local` outside `local` is refused. `TRAFFIC_MODEL` still overrides any single value, for example `{"sustainedPeak":{"holdDuration":"4h"}}`.
+
+| Length    | Sustained peak                           | P99 burst                    | Sessions                                                               |
+| --------- | ---------------------------------------- | ---------------------------- | ---------------------------------------------------------------------- |
+| `full`    | ramp 3h, then hold 7h (the DR's figures) | warm-up, 30m peak, 60s burst | as the traffic model                                                   |
+| `nightly` | ramp 1h, then hold 2h                    | unchanged                    | as the traffic model                                                   |
+| `local`   | ramp 2m, then hold 6m                    | warm-up, 4m peak, 60s burst  | 2 minutes (journeys and IUU) and 0.5 minutes (dashboard-only sessions) |
+
+The nightly ramp is 1 hour, not shorter, so the longest iteration (50 minutes) has finished once before the hold starts. At `local` length the page and arrival rates stay at the design figures, because page rate is notifications times pages and does not depend on session length. Concurrency is lower.
+
+Phases, tagged on every metric a journey emits as `phase`:
+
+- sustained peak: `ramp`, `hold`, `tail`. Response times are judged in the hold
+- P99 burst: `warm-up` (as long as the longest iteration, 50 minutes at full length, so the 30 minutes judged as peak are at steady state), `peak`, `burst`, `tail`
+
+### How the burst works
+
+An arrival rate alone cannot make a one-minute burst: at 44 notifications an hour, 1.5 times the rate for 60 seconds starts about one extra notification. So the arrival rate steps to 1.5 times for the 60 seconds, and in the `burst` phase every user also moves 1.5 times faster through their think time (`pacedSleep` in `src/k6/phase.js`). A wait that straddles the start of the burst is exact: a 30-second wait that starts 10 seconds before the burst lasts 10 + 20 / 1.5 = 23.3 seconds. The journey is the same pages in the same order. Outside a design-target run `pacedSleep` is `sleep`.
+
+### Pass rules
+
+c-004's default, with each threshold tied to a figure:
+
+- sustained peak: the response-time limits in Thresholds, per scenario and endpoint, in the `hold` phase. Failed requests under 1%, checks over 99% and no dropped iteration over the whole scenario, so a failure in the ramp still fails the run
+- P99 burst: 5xx under 1% in the burst minute (`server_errors{scenario,phase:burst}`), checks over 99% and no dropped iteration over the whole run, and the relative rule below. The peak-phase response times are reported, not gated
+
+The relative rule: P95 in the burst minute is no worse than twice the sustained-peak P95. k6 cannot compare two of its own metrics in a threshold, so `handleSummary` works it out for each scenario and request kind (`page`, `api`, `upload`). A pair with fewer than 10 requests in the burst minute (interim) is `not judged`. In the two-journey profile an over pair is written to `relative-thresholds-failed.txt`, and `scripts/run-suite.sh` exits 99 when k6 itself exited 0 and that file exists. The report has already been written by then. In the with-IUU profile the verdict prints as `reported, not gated`.
+
+### With IUU
+
+`LOAD_PROFILE=with-iuu` adds the with-IUU figures as a second profile: 770 sign-ins an hour, 1.5 RPS, 241 concurrent users and a 2.2 RPS burst. It is a separate run, so the gating thresholds never measure with-IUU load (c-007's default). Every threshold in it is reporting-only, so it never fails. Unset is `two-journeys`, the only gating run. IUU's load is generated as INS front-door traffic only, since no IUU journey exists here:
+
+- `iuu-journey-sessions`: 344 sessions an hour. Each signs in, opens the dashboard, then makes 4 more status checks across a 30-minute session
+- `iuu-front-door`: 229 dashboard-only sessions an hour
+- `iuu-address-book`: 57 address-book sessions an hour
+
+That is about 850 sign-ins an hour, 1.72 RPS and 252 concurrent users, each just above its target. Make it the gate when open item 7 puts IUU in Day One.
+
+### What a local run is
+
+A run in `local` is a script check, never a measurement, and `setup()` logs `Local run: a script check, not a measurement at design conditions`. Outside `local` the suites require the `sla` stub profile in code, and `STUB_PROFILE=zero-delay` is refused. In `local` the run requires what `STUB_PROFILE` says, and Compose defaults it to `zero-delay`. Outside `local` the suites also call `requireBackgroundVolume`. In `local` they report the volume and do not require it, because the workspace stack holds far fewer than 42,000 and 34,000 notifications.
+
+### Achieved against target
+
+Each run prints what it achieved over the steady phase (`hold`, or `peak` for the burst run) against the volumetrics figures. These are reported lines, never thresholds, because the rates are the run's input: whether INS kept up shows in the response-time, failure, check and dropped-iteration thresholds.
+
+```text
+Achieved live-animals over the hold (2h): 43.5 notifications an hour against 44, frontend 0.48 RPS against 0.5, backend 0.48 RPS against 0.5 (derived: 1 backend call a page), 21.6 concurrent users against 22 (NFR-VOL-AG-01 to AG-04)
+Achieved burst (60s at 1.5x): animals frontend 0.73 RPS against 0.7, plants 0.75 against 0.7, INS 0.66 against 0.6
+```
+
+The front door line gives sign-ins an hour, INS core RPS and concurrent users, labelled `(two journeys)` or `(with IUU)`. Concurrent users are the sum of `session_seconds` over the phase's length, which is the time-averaged number of signed-in sessions. The backend line is the frontend's RPS times one backend call a page (T8), not a measured rate: k6 sees only its own requests, so the backends' own rate arrives with inc-014. The run also prints the dashboard-read share against D7, every relative burst verdict, and each endpoint against its limits.
+
+### Report files
+
+| File                                          | What it holds                                                                         |
+| --------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `index.html`                                  | The k6 web dashboard, one-second period                                               |
+| `summary.json`                                | k6's end-of-test summary as JSON                                                      |
+| `timeseries.json.gz`                          | Every sample with its timestamp and tags                                              |
+| `design-target.json` and `design-target.html` | The run's report per scenario and per endpoint, tagged by journey, page and call kind |
+| `generator-samples.txt` and `generator.json`  | The load generator's samples and verdict                                              |
+| `relative-thresholds-failed.txt`              | The relative pairs that were over, only when the rule fails                           |
+
+### Run it locally
+
+```bash
+npm run test:docker-compose:sustained-peak
+npm run test:docker-compose:p99-burst
+LOAD_PROFILE=with-iuu npm run test:docker-compose:sustained-peak
+npm run k6:down
+```
+
+The workspace stack must be running (see above). Files land in `./reports`. Each local run takes about 12 to 13 minutes.
+
+### Nightly in CDP test
+
+Sustained peak (compressed to 2 hours, `nightly` length) and P99 burst run nightly in CDP `test`. A person sets this in the CDP Portal, on the `trade-imports-performance-tests` test suite page, as two schedules in environment `test`: `TEST_SUITE=sustained-peak` and `TEST_SUITE=p99-burst`. They must not overlap. `test` defaults to nightly length and the code requires `sla`, so no other variable is needed. It is Portal configuration, the same kind as the automatic test run above. With-IUU runs (`LOAD_PROFILE=with-iuu`) are on demand until IUU's Day One status is known.
+
+## Load generator
+
+The load generator must never be the bottleneck, so each run measures it. A run where it was is marked untrusted.
+
+- **Sampler.** `scripts/sample-generator.sh` runs beside k6 and every 5 seconds appends k6's CPU and memory, the machine's CPU, and its cores, CPU quota and memory limit. k6 cannot read these from JavaScript
+- **Judge.** `src/generator/generator-verdict.k6.js` is a second, one-iteration k6 run that reads `generator-samples.txt` and `summary.json`, prints the verdict and writes `generator.json`. The logic is pure and tested in `src/lib/generator.js`
+- **CPU rule.** At least 20% idle over any 60 seconds, ignoring the first 60 seconds (virtual-user initialisation). With a CPU quota the idle share is 1 minus k6's CPU over the quota's capacity. Without one it is 1 minus the machine's busy share. Source: the k6 docs, running large tests, "at least 20% idle cycles". Locally the machine is the whole Docker VM, shared with the stack, which is pessimistic and suits a script check
+- **Memory rule.** Peak k6 memory no more than a 128 MB base plus 20 MB a virtual user, times the run's `vus_max`. The k6 docs give "~1-5MB per VU" for simple tests and "tens of megabytes per VU" for tests that upload files, and live animals uploads up to 5 MB. Both figures are interim, held in `src/config/generator.js`
+
+```text
+Generator: CPU idle at least 41% over any minute (mean 63%) on 2 cores (quota 2); memory peaked at 412MB for 40 virtual users, 10.3MB each, against an allowance of 928MB
+Generator trust: trusted: the load generator was not the bottleneck
+```
+
+`Generator trust` is `trusted`, `untrusted: <reasons>` or `not judged: <what is missing>`. It is reported, never gated, like `Run trust`. A run is trusted only when both say trusted.
+
+**Shared test data.** The suites load no test-data files. Every value is drawn from the traffic model's distributions or from the options a page offers, so there is no read-only data set to share. A suite that adds one loads it in its init context through `SharedArray` from `k6/data`, so it is held once for all virtual users. The lint rule already stops modules under `src/k6/` calling `open()`. The generator's measured memory per virtual user is what proves the allowance is kept.
+
 ## Traffic model
 
 The load is a model, held as values in `src/config/traffic.js` and never fixed in the scripts. Every figure is a working figure from the INS volumetrics page and is still to be confirmed, so a revised figure changes a value, not a script.
@@ -326,6 +443,14 @@ The load is a model, held as values in `src/config/traffic.js` and never fixed i
 | `frontDoor.dashboardOnlySessionMinutes`          | 5        | C3                                                    | 0.25  |
 | `frontDoor.pagesPerDashboardOnlySession`         | 8        | C4                                                    | 8     |
 | `frontDoor.addressBookSessionsPerNotification`   | 0.25     | interim, no volumetrics figure                        | 0.25  |
+| `iuu.notificationsPerHour`                       | 229      | section 8.2 peak hour 114.3 x A3 (2), rounded up      | same  |
+| `iuu.sessionsPerNotification`                    | 1.5      | IUU3                                                  | same  |
+| `iuu.sessionMinutes`                             | 30       | IUU2                                                  | same  |
+| `sustainedPeak.rampDuration`                     | `3h`     | DR-EUDP-005 scenario shapes, row 1                    | same  |
+| `sustainedPeak.holdDuration`                     | `7h`     | DR-EUDP-005 scenario shapes, row 1                    | same  |
+| `p99Burst.peakDuration`                          | `30m`    | DR-EUDP-005 scenario shapes, row 2                    | same  |
+| `p99Burst.burstDuration`                         | `60s`    | DR-EUDP-005 scenario shapes, row 2                    | same  |
+| `p99Burst.burstFactor`                           | 1.5      | T5                                                    | same  |
 | `mix.dashboardReadShareTarget`                   | 0.25     | D7                                                    | 0.25  |
 | `backgroundVolume.liveAnimalsNotifications`      | 42000    | section 6.1, vol-130                                  | same  |
 | `backgroundVolume.highRiskPlantsNotifications`   | 34000    | section 7.1, vol-144                                  | same  |
@@ -368,7 +493,8 @@ Every page request is recorded under one traffic class: `sign-in`, `dashboard-re
 | Metric                   | What it shows                                                                                                                                                                                                                   |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `dashboard_read_share`   | The share of page requests that are dashboard reads, printed in k6's end-of-test summary                                                                                                                                        |
-| `page_requests`          | Page requests, tagged by `traffic_class`                                                                                                                                                                                        |
+| `page_requests`          | Page requests, tagged by `traffic_class` and `frontend` (`ins`, `animals` or `plants`)                                                                                                                                          |
+| `server_errors`          | The share of responses with a 5xx status. `http_req_failed` also counts 4xx                                                                                                                                                     |
 | `post_submission_reads`  | Reads after submit                                                                                                                                                                                                              |
 | `amendment_pages`        | Pages requested while amending                                                                                                                                                                                                  |
 | `pages_per_notification` | Journey pages one notification took, by scenario                                                                                                                                                                                |
@@ -383,6 +509,8 @@ Every page request is recorded under one traffic class: `sign-in`, `dashboard-re
 | `stub_ceiling`           | The recorded ceiling the load was judged against, tagged by `integration`                                                                                                                                                       |
 | `stub_headroom`          | 1 when the stub had headroom over the load it carried, 0 when it did not or when the integration carried no load and so was not judged (the summary's per-integration headroom line says 'not judged'), tagged by `integration` |
 | `run_trusted`            | 1 when every stub the run went through had headroom, 0 when the run is untrusted                                                                                                                                                |
+
+In a design-target run every journey metric also carries a `phase` tag.
 
 `setup()` logs the target, `Request mix target: dashboard reads 25% of page requests (D7)`, so the achieved share sits beside it. The mix is reported, not gated: the share comes from the pages the frontends need, and a threshold on it would be run-wide, while every threshold here is scoped to a scenario, and response times to an endpoint as well.
 
@@ -402,6 +530,8 @@ Thresholds live in `src/config/thresholds.js`. The interim values come from the 
 
 Every threshold is scoped to its scenario, and response times are also scoped to an endpoint tag from the catalogue in `src/config/endpoints.js`. Scoping to the scenario keeps the readiness wait in `setup()` out of the measurement. A breached response-time, failed-request or check threshold aborts the run, after a 30 second evaluation delay. Dropped iterations are judged at the end of the run: they do not abort it, but they fail it. So is the document scan: a slow scan fails the run rather than cutting it short. The `notifications_started` thresholds (`count>=0`) are reporting-only and can never fail: they exist so the summary prints the split by notification type. The `background_volume` thresholds (`value>=0`) are reporting-only in the same way: they print each datastore's background volume. The `stub_profile`, `stub_profile_flagged` and `stub_latency` thresholds (`value>=0`) are reporting-only too: they print each stubbed integration's profile, flags and latency. The stub-ceiling suite gates only on the two-journey Defra ID sign-in target, and every other threshold it declares is reporting-only. The `stub_load`, `stub_ceiling`, `stub_headroom` and `run_trusted` thresholds (`value>=0`) are reporting-only too. The background-volume run gates on failed requests, checks and dropped iterations only, never on response times.
 
+The design-target runs follow [Design-target runs](#design-target-runs). Sustained peak scopes response times to the `hold` phase, with the limits above, judged at the end of the run and never aborting (k6 counts the abort delay from the start of the test, so a hold that starts hours in would be judged on its first few samples), and scopes failed requests, checks and dropped iterations to the whole scenario. The burst run gates on 5xx under 1% in the burst minute (no abort), checks over 99% and no dropped iteration, and on the relative burst rule: P95 in the burst minute no worse than twice the peak phase's P95, worked out in `handleSummary` and failing the run with exit code 99. The with-IUU profile's thresholds are all reporting-only. Their per-phase `page_requests`, `session_seconds` and similar keys are reporting-only too, so k6 keeps their figures for the report.
+
 ## Add a suite
 
 1. Add `src/suites/<suite>.k6.js`. Name it after the test type and what it covers, for example `load-notification-submit.k6.js`.
@@ -409,9 +539,10 @@ Every threshold is scoped to its scenario, and response times are also scoped to
 3. Give each scenario its thresholds with `scenarioThresholds` in `src/config/thresholds.js`. Tag requests with an endpoint from the catalogue in `src/config/endpoints.js`, which also sets the `name` tag. Follow the workspace's k6 best practices.
 4. Put any logic worth testing in `src/config/` (or a new folder under `src/`) with a `*.test.js` beside it.
 5. A suite that measures load reports the background volume and calls `requireBackgroundVolume` in `setup()` (both in `src/k6/background-volume.js`), so it never measures an empty environment.
-6. Every suite reports the stub profiles at the start and the end of a run (`readStubProfiles` and `reportStubProfiles` in `src/k6/stub-profiles.js`). A design-target, breakpoint or resilience suite that measures INS also calls `requireStubProfiles(stubProfiles, SLA_PROFILE)` in `setup()`, in code, whatever `STUB_PROFILE` says, so it never measures against stubs that answer at once. In `setup()`, straight after the start `reportStubProfiles` call (and after `requireStubProfiles` where the suite has one), call `clearStubAnswered({ urls })`, so the end-of-run answered figures cover only this run. A suite that measures INS also takes `Date.now()` straight after that clear, returns it from `setup()` as `stubLoadSince`, and calls `reportStubHeadroom` in `teardown()` with it (`src/k6/stub-ceilings.js`), so the run reports each stub's headroom and whether it can be trusted.
+6. Every suite reports the stub profiles at the start and the end of a run (`readStubProfiles` and `reportStubProfiles` in `src/k6/stub-profiles.js`). A design-target, breakpoint or resilience suite that measures INS also calls `requireStubProfiles(stubProfiles, SLA_PROFILE)` in `setup()`, in code, whatever `STUB_PROFILE` says, except in `local`, where a run is a script check, so it never measures against stubs that answer at once. In `setup()`, straight after the start `reportStubProfiles` call (and after `requireStubProfiles` where the suite has one), call `clearStubAnswered({ urls })`, so the end-of-run answered figures cover only this run. A suite that measures INS also takes `Date.now()` straight after that clear, returns it from `setup()` as `stubLoadSince`, and calls `reportStubHeadroom` in `teardown()` with it (`src/k6/stub-ceilings.js`), so the run reports each stub's headroom and whether it can be trusted.
 7. Run it with `npm run k6:local -- run --no-usage-report src/suites/<suite>.k6.js`.
-8. To make CDP run it by default in an environment, change `default_suite` in `entrypoint.sh`. Otherwise set `TEST_SUITE` to `<suite>` on the run.
+8. A design-target shape is added to `src/config/design-target.js` and gets a two-line suite: import `createDesignTargetRun` and re-export what it returns.
+9. To make CDP run it by default in an environment, change `default_suite` in `entrypoint.sh`. Otherwise set `TEST_SUITE` to `<suite>` on the run.
 
 ## Licence
 

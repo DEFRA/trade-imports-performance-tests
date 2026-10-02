@@ -7,13 +7,18 @@ import {
   TRAFFIC_DEFAULTS,
   amendmentPlan,
   arrivalScenarios,
+  durationSeconds,
+  durationText,
   frontDoorThinkSecondsMean,
+  gracefulStopFor,
   isChosen,
   iterationSeconds,
+  iuuThinkSecondsMean,
   resolveTrafficModel,
   scenarioRates,
   sessionsFor,
-  thinkSecondsMean
+  thinkSecondsMean,
+  virtualUsersFor
 } from './traffic.js'
 
 const MAX_SMOKE_VUS = 5
@@ -50,7 +55,15 @@ describe('TRAFFIC_DEFAULTS', () => {
     ['backgroundVolume.virtualUsers', 10],
     ['backgroundVolume.maxDuration', '24h'],
     ['liveAnimals.documentKilobytes.min', 100],
-    ['liveAnimals.documentKilobytes.max', 5000]
+    ['liveAnimals.documentKilobytes.max', 5000],
+    ['iuu.notificationsPerHour', 229],
+    ['iuu.sessionsPerNotification', 1.5],
+    ['iuu.sessionMinutes', 30],
+    ['sustainedPeak.rampDuration', '3h'],
+    ['sustainedPeak.holdDuration', '7h'],
+    ['p99Burst.peakDuration', '30m'],
+    ['p99Burst.burstDuration', '60s'],
+    ['p99Burst.burstFactor', 1.5]
   ])('%s is %s', (path, expected) => {
     expect(pathOf(TRAFFIC_DEFAULTS, path)).toBe(expected)
   })
@@ -303,9 +316,35 @@ describe('resolveTrafficModel', () => {
     [
       '{"duration":"soon"}',
       'Traffic model value "duration" must be a duration such as 2m'
+    ],
+    [
+      '{"p99Burst":{"burstDuration":"1 minute"}}',
+      'Traffic model value "p99Burst.burstDuration" must be a duration such as 2m'
+    ],
+    [
+      '{"iuu":{"notificationsPerHour":228.6}}',
+      'Traffic model value "iuu.notificationsPerHour" must be a whole number'
     ]
   ])('rejects %s', (text, message) => {
     expect(() => resolveTrafficModel({ TRAFFIC_MODEL: text })).toThrow(message)
+  })
+
+  test.each(['0s', '1s'])('rejects a burst duration of %s', (duration) => {
+    expect(() =>
+      resolveTrafficModel({
+        TRAFFIC_MODEL: JSON.stringify({ p99Burst: { burstDuration: duration } })
+      })
+    ).toThrow(
+      `TRAFFIC_MODEL p99Burst.burstDuration must be at least 2s, got '${duration}'`
+    )
+  })
+
+  test('accepts a burst duration of 2s', () => {
+    expect(
+      resolveTrafficModel({
+        TRAFFIC_MODEL: '{"p99Burst":{"burstDuration":"2s"}}'
+      }).p99Burst.burstDuration
+    ).toBe('2s')
   })
 
   test('accepts a share of 0', () => {
@@ -436,7 +475,10 @@ describe('scenarioRates', () => {
       'live-animals': 44,
       'high-risk-plants': 36,
       'ins-front-door': 80,
-      'ins-address-book': 20
+      'ins-address-book': 20,
+      'iuu-journey-sessions': 344,
+      'iuu-front-door': 229,
+      'iuu-address-book': 57
     })
   })
 
@@ -457,6 +499,52 @@ describe('iterationSeconds', () => {
     expect(seconds['live-animals']).toBe(2 * 20 * SECONDS_PER_MINUTE)
     expect(seconds['high-risk-plants']).toBe(2 * 25 * SECONDS_PER_MINUTE)
     expect(seconds['ins-front-door']).toBe(5 * SECONDS_PER_MINUTE)
+    expect(seconds['iuu-journey-sessions']).toBe(1800)
+  })
+})
+
+describe('durationSeconds', () => {
+  test.each([
+    ['60s', 60],
+    ['2m', 120],
+    ['3h', 10_800]
+  ])('reads %s as %s seconds', (duration, seconds) => {
+    expect(durationSeconds(duration)).toBe(seconds)
+  })
+
+  test('throws for a value that is not a duration', () => {
+    expect(() => durationSeconds('soon')).toThrow(
+      '"soon" is not a duration such as 2m'
+    )
+  })
+})
+
+describe('durationText', () => {
+  test.each([
+    [7200, '2h'],
+    [1800, '30m'],
+    [90, '90s']
+  ])('writes %d seconds as %s', (seconds, text) => {
+    expect(durationText(seconds)).toBe(text)
+  })
+})
+
+describe('iuuThinkSecondsMean', () => {
+  test('spreads the IUU session over its status checks, the sign-in having no wait', () => {
+    expect(iuuThinkSecondsMean(resolveTrafficModel({}))).toBe(360)
+  })
+})
+
+describe('virtualUsersFor and gracefulStopFor', () => {
+  test('sizes the users from the rate and the longest iteration', () => {
+    expect(virtualUsersFor(44, 2400)).toEqual({
+      preAllocatedVUs: 30,
+      maxVUs: 60
+    })
+  })
+
+  test('allows twice the longest iteration to finish', () => {
+    expect(gracefulStopFor(2400)).toBe('4800s')
   })
 })
 

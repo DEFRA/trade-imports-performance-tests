@@ -10,6 +10,8 @@ import {
   isStaleActionRedirect,
   originOf
 } from '../lib/redirects.js'
+import { markPhase } from './phase.js'
+import { recordServerError } from './server-errors.js'
 
 const FORM_ENCODED = 'application/x-www-form-urlencoded'
 const HTTP_OK = 200
@@ -18,6 +20,12 @@ const HTTP_REDIRECT_MAX = 399
 
 const isRedirect = (status) =>
   status >= HTTP_REDIRECT_MIN && status <= HTTP_REDIRECT_MAX
+
+const recorded = (response) => {
+  recordServerError(response)
+
+  return response
+}
 
 const hiddenFieldsOf = (form) =>
   Object.fromEntries(
@@ -143,18 +151,24 @@ export const createBrowserSession = ({
 }) => {
   let signedIn = false
 
-  const paramsFor = (endpoint, headers = {}) => ({
-    jar,
-    redirects: 0,
-    headers,
-    tags: { endpoint, kind: kindOf(endpoint), name: endpoint, ...extraTags }
-  })
+  const paramsFor = (endpoint, headers = {}) => {
+    markPhase()
+
+    return {
+      jar,
+      redirects: 0,
+      headers,
+      tags: { endpoint, kind: kindOf(endpoint), name: endpoint, ...extraTags }
+    }
+  }
 
   const postForm = (url, fields, endpoint) =>
-    http.post(
-      url,
-      encodeForm(fields),
-      paramsFor(endpoint, { 'content-type': FORM_ENCODED })
+    recorded(
+      http.post(
+        url,
+        encodeForm(fields),
+        paramsFor(endpoint, { 'content-type': FORM_ENCODED })
+      )
     )
 
   const follow = (first, firstUrl, endpoint) => {
@@ -172,7 +186,9 @@ export const createBrowserSession = ({
       }
 
       url = absoluteLocation(url, location, localhostAlias)
-      response = http.get(url, paramsFor(endpointForHop(url, endpoint)))
+      response = recorded(
+        http.get(url, paramsFor(endpointForHop(url, endpoint)))
+      )
       hops += 1
 
       if (response.status === HTTP_OK && isIdentitySignInPage(url)) {
@@ -190,7 +206,7 @@ export const createBrowserSession = ({
   const open = (path, endpoint) => {
     const url = `${baseUrl}${path}`
 
-    return follow(http.get(url, paramsFor(endpoint)), url, endpoint)
+    return follow(recorded(http.get(url, paramsFor(endpoint))), url, endpoint)
   }
 
   const post = (path, fields, endpoint) => {
@@ -217,16 +233,18 @@ export const createBrowserSession = ({
     )
 
     return follow(
-      http.post(url, { ...fields, file }, paramsFor(endpoint)),
+      recorded(http.post(url, { ...fields, file }, paramsFor(endpoint))),
       url,
       endpoint
     )
   }
 
   const getJson = (path, endpoint) => {
-    const response = http.get(
-      `${baseUrl}${path}`,
-      paramsFor(endpoint, { accept: 'application/json' })
+    const response = recorded(
+      http.get(
+        `${baseUrl}${path}`,
+        paramsFor(endpoint, { accept: 'application/json' })
+      )
     )
 
     if (response.status !== HTTP_OK) {
