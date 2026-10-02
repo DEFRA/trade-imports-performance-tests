@@ -3,7 +3,13 @@ const ORIGIN = /^https?:\/\/[^/?#]+/
 const LOCALHOST_HOST = /^(https?:\/\/)localhost(?=[:/?#]|$)/
 const STALE_ACTION = /[?&]staleAction=1(&|#|$)/
 
-const pathOf = (url) => url.replace(ORIGIN, '').split(/[?#]/)[0]
+/**
+ * Reads the path of an absolute URL, without its query or fragment.
+ *
+ * @param {string} url - An absolute `http` or `https` URL.
+ * @returns {string} For example `/live-animals`.
+ */
+export const pathOf = (url) => url.replace(ORIGIN, '').split(/[?#]/)[0]
 
 /**
  * Reads the scheme, host and port of an absolute URL.

@@ -15,6 +15,7 @@ import {
   iterationSeconds,
   iuuThinkSecondsMean,
   resolveTrafficModel,
+  scenarioPagesPerHour,
   scenarioRates,
   sessionsFor,
   thinkSecondsMean,
@@ -66,7 +67,21 @@ describe('TRAFFIC_DEFAULTS', () => {
     ['p99Burst.burstFactor', 1.5],
     ['averageLoad.hourDuration', '1h'],
     ['averageLoad.seasonalPeakFactor', 2],
-    ['averageLoad.designHeadroom', 2]
+    ['averageLoad.designHeadroom', 2],
+    ['spikeRecovery.baselineDuration', '5m'],
+    ['spikeRecovery.spikeDuration', '10s'],
+    ['spikeRecovery.recoveryDuration', '60s'],
+    ['spikeRecovery.recoveredDuration', '2m'],
+    ['spikeRecovery.capacityRps.ins', 5],
+    ['spikeRecovery.capacityRps.animals', 5],
+    ['spikeRecovery.capacityRps.plants', 5],
+    ['spikeRecovery.capacityRps.iuu', 15],
+    ['endurance.holdDuration', '8h'],
+    ['endurance.comparisonWindow', '1h'],
+    ['endurance.sessionExpiry', 'frontend'],
+    ['endurance.sessionLifetime', '4h'],
+    ['endurance.visitInterval', '10m'],
+    ['endurance.returningUsersPerFrontend', 1]
   ])('%s is %s', (path, expected) => {
     expect(pathOf(TRAFFIC_DEFAULTS, path)).toBe(expected)
   })
@@ -341,6 +356,46 @@ describe('resolveTrafficModel', () => {
     expect(() => resolveTrafficModel({ TRAFFIC_MODEL: text })).toThrow(message)
   })
 
+  test('rejects a spike shorter than two seconds', () => {
+    expect(() =>
+      resolveTrafficModel({
+        TRAFFIC_MODEL: '{"spikeRecovery":{"spikeDuration":"1s"}}'
+      })
+    ).toThrow(
+      "TRAFFIC_MODEL spikeRecovery.spikeDuration must be at least 2s, got '1s'"
+    )
+  })
+
+  test('rejects comparison windows that overlap', () => {
+    expect(() =>
+      resolveTrafficModel({
+        TRAFFIC_MODEL: '{"endurance":{"comparisonWindow":"5h"}}'
+      })
+    ).toThrow(
+      "TRAFFIC_MODEL endurance.comparisonWindow must be at most half of endurance.holdDuration, got '5h' and '8h'"
+    )
+  })
+
+  test('rejects a session expiry that is neither frontend nor client', () => {
+    expect(() =>
+      resolveTrafficModel({
+        TRAFFIC_MODEL: '{"endurance":{"sessionExpiry":"never"}}'
+      })
+    ).toThrow(
+      'Traffic model value "endurance.sessionExpiry" must be one of frontend, client'
+    )
+  })
+
+  test('rejects a fractional number of returning users', () => {
+    expect(() =>
+      resolveTrafficModel({
+        TRAFFIC_MODEL: '{"endurance":{"returningUsersPerFrontend":1.5}}'
+      })
+    ).toThrow(
+      'Traffic model value "endurance.returningUsersPerFrontend" must be a whole number'
+    )
+  })
+
   test.each(['0s', '1s'])('rejects a burst duration of %s', (duration) => {
     expect(() =>
       resolveTrafficModel({
@@ -548,6 +603,20 @@ describe('scenarioRates', () => {
     })
 
     expect(scenarioRates(model)['ins-address-book']).toBe(1)
+  })
+})
+
+describe('scenarioPagesPerHour', () => {
+  test('counts the page requests each scenario puts on each frontend at the design rates', () => {
+    expect(scenarioPagesPerHour(resolveTrafficModel({}))).toEqual({
+      'live-animals': { animals: 1760, ins: 396 },
+      'high-risk-plants': { plants: 1800, ins: 324 },
+      'ins-front-door': { ins: 640 },
+      'ins-address-book': { ins: 240 },
+      'iuu-journey-sessions': { iuu: 2064 },
+      'iuu-front-door': { iuu: 1832 },
+      'iuu-address-book': { iuu: 684 }
+    })
   })
 })
 

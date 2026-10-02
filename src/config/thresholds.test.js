@@ -13,6 +13,7 @@ import {
   documentScanThresholds,
   hourlyReportThresholds,
   notificationSplitThresholds,
+  reauthenticationReportThresholds,
   scenarioThresholds,
   signInTargetThresholds,
   smokeThresholds,
@@ -638,6 +639,153 @@ describe('INTERIM_TARGETS.burst', () => {
     expect(INTERIM_TARGETS.burst).toEqual({
       maxServerErrorRate: 0.01,
       p95FactorOverPeak: 2,
+      minSamples: 10
+    })
+  })
+})
+
+describe('designTargetThresholds for spike and recovery', () => {
+  const scenarioSet = { [SCENARIO]: { endpoints: ENDPOINTS } }
+  const set = designTargetThresholds({
+    shape: 'spike-recovery',
+    scenarioSet,
+    gating: true
+  })
+
+  test('judges response times in the baseline phase, without aborting', () => {
+    const key = `http_req_duration{scenario:${SCENARIO},endpoint:ins-dashboard,phase:baseline}`
+
+    expect(set[key]).toEqual(['p(95)<2000', 'p(99)<5000'])
+  })
+
+  test('judges failed requests, checks and dropped iterations at the end, without aborting', () => {
+    expect(set[`http_req_failed{scenario:${SCENARIO}}`]).toEqual(['rate<0.01'])
+    expect(set[`checks{scenario:${SCENARIO}}`]).toEqual(['rate>0.99'])
+    expect(set[`dropped_iterations{scenario:${SCENARIO}}`]).toEqual(['count<1'])
+
+    for (const limits of Object.values(set)) {
+      expect(limits.every((limit) => typeof limit === 'string')).toBe(true)
+    }
+  })
+
+  test('fails the run on sign-in failures in the spike or the recovery, and on dead-letter growth', () => {
+    expect(set['http_req_failed{endpoint:sign-in,phase:spike}']).toEqual([
+      'rate<0.01'
+    ])
+    expect(set['http_req_failed{endpoint:sign-in,phase:recovery}']).toEqual([
+      'rate<0.01'
+    ])
+    expect(set['downstream_dead_letters{downstream:service-bus}']).toEqual([
+      'value<1'
+    ])
+  })
+
+  test('never judges response times in the spike phase', () => {
+    expect(
+      Object.keys(set).filter(
+        (key) =>
+          key.startsWith('http_req_duration') && key.includes('phase:spike')
+      )
+    ).toEqual([])
+  })
+
+  test('can never fail when it is not gating', () => {
+    const reporting = designTargetThresholds({
+      shape: 'spike-recovery',
+      scenarioSet,
+      gating: false
+    })
+
+    for (const limits of Object.values(reporting)) {
+      expect(limits).toHaveLength(1)
+      expect(limits[0].endsWith('>=0')).toBe(true)
+    }
+  })
+})
+
+describe('designTargetThresholds for endurance', () => {
+  const scenarioSet = {
+    'high-risk-plants': { endpoints: ENDPOINTS },
+    'returning-animals': { endpoints: ['sign-in', 'animals-dashboard'] },
+    'returning-ins': { endpoints: ['sign-in', 'ins-dashboard'] }
+  }
+  const set = designTargetThresholds({
+    shape: 'endurance',
+    scenarioSet,
+    gating: true
+  })
+
+  test('fails the run on a transport error in any scenario', () => {
+    expect(set['transport_errors{scenario:high-risk-plants}']).toEqual([
+      'count<1'
+    ])
+    expect(set['transport_errors{scenario:returning-ins}']).toEqual(['count<1'])
+  })
+
+  test('needs a re-authentication from each returning user only', () => {
+    expect(set['reauthentications{scenario:returning-animals}']).toEqual([
+      'count>=1'
+    ])
+    expect(set['reauthentications{scenario:high-risk-plants}']).toBeUndefined()
+  })
+
+  test('judges each returning scenario against the page limits over the whole run', () => {
+    expect(
+      set['http_req_duration{scenario:returning-ins,endpoint:sign-in}']
+    ).toEqual(['p(95)<2000', 'p(99)<5000'])
+  })
+
+  test('judges failures, checks and dropped iterations at the end and fails on dead-letter growth', () => {
+    expect(set['http_req_failed{scenario:high-risk-plants}']).toEqual([
+      'rate<0.01'
+    ])
+    expect(set['downstream_dead_letters{downstream:service-bus}']).toEqual([
+      'value<1'
+    ])
+    expect(Object.keys(set).some((key) => key.includes('phase:'))).toBe(false)
+  })
+
+  test('can never fail when it is not gating', () => {
+    const reporting = designTargetThresholds({
+      shape: 'endurance',
+      scenarioSet,
+      gating: false
+    })
+
+    for (const limits of Object.values(reporting)) {
+      expect(limits).toHaveLength(1)
+      expect(limits[0].endsWith('>=0')).toBe(true)
+    }
+  })
+})
+
+describe('reauthenticationReportThresholds', () => {
+  test('names the re-authentication traffic and the transport errors, all reporting-only', () => {
+    const set = reauthenticationReportThresholds()
+
+    expect(Object.keys(set)).toEqual([
+      'http_req_duration{auth:re-authentication}',
+      'http_req_failed{auth:re-authentication}',
+      'page_requests{traffic_class:re-authentication}',
+      'transport_errors'
+    ])
+
+    for (const limits of Object.values(set)) {
+      expect(limits).toHaveLength(1)
+      expect(limits[0].endsWith('>=0')).toBe(true)
+    }
+  })
+})
+
+describe('INTERIM_TARGETS for spike and endurance', () => {
+  test('is c-004: P95 back within 10% of the baseline, final hour within 1.2 times the first', () => {
+    expect(INTERIM_TARGETS.spike).toEqual({
+      p95FactorOverBaseline: 1.1,
+      minSamples: 10,
+      maxSignInFailureRate: 0.01
+    })
+    expect(INTERIM_TARGETS.endurance).toEqual({
+      p95FactorOverFirstHour: 1.2,
       minSamples: 10
     })
   })

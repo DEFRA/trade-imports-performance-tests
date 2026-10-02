@@ -20,7 +20,16 @@ import {
   resolveLoadProfile,
   resolveScenarioLength,
   runLine,
-  scenarioSetFor
+  enduranceProfileLine,
+  enduranceRunSeconds,
+  expectedReauthentications,
+  scenarioSchedules,
+  scenarioSetFor,
+  scenarioSetForShape,
+  spikeCapacities,
+  spikeFactors,
+  spikeProfileLine,
+  watchesDeadLetters
 } from './design-target.js'
 import { SCENARIOS } from './smoke.js'
 import { durationSeconds, resolveTrafficModel } from './traffic.js'
@@ -553,5 +562,416 @@ describe('run lines', () => {
     expect(localRunLine({ stubProfile: 'zero-delay' })).toBe(
       'Local run: a script check, not a measurement at design conditions: stubs zero-delay, background volume reported, not required, sessions compressed to the local length'
     )
+  })
+})
+
+const scenarioSetWith = (shape, loadProfile) =>
+  scenarioSetForShape({ shape, loadProfile })
+
+const scenariosFor = (shape, length = 'full', model = modelFor(length)) => {
+  const scenarioSet = scenarioSetWith(shape, LOAD_PROFILES.TWO_JOURNEYS)
+
+  return designTargetScenarios({
+    shape,
+    model,
+    scenarioSet,
+    schedule: phaseSchedule({
+      shape,
+      model,
+      scenarioNames: Object.keys(scenarioSetFor(LOAD_PROFILES.TWO_JOURNEYS))
+    })
+  })
+}
+
+describe('spikeFactors', () => {
+  test('takes each component to its stated capacity with two journeys', () => {
+    const factors = spikeFactors({
+      model: modelFor('full'),
+      scenarioSet: scenarioSetFor(LOAD_PROFILES.TWO_JOURNEYS)
+    })
+
+    expect(factors['live-animals']).toBeCloseTo(10.227, 3)
+    expect(factors['high-risk-plants']).toBe(10)
+    expect(factors['ins-front-door']).toBeCloseTo(12.17, 2)
+    expect(factors['ins-address-book']).toBe(factors['ins-front-door'])
+    expect(Object.keys(factors)).toHaveLength(4)
+  })
+
+  test('takes each IUU scenario to the IUU capacity with IUU', () => {
+    const factors = spikeFactors({
+      model: modelFor('full'),
+      scenarioSet: scenarioSetFor(LOAD_PROFILES.WITH_IUU)
+    })
+
+    for (const scenario of [
+      'iuu-journey-sessions',
+      'iuu-front-door',
+      'iuu-address-book'
+    ]) {
+      expect(factors[scenario]).toBeCloseTo(11.79, 2)
+    }
+  })
+
+  test('never lets the front door run slower than its steady rate', () => {
+    const model = resolveTrafficModel({
+      TRAFFIC_MODEL: '{"spikeRecovery":{"capacityRps":{"ins":1}}}'
+    })
+
+    expect(
+      spikeFactors({
+        model,
+        scenarioSet: scenarioSetFor(LOAD_PROFILES.TWO_JOURNEYS)
+      })['ins-front-door']
+    ).toBe(1)
+  })
+})
+
+describe('spikeCapacities', () => {
+  test('derives the session path as every frontend plus a backend call a journey page', () => {
+    expect(
+      spikeCapacities({
+        model: modelFor('full'),
+        loadProfile: LOAD_PROFILES.TWO_JOURNEYS
+      })
+    ).toEqual({ ins: 5, animals: 5, plants: 5, sessionPath: 25 })
+  })
+
+  test('states 55 for the session path with IUU, and IUU at 15', () => {
+    expect(
+      spikeCapacities({
+        model: modelFor('full'),
+        loadProfile: LOAD_PROFILES.WITH_IUU
+      })
+    ).toEqual({ ins: 5, animals: 5, plants: 5, iuu: 15, sessionPath: 55 })
+  })
+})
+
+describe('phaseSchedule for spike and recovery', () => {
+  test('warms up, holds a 5m baseline, spikes 10s, recovers 60s, then judges 2m at full length', () => {
+    expect(
+      scheduleFor(SHAPES.SPIKE_RECOVERY, 'full').map(
+        ({ phase, startSeconds, endSeconds }) => [
+          phase,
+          startSeconds,
+          endSeconds
+        ]
+      )
+    ).toEqual([
+      ['warm-up', 0, 3000],
+      ['baseline', 3000, 3300],
+      ['spike', 3300, 3310],
+      ['recovery', 3310, 3370],
+      ['recovered', 3370, 3490],
+      ['tail', 3490, null]
+    ])
+  })
+
+  test('shortens the baseline to 2m and the recovered window to 1m at local length', () => {
+    const schedule = scheduleFor(SHAPES.SPIKE_RECOVERY, 'local')
+    const phase = (name) => schedule.find((entry) => entry.phase === name)
+
+    expect(phase('baseline')).toMatchObject({
+      startSeconds: 240,
+      endSeconds: 360
+    })
+    expect(phase('recovered')).toMatchObject({
+      startSeconds: 430,
+      endSeconds: 490
+    })
+  })
+})
+
+describe('phaseSchedule for endurance', () => {
+  test('holds 8h with a first and a final hour at full length', () => {
+    expect(
+      scheduleFor(SHAPES.ENDURANCE, 'full').map(
+        ({ phase, startSeconds, endSeconds }) => [
+          phase,
+          startSeconds,
+          endSeconds
+        ]
+      )
+    ).toEqual([
+      ['warm-up', 0, 3000],
+      ['first-hour', 3000, 6600],
+      ['middle', 6600, 28_200],
+      ['final-hour', 28_200, 31_800],
+      ['tail', 31_800, null]
+    ])
+  })
+
+  test('holds 12m in 3m windows at local length', () => {
+    const schedule = scheduleFor(SHAPES.ENDURANCE, 'local')
+    const phase = (name) => schedule.find((entry) => entry.phase === name)
+
+    expect(phase('first-hour')).toMatchObject({
+      startSeconds: 240,
+      endSeconds: 420
+    })
+    expect(phase('final-hour')).toMatchObject({
+      startSeconds: 780,
+      endSeconds: 960
+    })
+  })
+
+  test('says how long the returning users run', () => {
+    expect(enduranceRunSeconds(scheduleFor(SHAPES.ENDURANCE, 'full'))).toBe(
+      31_800
+    )
+  })
+})
+
+describe('scenarioSchedules', () => {
+  test('gives each scenario its own pace in the spike phase', () => {
+    const model = modelFor('full')
+    const scenarioSet = scenarioSetFor(LOAD_PROFILES.TWO_JOURNEYS)
+    const schedule = scheduleFor(SHAPES.SPIKE_RECOVERY, 'full')
+    const schedules = scenarioSchedules({
+      shape: SHAPES.SPIKE_RECOVERY,
+      schedule,
+      model,
+      scenarioSet
+    })
+    const paceOf = (name, phase) =>
+      schedules[name].find((entry) => entry.phase === phase).paceFactor
+
+    expect(paceOf('live-animals', 'spike')).toBeCloseTo(10.227, 3)
+    expect(paceOf('high-risk-plants', 'spike')).toBe(10)
+    expect(paceOf('live-animals', 'baseline')).toBe(1)
+    expect(paceOf('live-animals', 'recovered')).toBe(1)
+  })
+
+  test('shares one schedule for every other shape', () => {
+    const schedule = scheduleFor(SHAPES.SUSTAINED_PEAK, 'full')
+    const schedules = scenarioSchedules({
+      shape: SHAPES.SUSTAINED_PEAK,
+      schedule,
+      model: modelFor('full'),
+      scenarioSet: scenarioSetFor(LOAD_PROFILES.TWO_JOURNEYS)
+    })
+
+    for (const scenarioSchedule of Object.values(schedules)) {
+      expect(scenarioSchedule).toBe(schedule)
+    }
+  })
+})
+
+describe('designTargetScenarios for spike and recovery', () => {
+  test('steps live animals to 450 an hour for the 10s spike, then back to 44', () => {
+    expect(scenariosFor(SHAPES.SPIKE_RECOVERY)['live-animals']).toMatchObject({
+      executor: 'ramping-arrival-rate',
+      startRate: 44,
+      stages: [
+        { duration: '3300s', target: 44 },
+        { duration: '1s', target: 450 },
+        { duration: '9s', target: 450 },
+        { duration: '1s', target: 44 },
+        { duration: '179s', target: 44 }
+      ]
+    })
+  })
+
+  test.each([
+    ['high-risk-plants', 360],
+    ['ins-front-door', 974]
+  ])('steps %s to %i an hour for the spike', (scenario, target) => {
+    expect(scenariosFor(SHAPES.SPIKE_RECOVERY)[scenario].stages[1]).toEqual({
+      duration: '1s',
+      target
+    })
+  })
+
+  test('has five stages for each scenario', () => {
+    for (const scenario of Object.values(scenariosFor(SHAPES.SPIKE_RECOVERY))) {
+      expect(scenario.stages).toHaveLength(5)
+    }
+  })
+})
+
+describe('designTargetScenarios for endurance', () => {
+  test('holds each arrival scenario at its rate to the end of the final hour', () => {
+    const scenarios = scenariosFor(SHAPES.ENDURANCE)
+
+    expect(scenarios['live-animals']).toMatchObject({
+      executor: 'ramping-arrival-rate',
+      startRate: 44,
+      stages: [{ duration: '31800s', target: 44 }]
+    })
+    expect(scenarios['ins-front-door']).toMatchObject({
+      startRate: 80,
+      stages: [{ duration: '31800s', target: 80 }]
+    })
+  })
+
+  test('runs one returning user for each frontend as constant users', () => {
+    const scenarios = scenariosFor(SHAPES.ENDURANCE)
+
+    expect(scenarios['returning-ins']).toEqual({
+      executor: 'constant-vus',
+      vus: 1,
+      duration: '31800s',
+      gracefulStop: '30s',
+      exec: 'returningIns',
+      tags: { journey: 'ins-front-door' }
+    })
+    expect(scenarios['returning-animals'].tags.journey).toBe('live-animals')
+    expect(scenarios['returning-plants'].exec).toBe('returningPlants')
+  })
+
+  test('never lets a duration or a rate be NaN', () => {
+    expect(JSON.stringify(scenariosFor(SHAPES.ENDURANCE))).not.toContain('NaN')
+  })
+
+  test('takes the number of returning users from the model', () => {
+    const model = resolveTrafficModel({
+      TRAFFIC_MODEL: '{"endurance":{"returningUsersPerFrontend":3}}'
+    })
+
+    expect(
+      scenariosFor(SHAPES.ENDURANCE, 'full', model)['returning-ins'].vus
+    ).toBe(3)
+  })
+})
+
+describe('scenarioSetForShape', () => {
+  test('adds the three returning scenarios for endurance', () => {
+    expect(
+      Object.keys(scenarioSetWith(SHAPES.ENDURANCE, LOAD_PROFILES.TWO_JOURNEYS))
+    ).toEqual([
+      ...Object.keys(scenarioSetFor(LOAD_PROFILES.TWO_JOURNEYS)),
+      'returning-ins',
+      'returning-animals',
+      'returning-plants'
+    ])
+  })
+
+  test.each([SHAPES.SPIKE_RECOVERY, SHAPES.SUSTAINED_PEAK])(
+    'adds nothing for %s',
+    (shape) => {
+      expect(scenarioSetWith(shape, LOAD_PROFILES.TWO_JOURNEYS)).toEqual(
+        scenarioSetFor(LOAD_PROFILES.TWO_JOURNEYS)
+      )
+    }
+  )
+
+  test('gives each returning scenario a sign-in and its dashboard', () => {
+    const set = scenarioSetWith(SHAPES.ENDURANCE, LOAD_PROFILES.TWO_JOURNEYS)
+
+    expect(set['returning-ins'].endpoints).toEqual(['sign-in', 'ins-dashboard'])
+    expect(set['returning-animals']).toMatchObject({
+      path: '/live-animals',
+      endpoints: ['sign-in', 'animals-dashboard']
+    })
+    expect(set['returning-plants']).toMatchObject({
+      path: '/high-risk-plants',
+      endpoints: ['sign-in', 'plants-dashboard']
+    })
+  })
+})
+
+describe('expectedReauthentications', () => {
+  test.each([
+    ['full', 31_800, 2],
+    ['local', 960, 4]
+  ])(
+    'is worked out from the session lifetime at %s length',
+    (length, seconds, expected) => {
+      expect(
+        expectedReauthentications({
+          model: modelFor(length),
+          runSeconds: seconds
+        })
+      ).toBe(expected)
+    }
+  )
+
+  test('is never below 0 for a run shorter than a visit', () => {
+    expect(
+      expectedReauthentications({ model: modelFor('full'), runSeconds: 60 })
+    ).toBe(0)
+  })
+})
+
+describe('profile lines', () => {
+  test('states what the spike applies with two journeys', () => {
+    expect(
+      spikeProfileLine({
+        model: modelFor('full'),
+        loadProfile: LOAD_PROFILES.TWO_JOURNEYS,
+        scenarioSet: scenarioSetFor(LOAD_PROFILES.TWO_JOURNEYS)
+      })
+    ).toBe(
+      'Spike: 10s at the stated capacities: animals 5 RPS (pace x10.23), plants 5 RPS (pace x10), INS front door 5 RPS including sign-in (pace x12.17), session path 25 RPS (derived); recovery judged over the 2m after the 60s allowed'
+    )
+  })
+
+  test('adds IUU and 55 RPS for the session path with IUU', () => {
+    expect(
+      spikeProfileLine({
+        model: modelFor('full'),
+        loadProfile: LOAD_PROFILES.WITH_IUU,
+        scenarioSet: scenarioSetFor(LOAD_PROFILES.WITH_IUU)
+      })
+    ).toBe(
+      'Spike: 10s at the stated capacities: animals 5 RPS (pace x10.23), plants 5 RPS (pace x10), INS front door 5 RPS including sign-in (pace x12.17), IUU 15 RPS (pace x11.79), session path 55 RPS (derived); recovery judged over the 2m after the 60s allowed'
+    )
+  })
+
+  test('states the endurance run with the frontends expiring sessions', () => {
+    expect(
+      enduranceProfileLine({ model: modelFor('full'), runSeconds: 31_800 })
+    ).toBe(
+      'Endurance: one returning user each on ins, animals and plants keeps one browser for the whole run; sessions expire at the frontends after 4h, so each should sign in again about 2 times'
+    )
+  })
+
+  test('states the endurance run with the browser forgetting sessions at local length', () => {
+    expect(
+      enduranceProfileLine({ model: modelFor('local'), runSeconds: 960 })
+    ).toBe(
+      "Endurance: one returning user each on ins, animals and plants keeps one browser for the whole run; the browser forgets each session after 3m, standing in for the frontends' expiry, so each should sign in again about 4 times"
+    )
+  })
+})
+
+describe('run lines for spike and endurance', () => {
+  const lineFor = (shape, length, environment) =>
+    runLine({
+      shape,
+      loadProfile: 'two-journeys',
+      scenarioLength: length,
+      environment,
+      stubProfile: 'sla',
+      model: modelFor(length)
+    })
+
+  test('names a full spike run with its windows', () => {
+    expect(lineFor('spike-recovery', 'full', 'perf-test')).toBe(
+      'Design-target run: spike-recovery, two-journeys profile, full length (warm-up 50m, baseline 5m, spike 10s, recovery 60s, recovered 2m), in perf-test, requiring stub profile sla'
+    )
+  })
+
+  test('names a full endurance run with the frontends expiring sessions', () => {
+    expect(lineFor('endurance', 'full', 'perf-test')).toBe(
+      'Design-target run: endurance, two-journeys profile, full length (warm-up 50m, hold 8h, first and final hour 1h each, sessions expire at the frontends after 4h), in perf-test, requiring stub profile sla'
+    )
+  })
+
+  test('names a local endurance run with the browser forgetting sessions', () => {
+    expect(lineFor('endurance', 'local', 'local')).toContain(
+      'first and final hour 3m each, the browser forgets each session after 3m)'
+    )
+  })
+})
+
+describe('watchesDeadLetters', () => {
+  test.each([
+    [SHAPES.SPIKE_RECOVERY, true],
+    [SHAPES.ENDURANCE, true],
+    [SHAPES.SUSTAINED_PEAK, false],
+    [SHAPES.P99_BURST, false],
+    [SHAPES.AVERAGE_LOAD, false]
+  ])('%s is %s', (shape, expected) => {
+    expect(watchesDeadLetters(shape)).toBe(expected)
   })
 })

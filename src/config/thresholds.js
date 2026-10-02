@@ -1,5 +1,11 @@
-import { PHASES, SHAPES, journeyScenariosIn } from './design-target.js'
+import {
+  PHASES,
+  RETURNING_SCENARIOS,
+  SHAPES,
+  journeyScenariosIn
+} from './design-target.js'
 import { kindOf } from './endpoints.js'
+import { RE_AUTHENTICATION_TAG, TRAFFIC_CLASSES } from './request-mix.js'
 import { HEADROOM_MEASURES } from './stub-ceilings.js'
 import { FLAGS, PROFILES, QUANTILES } from './stub-profiles.js'
 
@@ -19,6 +25,18 @@ export const INTERIM_TARGETS = Object.freeze({
   burst: Object.freeze({
     maxServerErrorRate: 0.01,
     p95FactorOverPeak: 2,
+    minSamples: 10
+  }),
+  // c-004's default: the spike run passes when P95 is back within 10% of the pre-spike baseline within 60 seconds.
+  // Sign-in failures under 1% in the spike stand in for "no cascade to the Defra ID stub". minSamples is interim.
+  spike: Object.freeze({
+    p95FactorOverBaseline: 1.1,
+    minSamples: 10,
+    maxSignInFailureRate: 0.01
+  }),
+  // c-004's default: the endurance run passes when the final hour's P95 is no more than 1.2 times the first hour's.
+  endurance: Object.freeze({
+    p95FactorOverFirstHour: 1.2,
     minSamples: 10
   })
 })
@@ -310,7 +328,10 @@ const NEVER_FAILING_LIMITS = Object.freeze({
   dashboard_read_share: ['rate>=0'],
   dropped_iterations: ['count>=0'],
   page_requests: ['count>=0'],
-  notifications_started: ['count>=0']
+  notifications_started: ['count>=0'],
+  transport_errors: ['count>=0'],
+  reauthentications: ['count>=0'],
+  downstream_dead_letters: ['value>=0']
 })
 
 const metricNameOf = (key) => key.split('{')[0]
@@ -374,34 +395,74 @@ const wholeRunScenarioThresholds = (scenario, endpoints) => ({
   ...endOfRunHealthThresholds(scenario)
 })
 
-const gatingDesignTargetThresholds = (shape, scenarioSet) => {
-  const entries = Object.entries(scenarioSet)
+const spikeScenarioThresholds = (scenario, endpoints) => ({
+  ...Object.fromEntries(
+    endpoints.map((endpoint) => [
+      subMetricKey('http_req_duration', {
+        scenario,
+        endpoint,
+        phase: PHASES.BASELINE
+      }),
+      durationLimits(kindOf(endpoint))
+    ])
+  ),
+  ...endOfRunHealthThresholds(scenario)
+})
 
-  if (shape === SHAPES.AVERAGE_LOAD) {
-    return Object.assign(
-      {},
-      ...entries.map(([scenario, { endpoints }]) =>
-        wholeRunScenarioThresholds(scenario, endpoints)
-      )
-    )
-  }
+const deadLetterThresholds = () => ({
+  [subMetricKey('downstream_dead_letters', { downstream: 'service-bus' })]: [
+    'value<1'
+  ]
+})
 
-  if (shape === SHAPES.SUSTAINED_PEAK) {
-    return Object.assign(
-      {},
-      ...entries.map(([scenario, { endpoints }]) =>
-        scenarioThresholds(scenario, endpoints, PHASES.HOLD)
-      )
-    )
-  }
+const cascadeThresholds = () => ({
+  ...Object.fromEntries(
+    [PHASES.SPIKE, PHASES.RECOVERY].map((phase) => [
+      subMetricKey('http_req_failed', { endpoint: 'sign-in', phase }),
+      [`rate<${INTERIM_TARGETS.spike.maxSignInFailureRate}`]
+    ])
+  ),
+  ...deadLetterThresholds()
+})
 
-  return Object.assign(
+const enduranceScenarioThresholds = (scenario, endpoints) => ({
+  ...wholeRunScenarioThresholds(scenario, endpoints),
+  [subMetricKey('transport_errors', { scenario })]: ['count<1'],
+  ...(scenario in RETURNING_SCENARIOS
+    ? { [subMetricKey('reauthentications', { scenario })]: ['count>=1'] }
+    : {})
+})
+
+const mergedPerScenario = (scenarioSet, thresholdsFor) =>
+  Object.assign(
     {},
-    ...entries.map(([scenario, { endpoints }]) =>
-      burstScenarioThresholds(scenario, endpoints)
+    ...Object.entries(scenarioSet).map(([scenario, { endpoints }]) =>
+      thresholdsFor(scenario, endpoints)
     )
   )
+
+const GATING_THRESHOLDS = {
+  [SHAPES.AVERAGE_LOAD]: (scenarioSet) =>
+    mergedPerScenario(scenarioSet, wholeRunScenarioThresholds),
+  [SHAPES.SUSTAINED_PEAK]: (scenarioSet) =>
+    mergedPerScenario(scenarioSet, (scenario, endpoints) =>
+      scenarioThresholds(scenario, endpoints, PHASES.HOLD)
+    ),
+  [SHAPES.SPIKE_RECOVERY]: (scenarioSet) => ({
+    ...mergedPerScenario(scenarioSet, spikeScenarioThresholds),
+    ...cascadeThresholds()
+  }),
+  [SHAPES.ENDURANCE]: (scenarioSet) => ({
+    ...mergedPerScenario(scenarioSet, enduranceScenarioThresholds),
+    ...deadLetterThresholds()
+  })
 }
+
+const gatingDesignTargetThresholds = (shape, scenarioSet) =>
+  (GATING_THRESHOLDS[shape] ?? burstThresholds)(scenarioSet)
+
+const burstThresholds = (scenarioSet) =>
+  mergedPerScenario(scenarioSet, burstScenarioThresholds)
 
 /**
  * Builds the thresholds of a design-target run.
@@ -412,11 +473,18 @@ const gatingDesignTargetThresholds = (shape, scenarioSet) => {
  * whole run, and only reports the peak phase's response times. The average-load
  * run judges response times, failed requests and checks over the whole run at
  * the end, never aborting, because the overnight hours it starts in have too
- * few samples; dropped iterations are judged as sustained peak does. With `gating`
- * false (the with-IUU profile) every limit can never fail.
+ * few samples; dropped iterations are judged as sustained peak does. The spike
+ * run judges response times in the baseline phase and failed requests, checks
+ * and dropped iterations over the whole scenario, all at the end; sign-in
+ * failures in the spike and recovery phases and any dead-letter growth fail it
+ * (no cascade), and its spike-phase response times are reported, never gated,
+ * because recovery is the rule. The endurance run judges what the average-load
+ * run does over its whole length, plus no transport error in any scenario, at
+ * least one re-authentication from each returning user and no dead-letter
+ * growth. With `gating` false (the with-IUU profile) every limit can never fail.
  *
  * @param {object} options - The run.
- * @param {string} options.shape - `sustained-peak`, `p99-burst` or `average-load`.
+ * @param {string} options.shape - A value of `SHAPES`.
  * @param {Record<string, { endpoints: string[] }>} options.scenarioSet - Scenarios shaped like `SCENARIOS`.
  * @param {boolean} options.gating - False makes the whole set reporting-only.
  * @returns {Record<string, Array<string | { threshold: string, abortOnFail: boolean, delayAbortEval: string }>>} k6 thresholds.
@@ -503,3 +571,22 @@ export const hourlyReportThresholds = ({ scenarioSet, phases }) =>
         .map((key) => [key, null])
     )
   )
+
+/**
+ * Builds the reporting-only thresholds that put the re-authentication traffic's
+ * figures in the summary data `handleSummary` reads.
+ *
+ * These can never fail. k6 keeps a sub-metric's figures only when a threshold
+ * names it, and the endurance report states the re-authentication traffic's
+ * requests, response time and failures, and the transport errors, from them.
+ *
+ * @returns {Record<string, string[]>} k6 thresholds.
+ */
+export const reauthenticationReportThresholds = () => ({
+  [subMetricKey('http_req_duration', RE_AUTHENTICATION_TAG)]: ['p(95)>=0'],
+  [subMetricKey('http_req_failed', RE_AUTHENTICATION_TAG)]: ['rate>=0'],
+  [subMetricKey('page_requests', {
+    traffic_class: TRAFFIC_CLASSES.RE_AUTHENTICATION
+  })]: ['count>=0'],
+  transport_errors: ['count>=0']
+})

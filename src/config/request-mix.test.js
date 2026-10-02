@@ -8,14 +8,15 @@ import {
 import { resolveTrafficModel } from './traffic.js'
 
 describe('TRAFFIC_CLASSES', () => {
-  test('has the six classes of a page request', () => {
+  test('has the seven classes of a page request', () => {
     expect(Object.values(TRAFFIC_CLASSES)).toEqual([
       'sign-in',
       'dashboard-read',
       'journey',
       'post-submission-read',
       'amendment',
-      'address-book'
+      'address-book',
+      're-authentication'
     ])
   })
 })

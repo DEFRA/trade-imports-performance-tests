@@ -5,10 +5,13 @@ import { DATASTORES, indexesBuiltLine } from '../config/background-volume.js'
 import {
   LOAD_PROFILES,
   REPORTED_PHASES,
+  RETURNING_SCENARIOS,
   SCENARIO_LENGTH_PROFILES,
   SHAPES,
   averageLoadProfileLine,
   designTargetScenarios,
+  enduranceProfileLine,
+  enduranceRunSeconds,
   isScriptCheck,
   localRunLine,
   phaseSchedule,
@@ -16,7 +19,11 @@ import {
   resolveLoadProfile,
   resolveScenarioLength,
   runLine,
-  scenarioSetFor
+  scenarioSchedules,
+  scenarioSetFor,
+  scenarioSetForShape,
+  spikeProfileLine,
+  watchesDeadLetters
 } from '../config/design-target.js'
 import { mixTargetLine } from '../config/request-mix.js'
 import {
@@ -37,6 +44,7 @@ import {
   documentScanThresholds,
   hourlyReportThresholds,
   notificationSplitThresholds,
+  reauthenticationReportThresholds,
   stubHeadroomReportThresholds,
   stubProfileReportThresholds
 } from '../config/thresholds.js'
@@ -54,13 +62,14 @@ import {
   designTargetHtml,
   designTargetReport,
   designTargetText,
-  relativeLine
+  failedComparisonLines
 } from '../lib/design-target-summary.js'
 import {
   measureBackgroundVolume,
   reportBackgroundVolume,
   requireBackgroundVolume
 } from './background-volume.js'
+import { readDeadLetterCount, reportDeadLetters } from './dead-letters.js'
 import {
   addressBookSession,
   dashboardOnlySession,
@@ -72,6 +81,7 @@ import { notificationJourney } from './journeys.js'
 import { LIVE_ANIMALS_STEPS } from './live-animals.js'
 import { usePhaseSchedule } from './phase.js'
 import { waitForReadiness } from './readiness.js'
+import { returningVisit } from './returning-session.js'
 import { reportStubHeadroom } from './stub-ceilings.js'
 import {
   clearStubAnswered,
@@ -100,11 +110,11 @@ const resolveRun = ({ shape, env }) => {
     env,
     SCENARIO_LENGTH_PROFILES[scenarioLength]
   )
-  const scenarioSet = scenarioSetFor(loadProfile)
+  const scenarioSet = scenarioSetForShape({ shape, loadProfile })
   const schedule = phaseSchedule({
     shape,
     model,
-    scenarioNames: Object.keys(scenarioSet)
+    scenarioNames: Object.keys(scenarioSetFor(loadProfile))
   })
 
   return {
@@ -115,6 +125,7 @@ const resolveRun = ({ shape, env }) => {
     model,
     scenarioSet,
     schedule,
+    schedules: scenarioSchedules({ shape, schedule, model, scenarioSet }),
     gating: loadProfile === LOAD_PROFILES.TWO_JOURNEYS
   }
 }
@@ -132,7 +143,8 @@ const resolveUrls = (env) => {
     insBackend: resolveServiceUrl(env, 'trade-imports-ins-backend'),
     referenceData: resolveServiceUrl(env, 'trade-imports-reference-data'),
     tradeImportsStub: resolveServiceUrl(env, 'trade-imports-stub'),
-    defraIdStub: resolveServiceUrl(env, 'trade-imports-defra-id-stub')
+    defraIdStub: resolveServiceUrl(env, 'trade-imports-defra-id-stub'),
+    gateway: resolveServiceUrl(env, 'trade-imports-dynamics-gateway')
   }
 }
 
@@ -151,6 +163,7 @@ const thresholdsFor = ({ shape, run }) => ({
     scenarioSet: run.scenarioSet,
     gating: run.gating
   }),
+  ...(shape === SHAPES.ENDURANCE ? reauthenticationReportThresholds() : {}),
   ...(run.gating
     ? documentScanThresholds('live-animals')
     : asReportingOnly(documentScanThresholds('live-animals'))),
@@ -164,8 +177,9 @@ const thresholdsFor = ({ shape, run }) => ({
  * Builds a design-target run: the options, set-up, tear-down, summary and exec
  * functions a suite file re-exports.
  *
- * The shape (sustained peak, P99 burst or average load), the run length and the load profile
- * come from configuration, so a suite is the import and the re-exports only.
+ * The shape (sustained peak, P99 burst, average load, spike and recovery or
+ * endurance), the run length and the load profile come from configuration, so
+ * a suite is the import and the re-exports only.
  * Run it at k6's init stage: it reads the environment and resolves the model.
  *
  * @param {object} options - The run.
@@ -183,6 +197,11 @@ export const createDesignTargetRun = ({ shape, env }) => {
   const urls = resolveUrls(env)
   const animals = JOURNEYS['live-animals']
   const plants = JOURNEYS['high-risk-plants']
+  const returningBaseUrls = {
+    'returning-ins': urls.ins,
+    'returning-animals': urls.animalsFrontend,
+    'returning-plants': urls.plantsFrontend
+  }
   const settings = {
     shape,
     loadProfile,
@@ -217,6 +236,21 @@ export const createDesignTargetRun = ({ shape, env }) => {
 
     if (shape === SHAPES.AVERAGE_LOAD) {
       console.log(averageLoadProfileLine(model))
+    }
+
+    if (shape === SHAPES.SPIKE_RECOVERY) {
+      console.log(
+        spikeProfileLine({ model, loadProfile, scenarioSet: run.scenarioSet })
+      )
+    }
+
+    if (shape === SHAPES.ENDURANCE) {
+      console.log(
+        enduranceProfileLine({
+          model,
+          runSeconds: enduranceRunSeconds(schedule)
+        })
+      )
     }
 
     console.log(`Traffic model: ${JSON.stringify(model)}`)
@@ -266,20 +300,35 @@ export const createDesignTargetRun = ({ shape, env }) => {
       requireBackgroundVolume(volume, model.backgroundVolume)
     }
 
-    return { addressName: PERF_ADDRESS.name, stubLoadSince }
+    return {
+      addressName: PERF_ADDRESS.name,
+      stubLoadSince,
+      deadLettersAtStart: watchesDeadLetters(shape)
+        ? readDeadLetterCount({ urls })
+        : null
+    }
   }
 
   const teardown = (data) => {
-    const entries = readStubProfiles({ urls })
+    try {
+      const entries = readStubProfiles({ urls })
 
-    reportStubProfiles(entries, 'end', new Date())
-    reportStubHeadroom({
-      entries,
-      ceilings,
-      environment,
-      since: data.stubLoadSince,
-      now: Date.now()
-    })
+      reportStubProfiles(entries, 'end', new Date())
+      reportStubHeadroom({
+        entries,
+        ceilings,
+        environment,
+        since: data.stubLoadSince,
+        now: Date.now()
+      })
+    } finally {
+      if (watchesDeadLetters(shape)) {
+        reportDeadLetters({
+          before: data.deadLettersAtStart,
+          after: readDeadLetterCount({ urls })
+        })
+      }
+    }
   }
 
   const frontDoorOptions = () => ({
@@ -306,10 +355,23 @@ export const createDesignTargetRun = ({ shape, env }) => {
     iterationInTest: exec.scenario.iterationInTest
   })
 
-  const scheduled = (work) => (data) => {
-    usePhaseSchedule(schedule)
+  const scheduled = (name, work) => (data) => {
+    usePhaseSchedule(run.schedules[name])
     work(data)
   }
+
+  const returning = (name) =>
+    scheduled(name, () =>
+      returningVisit({
+        scenario: name,
+        entry: RETURNING_SCENARIOS[name],
+        baseUrl: returningBaseUrls[name],
+        model,
+        credentials,
+        localhostAlias,
+        staleRedirects
+      })
+    )
 
   const handleSummary = (data) => {
     const report = designTargetReport({
@@ -329,10 +391,8 @@ export const createDesignTargetRun = ({ shape, env }) => {
     files[`${directory}/design-target.html`] = designTargetHtml(report)
 
     if (report.relativeFailed) {
-      files[`${directory}/relative-thresholds-failed.txt`] = `${report.relative
-        .filter(({ verdict }) => verdict === 'over')
-        .map(relativeLine)
-        .join('\n')}\n`
+      files[`${directory}/relative-thresholds-failed.txt`] =
+        `${failedComparisonLines(report).join('\n')}\n`
     }
 
     return files
@@ -343,7 +403,7 @@ export const createDesignTargetRun = ({ shape, env }) => {
     setup,
     teardown,
     handleSummary,
-    liveAnimals: scheduled((data) =>
+    liveAnimals: scheduled('live-animals', (data) =>
       notificationJourney(
         journeyOptions({
           journey: animals,
@@ -354,7 +414,7 @@ export const createDesignTargetRun = ({ shape, env }) => {
         })
       )
     ),
-    highRiskPlants: scheduled((data) =>
+    highRiskPlants: scheduled('high-risk-plants', (data) =>
       notificationJourney(
         journeyOptions({
           journey: plants,
@@ -365,10 +425,23 @@ export const createDesignTargetRun = ({ shape, env }) => {
         })
       )
     ),
-    insFrontDoor: scheduled(() => dashboardOnlySession(frontDoorOptions())),
-    insAddressBook: scheduled(() => addressBookSession(frontDoorOptions())),
-    iuuJourneySession: scheduled(() => iuuJourneySession(frontDoorOptions())),
-    iuuFrontDoor: scheduled(() => dashboardOnlySession(frontDoorOptions())),
-    iuuAddressBook: scheduled(() => addressBookSession(frontDoorOptions()))
+    insFrontDoor: scheduled('ins-front-door', () =>
+      dashboardOnlySession(frontDoorOptions())
+    ),
+    insAddressBook: scheduled('ins-address-book', () =>
+      addressBookSession(frontDoorOptions())
+    ),
+    iuuJourneySession: scheduled('iuu-journey-sessions', () =>
+      iuuJourneySession(frontDoorOptions())
+    ),
+    iuuFrontDoor: scheduled('iuu-front-door', () =>
+      dashboardOnlySession(frontDoorOptions())
+    ),
+    iuuAddressBook: scheduled('iuu-address-book', () =>
+      addressBookSession(frontDoorOptions())
+    ),
+    returningIns: returning('returning-ins'),
+    returningAnimals: returning('returning-animals'),
+    returningPlants: returning('returning-plants')
   }
 }

@@ -1,20 +1,29 @@
 import {
   DESIGN_TARGETS,
   FRONTEND_OF_SCENARIO,
+  IUU_SCENARIOS,
   JOURNEY_OF,
   LOAD_PROFILES,
   REPORTED_PHASES,
+  RETURNING_SCENARIOS,
   HOUR_PHASES,
   SHAPES,
   averageLoadFactors,
   averageLoadProfileLine,
+  enduranceProfileLine,
+  enduranceRunSeconds,
+  expectedReauthentications,
   hourLabel,
   journeyScenariosIn,
   percentText,
   runLine,
-  segmentOf
+  segmentOf,
+  sessionExpiryText,
+  spikeCapacities,
+  spikeProfileLine
 } from '../config/design-target.js'
 import { kindOf } from '../config/endpoints.js'
+import { RE_AUTHENTICATION_TAG } from '../config/request-mix.js'
 import { INTERIM_TARGETS, subMetricKey } from '../config/thresholds.js'
 import {
   SECONDS_PER_HOUR,
@@ -23,6 +32,7 @@ import {
 } from '../config/traffic.js'
 import { thresholdLines, thresholdResults } from './summary-text.js'
 
+const PERCENT = 100
 const RPS_DECIMALS = 2
 const FIGURE_DECIMALS = 1
 const BACKEND_NOTE = 'derived: 1 backend call a page'
@@ -156,38 +166,132 @@ export const achievedBurst = ({ metrics, seconds }) =>
 const durationOf = (metrics, tags, stat) =>
   valueOf(metrics, subMetricKey('http_req_duration', tags), stat)
 
-const relativeVerdictFor = ({ metrics, scenario, kind }) => {
-  const peakP95Ms = durationOf(
+/**
+ * Compares one scenario and request kind's P95 in a later phase with a limit
+ * worked out from its P95 in an earlier one.
+ *
+ * k6 cannot compare two of its own metrics in a threshold, so the run works
+ * this out from the summary. A pair with fewer requests in the later phase than
+ * `minSamples`, fewer in the earlier phase than `minBeforeSamples`, or none in
+ * the earlier phase, is not judged.
+ *
+ * @param {object} options - The pair.
+ * @param {Record<string, object>} options.metrics - k6's summary metrics.
+ * @param {string} options.scenario - The scenario name.
+ * @param {string} options.kind - `page`, `api` or `upload`.
+ * @param {string} options.before - The phase the limit comes from.
+ * @param {string} options.after - The phase that is judged.
+ * @param {number} options.factor - The most the later P95 may be, as a multiple of the earlier.
+ * @param {number} options.minSamples - The fewest requests in the later phase that are judged.
+ * @param {number} [options.minBeforeSamples] - The fewest requests in the earlier phase that are judged. 0 judges any.
+ * @returns {{ scenario: string, kind: string, beforeP95Ms: number | undefined, afterP95Ms: number | undefined, beforeCount: number, afterCount: number, limitMs: number | undefined, verdict: 'within' | 'over' | 'not judged' }} The comparison.
+ */
+export const p95Comparison = ({
+  metrics,
+  scenario,
+  kind,
+  before,
+  after,
+  factor,
+  minSamples,
+  minBeforeSamples = 0
+}) => {
+  const beforeP95Ms = durationOf(
     metrics,
-    { scenario, kind, phase: 'peak' },
+    { scenario, kind, phase: before },
     'p(95)'
   )
-  const burstP95Ms = durationOf(
+  const afterP95Ms = durationOf(
     metrics,
-    { scenario, kind, phase: 'burst' },
+    { scenario, kind, phase: after },
     'p(95)'
   )
-  const burstCount =
-    durationOf(metrics, { scenario, kind, phase: 'burst' }, 'count') ?? 0
-  const { p95FactorOverPeak, minSamples } = INTERIM_TARGETS.burst
-  const limitMs =
-    peakP95Ms === undefined ? undefined : peakP95Ms * p95FactorOverPeak
+  const beforeCount =
+    durationOf(metrics, { scenario, kind, phase: before }, 'count') ?? 0
+  const afterCount =
+    durationOf(metrics, { scenario, kind, phase: after }, 'count') ?? 0
+  const limitMs = beforeP95Ms === undefined ? undefined : beforeP95Ms * factor
   const judged =
-    burstCount >= minSamples &&
-    peakP95Ms !== undefined &&
-    burstP95Ms !== undefined
+    afterCount >= minSamples &&
+    beforeCount >= minBeforeSamples &&
+    beforeP95Ms !== undefined &&
+    afterP95Ms !== undefined
   const verdict = !judged
     ? 'not judged'
-    : burstP95Ms > limitMs
+    : afterP95Ms > limitMs
       ? 'over'
       : 'within'
 
   return {
     scenario,
     kind,
-    peakP95Ms,
-    burstP95Ms,
-    burstCount,
+    beforeP95Ms,
+    afterP95Ms,
+    beforeCount,
+    afterCount,
+    limitMs,
+    verdict
+  }
+}
+
+const kindsIn = (endpoints) =>
+  KINDS.filter((kind) => endpoints.some((name) => kindOf(name) === kind))
+
+/**
+ * Compares P95 between two phases for each scenario and request kind the
+ * scenario makes.
+ *
+ * @param {object} options - The run.
+ * @param {Record<string, object>} options.metrics - k6's summary metrics.
+ * @param {Record<string, { endpoints: string[] }>} options.scenarioSet - Scenarios shaped like `SCENARIOS`.
+ * @param {string} options.before - The phase the limit comes from.
+ * @param {string} options.after - The phase that is judged.
+ * @param {number} options.factor - The most the later P95 may be, as a multiple of the earlier.
+ * @param {number} options.minSamples - The fewest requests in either phase that are judged: a P95 of a handful of requests says nothing, in the earlier phase as much as the later.
+ * @returns {Array<ReturnType<typeof p95Comparison>>} One per pair.
+ */
+export const p95Comparisons = ({
+  metrics,
+  scenarioSet,
+  before,
+  after,
+  factor,
+  minSamples
+}) =>
+  Object.entries(scenarioSet).flatMap(([scenario, { endpoints }]) =>
+    kindsIn(endpoints).map((kind) =>
+      p95Comparison({
+        metrics,
+        scenario,
+        kind,
+        before,
+        after,
+        factor,
+        minSamples,
+        minBeforeSamples: minSamples
+      })
+    )
+  )
+
+const relativeVerdictFor = ({ metrics, scenario, kind }) => {
+  const { p95FactorOverPeak, minSamples } = INTERIM_TARGETS.burst
+  const { beforeP95Ms, afterP95Ms, afterCount, limitMs, verdict } =
+    p95Comparison({
+      metrics,
+      scenario,
+      kind,
+      before: 'peak',
+      after: 'burst',
+      factor: p95FactorOverPeak,
+      minSamples
+    })
+
+  return {
+    scenario,
+    kind,
+    peakP95Ms: beforeP95Ms,
+    burstP95Ms: afterP95Ms,
+    burstCount: afterCount,
     limitMs,
     verdict
   }
@@ -208,8 +312,8 @@ const relativeVerdictFor = ({ metrics, scenario, kind }) => {
  */
 export const relativeBurstVerdicts = ({ metrics, scenarioSet }) =>
   Object.entries(scenarioSet).flatMap(([scenario, { endpoints }]) =>
-    KINDS.filter((kind) => endpoints.some((name) => kindOf(name) === kind)).map(
-      (kind) => relativeVerdictFor({ metrics, scenario, kind })
+    kindsIn(endpoints).map((kind) =>
+      relativeVerdictFor({ metrics, scenario, kind })
     )
   )
 
@@ -337,6 +441,8 @@ export const achievedBurstLine = ({
 }) =>
   `Achieved burst (${burstDuration} at ${burstFactor}x): animals frontend ${labelledAgainst('RPS', achieved.animals, targets.animals, rpsText)}, plants ${againstText(achieved.plants, targets.plants, rpsText)}, INS ${againstText(achieved.ins, targets.ins, rpsText)}`
 
+const verdictText = (verdict) => (verdict === 'over' ? 'OVER' : 'within')
+
 /**
  * States one relative burst verdict.
  *
@@ -361,7 +467,7 @@ export const relativeLine = ({
       : `${subject}: not judged, no requests in the peak phase`
   }
 
-  return `${subject}: ${millisecondsText(burstP95Ms)} against twice the peak's ${millisecondsText(peakP95Ms)} (${millisecondsText(limitMs)}): ${verdict === 'over' ? 'OVER' : 'within'}`
+  return `${subject}: ${millisecondsText(burstP95Ms)} against twice the peak's ${millisecondsText(peakP95Ms)} (${millisecondsText(limitMs)}): ${verdictText(verdict)}`
 }
 
 /**
@@ -407,6 +513,250 @@ export const relativeOutcomeLine = ({ verdicts, gating }) => {
     ? 'Relative thresholds: passed'
     : `Relative thresholds: FAILED: ${over.map(({ scenario, kind }) => `${scenario} ${kind}`).join('; ')}`
 }
+
+const pagesOver = (metrics, tags) =>
+  countOf(metrics, subMetricKey('page_requests', tags))
+
+/**
+ * Works out each component's page rate over the spike, and the figures derived from them.
+ *
+ * The backends and the session path are derived, because nothing in the stack
+ * serves a session API: a backend call is one for each journey page, and the session
+ * path is every frontend page plus those backend calls.
+ *
+ * @param {object} options - The spike.
+ * @param {Record<string, object>} options.metrics - k6's summary metrics.
+ * @param {number} options.seconds - The spike's length.
+ * @param {Record<string, unknown>} options.scenarioSet - The scenarios that ran.
+ * @returns {{ animals: number, plants: number, ins: number, iuu: number, animalsBackend: number, plantsBackend: number, iuuBackend: number, sessionPath: number, signIns: number }} Page requests a second; `signIns` is a count.
+ */
+export const achievedSpike = ({ metrics, seconds, scenarioSet }) => {
+  const rate = (tags) =>
+    pagesOver(metrics, { ...tags, phase: 'spike' }) / seconds
+  const { backendCallsPerPage } = DESIGN_TARGETS
+  const animals = rate({ frontend: 'animals' })
+  const plants = rate({ frontend: 'plants' })
+  const ins = rate({ frontend: 'ins' })
+  const iuu = Object.keys(IUU_SCENARIOS)
+    .filter((scenario) => scenario in scenarioSet)
+    .reduce((total, scenario) => total + rate({ scenario }), 0)
+  const [animalsBackend, plantsBackend, iuuBackend] = [
+    animals,
+    plants,
+    iuu
+  ].map((pages) => pages * backendCallsPerPage)
+
+  return {
+    animals,
+    plants,
+    ins,
+    iuu,
+    animalsBackend,
+    plantsBackend,
+    iuuBackend,
+    sessionPath:
+      animals + plants + ins + animalsBackend + plantsBackend + iuuBackend,
+    signIns: pagesOver(metrics, { traffic_class: 'sign-in', phase: 'spike' })
+  }
+}
+
+/**
+ * States each component's achieved spike rate against its stated capacity.
+ *
+ * @param {object} options - The spike.
+ * @param {string} options.duration - The spike's length as configured, such as `10s`.
+ * @param {ReturnType<typeof achievedSpike>} options.achieved - What the run achieved.
+ * @param {ReturnType<typeof spikeCapacities>} options.capacities - The stated capacities.
+ * @param {string} options.loadProfile - A value of `LOAD_PROFILES`.
+ * @returns {string} The line.
+ */
+export const spikeLine = ({ duration, achieved, capacities, loadProfile }) => {
+  const withIuu = loadProfile === LOAD_PROFILES.WITH_IUU
+  const insCapacity = withIuu ? capacities.ins + capacities.iuu : capacities.ins
+  const insNote = withIuu
+    ? ` (${rpsText(capacities.ins)} core and ${rpsText(capacities.iuu)} IUU)`
+    : ''
+  const { backendCallsPerPage } = DESIGN_TARGETS
+
+  return `Spike (${duration}): animals frontend ${labelledAgainst('RPS', achieved.animals, capacities.animals, rpsText)}, backend ${labelledAgainst('RPS', achieved.animalsBackend, capacities.animals * backendCallsPerPage, rpsText)} (${BACKEND_NOTE}); plants frontend ${labelledAgainst('RPS', achieved.plants, capacities.plants, rpsText)}, backend ${labelledAgainst('RPS', achieved.plantsBackend, capacities.plants * backendCallsPerPage, rpsText)}; INS front door ${labelledAgainst('RPS', achieved.ins, insCapacity, rpsText)}${insNote} including ${achieved.signIns} sign-ins; session path ${labelledAgainst('RPS', achieved.sessionPath, capacities.sessionPath, rpsText)} (derived: every frontend page plus ${backendCallsPerPage} backend call a journey page)`
+}
+
+const percentOver = (factor) => `${Math.round((factor - 1) * PERCENT)}%`
+
+/**
+ * States one recovery comparison: the recovered window's P95 against the baseline's plus 10%.
+ *
+ * @param {ReturnType<typeof p95Comparison> & { window: string }} comparison - The comparison, with the recovered window's length as configured.
+ * @returns {string} The line.
+ */
+export const recoveryLine = ({
+  scenario,
+  kind,
+  beforeP95Ms,
+  afterP95Ms,
+  beforeCount,
+  afterCount,
+  limitMs,
+  verdict,
+  window
+}) => {
+  const subject = `Recovery P95 ${scenario} ${kind}`
+  const { minSamples, p95FactorOverBaseline } = INTERIM_TARGETS.spike
+
+  if (verdict === 'not judged') {
+    return afterCount < minSamples
+      ? `${subject}: not judged, ${afterCount} requests in the recovered ${window}, fewer than ${minSamples}`
+      : `${subject}: not judged, ${beforeCount} requests in the baseline, fewer than ${minSamples}`
+  }
+
+  return `${subject}: ${millisecondsText(afterP95Ms)} in the recovered ${window} against the baseline's ${millisecondsText(beforeP95Ms)} plus ${percentOver(p95FactorOverBaseline)} (${millisecondsText(limitMs)}): ${verdictText(verdict)}`
+}
+
+/**
+ * States one drift comparison: the final hour's P95 against 1.2 times the first hour's.
+ *
+ * @param {ReturnType<typeof p95Comparison>} comparison - The comparison.
+ * @returns {string} The line.
+ */
+export const driftLine = ({
+  scenario,
+  kind,
+  beforeP95Ms,
+  afterP95Ms,
+  beforeCount,
+  afterCount,
+  limitMs,
+  verdict
+}) => {
+  const subject = `Drift P95 ${scenario} ${kind}`
+  const { minSamples, p95FactorOverFirstHour } = INTERIM_TARGETS.endurance
+
+  if (verdict === 'not judged') {
+    return afterCount < minSamples
+      ? `${subject}: not judged, ${afterCount} requests in the final hour, fewer than ${minSamples}`
+      : `${subject}: not judged, ${beforeCount} requests in the first hour, fewer than ${minSamples}`
+  }
+
+  return `${subject}: ${millisecondsText(afterP95Ms)} in the final hour against ${p95FactorOverFirstHour} times the first hour's ${millisecondsText(beforeP95Ms)} (${millisecondsText(limitMs)}): ${verdictText(verdict)}`
+}
+
+/**
+ * States whether a relative rule passed.
+ *
+ * @param {object} options - The rule.
+ * @param {string} options.label - `Recovery` or `Drift`.
+ * @param {Array<ReturnType<typeof p95Comparison>>} options.comparisons - Every pair's comparison.
+ * @param {boolean} options.gating - False for the with-IUU profile, which is reported only.
+ * @returns {string} The line.
+ */
+export const comparisonOutcomeLine = ({ label, comparisons, gating }) => {
+  if (!gating) {
+    return `${label}: reported, not gated (with-IUU profile)`
+  }
+
+  const over = comparisons.filter(({ verdict }) => verdict === 'over')
+
+  return over.length === 0
+    ? `${label}: passed`
+    : `${label}: FAILED: ${over.map(({ scenario, kind }) => `${scenario} ${kind}`).join('; ')}`
+}
+
+const signInFailureRateIn = (metrics, phase) =>
+  valueOf(
+    metrics,
+    subMetricKey('http_req_failed', { endpoint: 'sign-in', phase }),
+    'rate'
+  ) ?? 0
+
+/**
+ * Works out the Defra ID stub's sign-in failure rate in the spike and the recovery.
+ *
+ * @param {Record<string, object>} metrics - k6's summary metrics.
+ * @returns {{ spike: number, recovery: number }} Rates from 0 to 1; 0 when k6 has no sign-ins.
+ */
+export const signInFailureRates = (metrics) => ({
+  spike: signInFailureRateIn(metrics, 'spike'),
+  recovery: signInFailureRateIn(metrics, 'recovery')
+})
+
+/**
+ * States whether the spike cascaded to the Defra ID stub, by its sign-in failures.
+ *
+ * @param {Record<string, object>} metrics - k6's summary metrics.
+ * @returns {string} The line.
+ */
+export const signInCascadeLine = (metrics) => {
+  const { spike, recovery } = signInFailureRates(metrics)
+  const limit = INTERIM_TARGETS.spike.maxSignInFailureRate
+  const cascaded = spike >= limit || recovery >= limit
+
+  return `Defra ID stub: sign-in requests failed ${percentText(spike)} in the spike and ${percentText(recovery)} in the recovery against ${percentText(limit)}: ${cascaded ? 'CASCADED' : 'no cascade'}`
+}
+
+/**
+ * Works out how often each returning user signed in again, against how often they should.
+ *
+ * @param {object} options - The run.
+ * @param {Record<string, object>} options.metrics - k6's summary metrics.
+ * @param {object} options.model - A resolved traffic model.
+ * @param {number} options.runSeconds - How long the returning users ran.
+ * @returns {Array<{ scenario: string, frontend: string, count: number, expected: number }>} One per returning scenario.
+ */
+export const reauthentications = ({ metrics, model, runSeconds }) =>
+  Object.entries(RETURNING_SCENARIOS).map(([scenario, { frontend }]) => ({
+    scenario,
+    frontend,
+    count: countOf(metrics, subMetricKey('reauthentications', { scenario })),
+    expected: expectedReauthentications({ model, runSeconds })
+  }))
+
+/**
+ * States how often each returning user signed in again.
+ *
+ * @param {object} options - The re-authentications.
+ * @param {ReturnType<typeof reauthentications>} options.entries - One per returning scenario.
+ * @param {string} options.expiry - What ends a session, from `sessionExpiryText`.
+ * @returns {string[]} One line each.
+ */
+export const reauthenticationLines = ({ entries, expiry }) =>
+  entries.map(
+    ({ frontend, count, expected }) =>
+      `Re-authentication ${frontend}: ${count} times, about ${expected} expected (${expiry})`
+  )
+
+/**
+ * States the re-authentication traffic, the sign-in hops tagged `auth:re-authentication`.
+ *
+ * @param {Record<string, object>} metrics - k6's summary metrics.
+ * @returns {string} The line.
+ */
+export const reauthenticationTrafficLine = (metrics) => {
+  const tags = RE_AUTHENTICATION_TAG
+  const requests = durationOf(metrics, tags, 'count') ?? 0
+  const failed = valueOf(metrics, subMetricKey('http_req_failed', tags), 'rate')
+
+  return requests === 0
+    ? 'Re-authentication traffic (auth:re-authentication): 0 requests'
+    : `Re-authentication traffic (auth:re-authentication): ${requests} requests, P95 ${millisecondsText(durationOf(metrics, tags, 'p(95)'))}, ${percentText(failed ?? 0)} failed`
+}
+
+/**
+ * Counts the requests that failed below HTTP: refused, reset or timed out.
+ *
+ * @param {Record<string, object>} metrics - k6's summary metrics.
+ * @returns {number} The count; 0 when k6 has none.
+ */
+export const transportErrorCount = (metrics) =>
+  countOf(metrics, 'transport_errors')
+
+/**
+ * States the transport errors, k6's only sign of exhaustion.
+ *
+ * @param {Record<string, object>} metrics - k6's summary metrics.
+ * @returns {string} The line.
+ */
+export const transportErrorLine = (metrics) =>
+  `Transport errors (refused, reset or timed out): ${transportErrorCount(metrics)}`
 
 const burstTargets = (loadProfile) => ({
   animals: DESIGN_TARGETS['live-animals'].burstRps,
@@ -507,63 +857,82 @@ export const hourLine = ({ row, loadProfile }) => {
   ].join('; ')}`
 }
 
-const averageLoadReport = ({
-  metrics,
+const runDescription = ({
   shape,
   loadProfile,
   scenarioLength,
   environment,
   stubProfile,
-  schedule,
-  scenarioSet,
   model
 }) => ({
-  run: {
-    line: runLine({
-      shape,
-      loadProfile,
-      scenarioLength,
-      environment,
-      stubProfile,
-      model
-    }),
-    profileLine: averageLoadProfileLine(model),
+  line: runLine({
     shape,
     loadProfile,
     scenarioLength,
     environment,
-    stubProfile: stubProfile ?? 'as-reported',
-    gating: loadProfile === LOAD_PROFILES.TWO_JOURNEYS,
-    hourSeconds: durationSeconds(model.averageLoad.hourDuration),
-    schedule
-  },
-  hours: averageLoadHours({
-    metrics,
-    schedule,
-    model,
-    loadProfile,
-    scenarioSet
+    stubProfile,
+    model
   }),
-  relative: [],
-  endpoints: endpointRows({ metrics, scenarioSet }),
-  thresholds: thresholdResults(metrics),
-  relativeFailed: false
-})
-
-const peakReport = ({
-  metrics,
   shape,
   loadProfile,
   scenarioLength,
   environment,
-  stubProfile,
-  schedule,
+  stubProfile: stubProfile ?? 'as-reported',
+  gating: loadProfile === LOAD_PROFILES.TWO_JOURNEYS
+})
+
+const averageLoadReport = (options) => {
+  const { metrics, loadProfile, schedule, scenarioSet, model } = options
+
+  return {
+    run: {
+      ...runDescription(options),
+      profileLine: averageLoadProfileLine(model),
+      hourSeconds: durationSeconds(model.averageLoad.hourDuration),
+      schedule
+    },
+    hours: averageLoadHours({
+      metrics,
+      schedule,
+      model,
+      loadProfile,
+      scenarioSet
+    }),
+    relative: [],
+    endpoints: endpointRows({ metrics, scenarioSet }),
+    thresholds: thresholdResults(metrics),
+    relativeFailed: false
+  }
+}
+
+const achievedOver = ({
+  metrics,
+  phase,
+  seconds,
   scenarioSet,
-  model
-}) => {
+  loadProfile
+}) => ({
+  journeys: Object.fromEntries(
+    journeyScenariosIn(scenarioSet).map((scenario) => [
+      scenario,
+      {
+        achieved: achievedJourney({ metrics, scenario, phase, seconds }),
+        target: DESIGN_TARGETS[scenario]
+      }
+    ])
+  ),
+  frontDoor: {
+    achieved: achievedFrontDoor({ metrics, phase, seconds }),
+    target: DESIGN_TARGETS.frontDoor[loadProfile]
+  }
+})
+
+const peakReport = (options) => {
+  const { metrics, shape, loadProfile, schedule, scenarioSet, model } = options
   const [steady] = REPORTED_PHASES[shape]
   const seconds = phaseSeconds(schedule, steady)
-  const gating = loadProfile === LOAD_PROFILES.TWO_JOURNEYS
+  const run = runDescription(options)
+  const { gating } = run
   const isBurst = shape === SHAPES.P99_BURST
   const verdicts = isBurst
     ? relativeBurstVerdicts({ metrics, scenarioSet })
@@ -571,44 +940,18 @@ const peakReport = ({
 
   return {
     run: {
-      line: runLine({
-        shape,
-        loadProfile,
-        scenarioLength,
-        environment,
-        stubProfile,
-        model
-      }),
-      shape,
-      loadProfile,
-      scenarioLength,
-      environment,
-      stubProfile: stubProfile ?? 'as-reported',
-      gating,
+      ...run,
       steadyPhase: steady,
       steadySeconds: seconds,
       schedule
     },
-    achieved: {
-      journeys: Object.fromEntries(
-        journeyScenariosIn(scenarioSet).map((scenario) => [
-          scenario,
-          {
-            achieved: achievedJourney({
-              metrics,
-              scenario,
-              phase: steady,
-              seconds
-            }),
-            target: DESIGN_TARGETS[scenario]
-          }
-        ])
-      ),
-      frontDoor: {
-        achieved: achievedFrontDoor({ metrics, phase: steady, seconds }),
-        target: DESIGN_TARGETS.frontDoor[loadProfile]
-      }
-    },
+    achieved: achievedOver({
+      metrics,
+      phase: steady,
+      seconds,
+      scenarioSet,
+      loadProfile
+    }),
     ...(isBurst
       ? {
           burst: {
@@ -627,6 +970,104 @@ const peakReport = ({
     thresholds: thresholdResults(metrics),
     relativeFailed: gating && verdicts.some(({ verdict }) => verdict === 'over')
   }
+}
+
+const anyOver = (comparisons) =>
+  comparisons.some(({ verdict }) => verdict === 'over')
+
+const spikeReport = (options) => {
+  const { metrics, shape, loadProfile, schedule, scenarioSet, model } = options
+  const [baseline] = REPORTED_PHASES[shape]
+  const run = runDescription(options)
+  const { recoveredDuration, spikeDuration } = model.spikeRecovery
+  const { spike: spikeLimits } = INTERIM_TARGETS
+  const comparisons = p95Comparisons({
+    metrics,
+    scenarioSet,
+    before: baseline,
+    after: 'recovered',
+    factor: spikeLimits.p95FactorOverBaseline,
+    minSamples: spikeLimits.minSamples
+  }).map((comparison) => ({ ...comparison, window: recoveredDuration }))
+
+  return {
+    run: {
+      ...run,
+      profileLine: spikeProfileLine({ model, loadProfile, scenarioSet }),
+      steadyPhase: baseline,
+      steadySeconds: phaseSeconds(schedule, baseline),
+      schedule
+    },
+    achieved: achievedOver({
+      metrics,
+      phase: baseline,
+      seconds: phaseSeconds(schedule, baseline),
+      scenarioSet,
+      loadProfile
+    }),
+    spike: {
+      duration: spikeDuration,
+      seconds: phaseSeconds(schedule, 'spike'),
+      achieved: achievedSpike({
+        metrics,
+        seconds: phaseSeconds(schedule, 'spike'),
+        scenarioSet
+      }),
+      capacities: spikeCapacities({ model, loadProfile })
+    },
+    relative: comparisons,
+    cascade: { signInFailureRates: signInFailureRates(metrics) },
+    endpoints: endpointRows({ metrics, scenarioSet, phase: baseline }),
+    thresholds: thresholdResults(metrics),
+    relativeFailed: run.gating && anyOver(comparisons)
+  }
+}
+
+const enduranceReport = (options) => {
+  const { metrics, shape, loadProfile, schedule, scenarioSet, model } = options
+  const run = runDescription(options)
+  const runSeconds = enduranceRunSeconds(schedule)
+  const { endurance: enduranceLimits } = INTERIM_TARGETS
+  const [first, last] = REPORTED_PHASES[shape]
+  const comparisons = p95Comparisons({
+    metrics,
+    scenarioSet,
+    before: first,
+    after: last,
+    factor: enduranceLimits.p95FactorOverFirstHour,
+    minSamples: enduranceLimits.minSamples
+  })
+
+  return {
+    run: {
+      ...run,
+      profileLine: enduranceProfileLine({ model, runSeconds }),
+      expiry: sessionExpiryText(model.endurance),
+      runSeconds,
+      schedule
+    },
+    windows: REPORTED_PHASES[shape].map((phase) => {
+      const seconds = phaseSeconds(schedule, phase)
+
+      return {
+        phase,
+        seconds,
+        ...achievedOver({ metrics, phase, seconds, scenarioSet, loadProfile })
+      }
+    }),
+    relative: comparisons,
+    reauthentication: reauthentications({ metrics, model, runSeconds }),
+    transportErrors: transportErrorCount(metrics),
+    endpoints: endpointRows({ metrics, scenarioSet }),
+    thresholds: thresholdResults(metrics),
+    relativeFailed: run.gating && anyOver(comparisons)
+  }
+}
+
+const REPORTS = {
+  [SHAPES.AVERAGE_LOAD]: averageLoadReport,
+  [SHAPES.SPIKE_RECOVERY]: spikeReport,
+  [SHAPES.ENDURANCE]: enduranceReport
 }
 
 /**
@@ -649,19 +1090,27 @@ const peakReport = ({
  * @returns {object} The report.
  */
 export const designTargetReport = (options) =>
-  options.shape === SHAPES.AVERAGE_LOAD
-    ? averageLoadReport(options)
-    : peakReport(options)
+  (REPORTS[options.shape] ?? peakReport)(options)
+
+const journeyLinesOver = ({ achieved, phase, seconds }) =>
+  Object.entries(achieved.journeys).map(([scenario, figures]) =>
+    achievedJourneyLine({ scenario, phase, seconds, ...figures })
+  )
 
 const journeyLines = ({ achieved, run }) =>
-  Object.entries(achieved.journeys).map(([scenario, figures]) =>
-    achievedJourneyLine({
-      scenario,
-      phase: run.steadyPhase,
-      seconds: run.steadySeconds,
-      ...figures
-    })
-  )
+  journeyLinesOver({
+    achieved,
+    phase: run.steadyPhase,
+    seconds: run.steadySeconds
+  })
+
+const frontDoorLineOver = ({ achieved, loadProfile, phase, seconds }) =>
+  achievedFrontDoorLine({
+    loadProfile,
+    phase,
+    seconds,
+    ...achieved.frontDoor
+  })
 
 const burstLines = ({ burst, relative, run }) =>
   burst === undefined
@@ -707,6 +1156,77 @@ const peakText = (report, metrics) =>
     ...thresholdLines(metrics)
   ].join('\n')}\n`
 
+const spikeText = (report, metrics) =>
+  `${[
+    report.run.line,
+    report.run.profileLine,
+    ...journeyLines(report),
+    achievedFrontDoorLine({
+      loadProfile: report.run.loadProfile,
+      phase: report.run.steadyPhase,
+      seconds: report.run.steadySeconds,
+      ...report.achieved.frontDoor
+    }),
+    requestMixLine({
+      phase: report.run.steadyPhase,
+      share: report.achieved.frontDoor.achieved.dashboardReadShare
+    }),
+    spikeLine({
+      duration: report.spike.duration,
+      achieved: report.spike.achieved,
+      capacities: report.spike.capacities,
+      loadProfile: report.run.loadProfile
+    }),
+    ...report.relative.map(recoveryLine),
+    comparisonOutcomeLine({
+      label: 'Recovery',
+      comparisons: report.relative,
+      gating: report.run.gating
+    }),
+    signInCascadeLine(metrics),
+    ...report.endpoints.map(endpointLine),
+    ...thresholdLines(metrics)
+  ].join('\n')}\n`
+
+const enduranceText = (report, metrics) =>
+  `${[
+    report.run.line,
+    report.run.profileLine,
+    ...report.windows.flatMap((window) => [
+      ...journeyLinesOver({
+        achieved: window,
+        phase: window.phase,
+        seconds: window.seconds
+      }),
+      frontDoorLineOver({
+        achieved: window,
+        loadProfile: report.run.loadProfile,
+        phase: window.phase,
+        seconds: window.seconds
+      })
+    ]),
+    ...report.relative.map(driftLine),
+    comparisonOutcomeLine({
+      label: 'Drift',
+      comparisons: report.relative,
+      gating: report.run.gating
+    }),
+    ...reauthenticationLines({
+      entries: report.reauthentication,
+      expiry: report.run.expiry
+    }),
+    reauthenticationTrafficLine(metrics),
+    transportErrorLine(metrics),
+    ...report.endpoints.map(endpointLine),
+    ...thresholdLines(metrics)
+  ].join('\n')}\n`
+
+const TEXTS = {
+  [SHAPES.AVERAGE_LOAD]: averageLoadText,
+  [SHAPES.SPIKE_RECOVERY]: spikeText,
+  [SHAPES.ENDURANCE]: enduranceText
+}
+
 /**
  * Writes a design-target run's end-of-test text.
  *
@@ -715,9 +1235,7 @@ const peakText = (report, metrics) =>
  * @returns {string} Lines joined with newlines, ending in one.
  */
 export const designTargetText = (report, metrics) =>
-  report.hours === undefined
-    ? peakText(report, metrics)
-    : averageLoadText(report, metrics)
+  (TEXTS[report.run.shape] ?? peakText)(report, metrics)
 
 const HTML_ESCAPES = {
   '&': '&amp;',
@@ -749,17 +1267,15 @@ const table = (heading, columns, rows) =>
     .join('\n')}\n</table>`
 
 const achievedRows = ({ achieved }) => [
-  ...Object.entries(achieved.journeys).map(
-    ([scenario, { achieved: a, target }]) => [
-      scenario,
-      figureText(a.notificationsPerHour),
-      String(target.notificationsPerHour),
-      rpsText(a.frontendRps),
-      String(target.frontendRps),
-      figureText(a.concurrentUsers),
-      String(target.concurrentUsers)
-    ]
-  ),
+  ...Object.entries(achieved.journeys).map(([scenario, figures]) => [
+    scenario,
+    figureText(figures.achieved.notificationsPerHour),
+    String(figures.target.notificationsPerHour),
+    rpsText(figures.achieved.frontendRps),
+    String(figures.target.frontendRps),
+    figureText(figures.achieved.concurrentUsers),
+    String(figures.target.concurrentUsers)
+  ]),
   [
     'front door',
     figureText(achieved.frontDoor.achieved.signInsPerHour),
@@ -798,18 +1314,22 @@ const relativeTable = (report) =>
     ])
   )
 
+const achievedHeading = (phase) => `Achieved over the ${phase}`
+
+const ACHIEVED_COLUMNS = [
+  'Scenario',
+  'Starts or sign-ins an hour',
+  'Target',
+  'Frontend RPS',
+  'Target',
+  'Concurrent users',
+  'Target'
+]
+
 const peakTables = (report) => [
   table(
-    `Achieved over the ${report.run.steadyPhase}`,
-    [
-      'Scenario',
-      'Starts or sign-ins an hour',
-      'Target',
-      'Frontend RPS',
-      'Target',
-      'Concurrent users',
-      'Target'
-    ],
+    achievedHeading(report.run.steadyPhase),
+    ACHIEVED_COLUMNS,
     achievedRows(report)
   ),
   burstTable(report),
@@ -857,6 +1377,103 @@ const averageLoadTables = (report) => [
   )
 ]
 
+const comparisonTable = ({ heading, beforeLabel, afterLabel, comparisons }) =>
+  table(
+    heading,
+    [
+      'Scenario',
+      'Kind',
+      `${beforeLabel} P95 ms`,
+      `${afterLabel} P95 ms`,
+      'Requests',
+      'Verdict'
+    ],
+    comparisons.map((entry) => [
+      entry.scenario,
+      entry.kind,
+      entry.beforeP95Ms === undefined ? '' : Math.round(entry.beforeP95Ms),
+      entry.afterP95Ms === undefined ? '' : Math.round(entry.afterP95Ms),
+      entry.afterCount,
+      entry.verdict
+    ])
+  )
+
+const spikeRows = ({ achieved, capacities, loadProfile }) => {
+  const withIuu = loadProfile === LOAD_PROFILES.WITH_IUU
+  const { backendCallsPerPage } = DESIGN_TARGETS
+
+  return [
+    ['animals frontend', achieved.animals, capacities.animals],
+    [
+      'animals backend (derived)',
+      achieved.animalsBackend,
+      capacities.animals * backendCallsPerPage
+    ],
+    ['plants frontend', achieved.plants, capacities.plants],
+    [
+      'plants backend (derived)',
+      achieved.plantsBackend,
+      capacities.plants * backendCallsPerPage
+    ],
+    [
+      'INS front door',
+      achieved.ins,
+      withIuu ? capacities.ins + capacities.iuu : capacities.ins
+    ],
+    ['session path (derived)', achieved.sessionPath, capacities.sessionPath]
+  ].map(([component, rate, capacity]) => [
+    component,
+    rpsText(rate),
+    String(capacity)
+  ])
+}
+
+const spikeTables = (report) => [
+  `<p>${escapeHtml(report.run.profileLine)}</p>`,
+  table(
+    achievedHeading(report.run.steadyPhase),
+    ACHIEVED_COLUMNS,
+    achievedRows(report)
+  ),
+  table(
+    `Spike (${report.spike.duration})`,
+    ['Component', 'RPS', 'Capacity'],
+    spikeRows({ ...report.spike, loadProfile: report.run.loadProfile })
+  ),
+  comparisonTable({
+    heading: 'Recovery P95',
+    beforeLabel: 'Baseline',
+    afterLabel: 'Recovered',
+    comparisons: report.relative
+  })
+]
+
+const enduranceTables = (report) => [
+  `<p>${escapeHtml(report.run.profileLine)}</p>`,
+  ...report.windows.map((window) =>
+    table(
+      achievedHeading(window.phase),
+      ACHIEVED_COLUMNS,
+      achievedRows({ achieved: window })
+    )
+  ),
+  comparisonTable({
+    heading: 'Drift P95',
+    beforeLabel: 'First-hour',
+    afterLabel: 'Final-hour',
+    comparisons: report.relative
+  }),
+  table(
+    'Re-authentication',
+    ['Frontend', 'Times', 'Expected'],
+    report.reauthentication.map(({ frontend, count, expected }) => [
+      frontend,
+      count,
+      expected
+    ])
+  )
+]
+
 const endpointsTable = (report) =>
   table(
     'Endpoints',
@@ -882,6 +1499,12 @@ const endpointsTable = (report) =>
     ])
   )
 
+const TABLES = {
+  [SHAPES.AVERAGE_LOAD]: averageLoadTables,
+  [SHAPES.SPIKE_RECOVERY]: spikeTables,
+  [SHAPES.ENDURANCE]: enduranceTables
+}
+
 /**
  * Writes a design-target run's report as a complete HTML page.
  *
@@ -899,11 +1522,26 @@ export const designTargetHtml = (report) =>
     '<body style="font-family:sans-serif;margin:16px">',
     `<h1>Design-target run: ${escapeHtml(report.run.shape)}</h1>`,
     `<p>${escapeHtml(report.run.line)}</p>`,
-    ...(report.hours === undefined
-      ? peakTables(report)
-      : averageLoadTables(report)),
+    ...(TABLES[report.run.shape] ?? peakTables)(report),
     endpointsTable(report),
     '</body>',
     '</html>',
     ''
   ].join('\n')
+
+const FAILED_LINES = {
+  [SHAPES.P99_BURST]: relativeLine,
+  [SHAPES.SPIKE_RECOVERY]: recoveryLine,
+  [SHAPES.ENDURANCE]: driftLine
+}
+
+/**
+ * Lists the relative comparisons that went over, as lines.
+ *
+ * @param {ReturnType<typeof designTargetReport>} report - The run's report.
+ * @returns {string[]} One line for each pair that is over, worded for the run's shape.
+ */
+export const failedComparisonLines = (report) =>
+  report.relative
+    .filter(({ verdict }) => verdict === 'over')
+    .map(FAILED_LINES[report.run.shape])

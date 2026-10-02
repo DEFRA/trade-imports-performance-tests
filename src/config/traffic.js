@@ -44,7 +44,28 @@ const WEEKDAY_HOURLY_SHARES = [
   0.021, 0.016
 ]
 
-const ADDRESS_BOOK_SESSION_PAGES = 12
+// DR-EUDP-005 'Scenario shapes' row 3 and volumetrics section 4.2: five minutes at peak, then a ten-second spike.
+const SPIKE_BASELINE_DURATION = '5m'
+const SPIKE_DURATION = '10s'
+// c-004 default: P95 back within 10% of the pre-spike baseline within 60 seconds.
+const SPIKE_RECOVERY_DURATION = '60s'
+// Interim: the window judged once the minute c-004 allows has passed.
+const SPIKE_RECOVERED_DURATION = '2m'
+// Volumetrics section 4.2 Spike capacities rows 1 and 2: proposals pending open item 2.
+const FRONTEND_SPIKE_CAPACITY_RPS = 5
+const IUU_SPIKE_CAPACITY_RPS = 15
+// DR-EUDP-005 'Scenario shapes' row 4: eight hours at the design-target peak.
+const ENDURANCE_HOLD_DURATION = '8h'
+// c-004 default: the final hour's P95 against the first hour's.
+const ENDURANCE_COMPARISON_WINDOW = '1h'
+// The frontends' session.cache.ttl default (four hours), set at sign-in and not sliding.
+const FRONTEND_SESSION_LIFETIME = '4h'
+// Interim: how often a returning user visits its frontend, and how many there are for each.
+const RETURNING_VISIT_INTERVAL = '10m'
+const RETURNING_USERS_PER_FRONTEND = 1
+const SESSION_EXPIRIES = ['frontend', 'client']
+
+export const ADDRESS_BOOK_SESSION_PAGES = 12
 const SECONDS_PER_MINUTE = 60
 const SIGN_IN_PAGES_WITHOUT_WAIT = 1
 export const SECONDS_PER_HOUR = 3600
@@ -55,6 +76,7 @@ const DURATION_FORMAT = /^\d+[smh]$/
 const MIN_BURST_SECONDS = 2
 // Each hour after the first spends one second stepping to its rate, then holds it.
 const MIN_HOUR_SECONDS = 2
+const HALF_DENOMINATOR = 2
 
 export const HOURS_PER_DAY = 24
 
@@ -142,6 +164,26 @@ export const TRAFFIC_DEFAULTS = freezeDeep({
     seasonalPeakFactor: A1_SEASONAL_PEAK_FACTOR,
     designHeadroom: A3_DESIGN_HEADROOM
   },
+  spikeRecovery: {
+    baselineDuration: SPIKE_BASELINE_DURATION,
+    spikeDuration: SPIKE_DURATION,
+    recoveryDuration: SPIKE_RECOVERY_DURATION,
+    recoveredDuration: SPIKE_RECOVERED_DURATION,
+    capacityRps: {
+      ins: FRONTEND_SPIKE_CAPACITY_RPS,
+      animals: FRONTEND_SPIKE_CAPACITY_RPS,
+      plants: FRONTEND_SPIKE_CAPACITY_RPS,
+      iuu: IUU_SPIKE_CAPACITY_RPS
+    }
+  },
+  endurance: {
+    holdDuration: ENDURANCE_HOLD_DURATION,
+    comparisonWindow: ENDURANCE_COMPARISON_WINDOW,
+    sessionExpiry: 'frontend',
+    sessionLifetime: FRONTEND_SESSION_LIFETIME,
+    visitInterval: RETURNING_VISIT_INTERVAL,
+    returningUsersPerFrontend: RETURNING_USERS_PER_FRONTEND
+  },
   mix: { dashboardReadShareTarget: D7_DASHBOARD_READ_SHARE },
   backgroundVolume: {
     liveAnimalsNotifications: GBN_AG_ANNUAL_NOTIFICATIONS,
@@ -208,7 +250,8 @@ const WHOLE_NUMBER_KEYS = new Set([
   'highRiskPlantsNotifications',
   'addressBookEntries',
   'maxCreatedPerRun',
-  'virtualUsers'
+  'virtualUsers',
+  'returningUsersPerFrontend'
 ])
 const DURATION_KEYS = new Set([
   'duration',
@@ -217,8 +260,16 @@ const DURATION_KEYS = new Set([
   'holdDuration',
   'peakDuration',
   'burstDuration',
-  'hourDuration'
+  'hourDuration',
+  'baselineDuration',
+  'spikeDuration',
+  'recoveryDuration',
+  'recoveredDuration',
+  'comparisonWindow',
+  'sessionLifetime',
+  'visitInterval'
 ])
+const CHOICE_KEYS = { sessionExpiry: SESSION_EXPIRIES }
 const SHARE_KEYS = new Set([
   'amendShare',
   'cancelAmendShare',
@@ -271,6 +322,12 @@ const deepMerge = (base, override, parent = '') => {
 }
 
 const failureFor = (key, value) => {
+  if (key in CHOICE_KEYS) {
+    return CHOICE_KEYS[key].includes(value)
+      ? undefined
+      : `one of ${CHOICE_KEYS[key].join(', ')}`
+  }
+
   if (DURATION_KEYS.has(key)) {
     return typeof value === 'string' && DURATION_FORMAT.test(value)
       ? undefined
@@ -437,6 +494,25 @@ const failIfHourTooShort = (hourDuration) => {
   }
 }
 
+const failIfSpikeTooShort = (spikeDuration) => {
+  if (durationSeconds(spikeDuration) < MIN_BURST_SECONDS) {
+    throw new Error(
+      `TRAFFIC_MODEL spikeRecovery.spikeDuration must be at least ${MIN_BURST_SECONDS}s, got '${spikeDuration}'`
+    )
+  }
+}
+
+const failIfWindowsOverlap = ({ holdDuration, comparisonWindow }) => {
+  if (
+    durationSeconds(comparisonWindow) * HALF_DENOMINATOR >
+    durationSeconds(holdDuration)
+  ) {
+    throw new Error(
+      `TRAFFIC_MODEL endurance.comparisonWindow must be at most half of endurance.holdDuration, got '${comparisonWindow}' and '${holdDuration}'`
+    )
+  }
+}
+
 /**
  * Works out the traffic model a run applies.
  *
@@ -456,6 +532,11 @@ export const resolveTrafficModel = (env, profile = {}) => {
   validate(model)
   failIfBurstTooShort(model.p99Burst.burstDuration)
   failIfHourTooShort(model.averageLoad.hourDuration)
+  failIfSpikeTooShort(model.spikeRecovery.spikeDuration)
+  failIfWindowsOverlap({
+    holdDuration: model.endurance.holdDuration,
+    comparisonWindow: model.endurance.comparisonWindow
+  })
 
   return freezeDeep(model)
 }
@@ -623,6 +704,58 @@ export const scenarioRates = (model) => ({
     model
   )
 })
+
+const journeyPagesPerHour = ({ rate, journeyModel, frontend, model }) => ({
+  [frontend]: rate * journeyModel.pagesPerNotification,
+  ins:
+    rate *
+    journeyModel.sessionsPerNotification *
+    model.frontDoor.corePagesPerJourneySession
+})
+
+/**
+ * The page requests an hour each scenario puts on each frontend at its steady
+ * rate. The IUU scenarios' pages are counted as `iuu`, though they land on the
+ * INS host, because they count against IUU's own capacity (c-007).
+ *
+ * @param {object} model - A resolved traffic model.
+ * @returns {Record<string, Record<string, number>>} Pages an hour by scenario name, then by frontend.
+ */
+export const scenarioPagesPerHour = (model) => {
+  const rates = scenarioRates(model)
+  const { frontDoor } = model
+  const iuuSessionPages = frontDoor.corePagesPerJourneySession
+
+  return {
+    'live-animals': journeyPagesPerHour({
+      rate: rates['live-animals'],
+      journeyModel: model.liveAnimals,
+      frontend: 'animals',
+      model
+    }),
+    'high-risk-plants': journeyPagesPerHour({
+      rate: rates['high-risk-plants'],
+      journeyModel: model.highRiskPlants,
+      frontend: 'plants',
+      model
+    }),
+    'ins-front-door': {
+      ins: rates['ins-front-door'] * frontDoor.pagesPerDashboardOnlySession
+    },
+    'ins-address-book': {
+      ins: rates['ins-address-book'] * ADDRESS_BOOK_SESSION_PAGES
+    },
+    'iuu-journey-sessions': {
+      iuu: rates['iuu-journey-sessions'] * iuuSessionPages
+    },
+    'iuu-front-door': {
+      iuu: rates['iuu-front-door'] * frontDoor.pagesPerDashboardOnlySession
+    },
+    'iuu-address-book': {
+      iuu: rates['iuu-address-book'] * ADDRESS_BOOK_SESSION_PAGES
+    }
+  }
+}
 
 /**
  * The longest one iteration of each scenario can run, in seconds.

@@ -27,7 +27,7 @@ import {
   recordSession
 } from './pages.js'
 import { markPhase } from './phase.js'
-import { recordServerError } from './server-errors.js'
+import { recordServerError, recordTransportError } from './server-errors.js'
 
 const HTTP_OK = 200
 const JSON_HEADERS = { 'content-type': 'application/json' }
@@ -50,6 +50,7 @@ const backendParams = (endpoint, headers = {}) => {
 
 const recorded = (response) => {
   recordServerError(response)
+  recordTransportError(response)
 
   return response
 }

@@ -5,7 +5,8 @@ import {
   SCENARIO_LENGTH_PROFILES,
   SHAPES,
   phaseSchedule,
-  scenarioSetFor
+  scenarioSetFor,
+  scenarioSetForShape
 } from '../config/design-target.js'
 import { subMetricKey } from '../config/thresholds.js'
 import { resolveTrafficModel } from '../config/traffic.js'
@@ -16,19 +17,31 @@ import {
   achievedFrontDoorLine,
   achievedJourney,
   achievedJourneyLine,
+  achievedSpike,
   averageLoadHours,
+  comparisonOutcomeLine,
   designTargetHtml,
   designTargetReport,
   designTargetText,
+  driftLine,
   endpointLine,
   endpointRows,
+  failedComparisonLines,
   hourLine,
   hourTarget,
+  p95Comparison,
   phaseSeconds,
+  reauthenticationLines,
+  reauthenticationTrafficLine,
+  reauthentications,
+  recoveryLine,
   relativeBurstVerdicts,
   relativeLine,
   relativeOutcomeLine,
   requestMixLine,
+  signInCascadeLine,
+  spikeLine,
+  transportErrorLine,
   valueOf
 } from './design-target-summary.js'
 
@@ -765,5 +778,582 @@ describe('designTargetReport for average load', () => {
     expect(html).not.toContain('<h2>Burst</h2>')
     expect(html).not.toContain('<script>')
     expect(html).toContain('&lt;script&gt;')
+  })
+})
+
+const pairMetrics = ({ scenario, kind, before, after, beforeP95, afterP95 }) =>
+  Object.fromEntries([
+    duration(
+      { scenario, kind, phase: before },
+      { 'p(95)': beforeP95, count: 500 }
+    ),
+    duration({ scenario, kind, phase: after }, { 'p(95)': afterP95, count: 40 })
+  ])
+
+describe('p95Comparison', () => {
+  const compare = (metrics, overrides = {}) =>
+    p95Comparison({
+      metrics,
+      scenario: 'live-animals',
+      kind: 'page',
+      before: 'baseline',
+      after: 'recovered',
+      factor: 1.1,
+      minSamples: 10,
+      ...overrides
+    })
+  const pair = (afterP95) =>
+    pairMetrics({
+      scenario: 'live-animals',
+      kind: 'page',
+      before: 'baseline',
+      after: 'recovered',
+      beforeP95: 600,
+      afterP95
+    })
+
+  test('is within when the later P95 is no worse than the factor times the earlier', () => {
+    expect(compare(pair(640))).toMatchObject({
+      beforeP95Ms: 600,
+      afterP95Ms: 640,
+      afterCount: 40,
+      verdict: 'within'
+    })
+    expect(compare(pair(640)).limitMs).toBeCloseTo(660, 6)
+  })
+
+  test('is over when it is worse', () => {
+    expect(compare(pair(700)).verdict).toBe('over')
+  })
+
+  test('is not judged with fewer requests than the minimum in the later phase', () => {
+    expect(compare(pair(700), { minSamples: 41 })).toMatchObject({
+      verdict: 'not judged',
+      afterCount: 40
+    })
+  })
+
+  test('is not judged with fewer requests than the minimum in the earlier phase', () => {
+    expect(compare(pair(700), { minBeforeSamples: 501 })).toMatchObject({
+      verdict: 'not judged',
+      beforeCount: 500
+    })
+    expect(compare(pair(700), { minBeforeSamples: 500 }).verdict).toBe('over')
+  })
+
+  test('judges a pair with few requests in the earlier phase unless asked not to', () => {
+    expect(compare(pair(700), { minBeforeSamples: 0 }).verdict).toBe('over')
+  })
+
+  test('is not judged with no requests in the earlier phase', () => {
+    expect(compare({})).toMatchObject({
+      verdict: 'not judged',
+      afterCount: 0,
+      limitMs: undefined
+    })
+  })
+})
+
+describe('achievedSpike', () => {
+  const metrics = {
+    [subMetricKey('page_requests', { frontend: 'animals', phase: 'spike' })]:
+      metric({ count: 49 }),
+    [subMetricKey('page_requests', { frontend: 'plants', phase: 'spike' })]:
+      metric({ count: 50 }),
+    [subMetricKey('page_requests', { frontend: 'ins', phase: 'spike' })]:
+      metric({ count: 51 }),
+    [subMetricKey('page_requests', {
+      scenario: 'iuu-front-door',
+      phase: 'spike'
+    })]: metric({ count: 100 }),
+    [subMetricKey('page_requests', {
+      traffic_class: 'sign-in',
+      phase: 'spike'
+    })]: metric({ count: 3 })
+  }
+
+  test('works out each frontend page rate over the spike and derives the backends', () => {
+    const achieved = achievedSpike({
+      metrics,
+      seconds: 10,
+      scenarioSet: scenarioSetFor('two-journeys')
+    })
+
+    expect(achieved).toMatchObject({
+      animals: 4.9,
+      animalsBackend: 4.9,
+      plants: 5,
+      plantsBackend: 5,
+      ins: 5.1,
+      iuu: 0,
+      signIns: 3
+    })
+  })
+
+  test('derives the session path as every frontend page plus a backend call a journey page', () => {
+    const { sessionPath } = achievedSpike({
+      metrics,
+      seconds: 10,
+      scenarioSet: scenarioSetFor('two-journeys')
+    })
+
+    expect(sessionPath).toBeCloseTo(4.9 + 5 + 5.1 + 4.9 + 5, 6)
+  })
+
+  test('adds the IUU pages to the backends with IUU', () => {
+    const achieved = achievedSpike({
+      metrics,
+      seconds: 10,
+      scenarioSet: scenarioSetFor('with-iuu')
+    })
+
+    expect(achieved.iuu).toBe(10)
+    expect(achieved.iuuBackend).toBe(10)
+  })
+
+  test('is zero, never NaN, with no samples', () => {
+    const achieved = achievedSpike({
+      metrics: {},
+      seconds: 10,
+      scenarioSet: scenarioSetFor('two-journeys')
+    })
+
+    expect(Object.values(achieved).every((value) => value === 0)).toBe(true)
+  })
+})
+
+describe('spike and endurance line writers', () => {
+  const capacities = { ins: 5, animals: 5, plants: 5, sessionPath: 25 }
+  const comparison = {
+    scenario: 'live-animals',
+    kind: 'page',
+    beforeP95Ms: 600,
+    afterP95Ms: 640,
+    beforeCount: 500,
+    afterCount: 40,
+    limitMs: 660,
+    verdict: 'within',
+    window: '2m'
+  }
+
+  test('states the spike against the stated capacities', () => {
+    expect(
+      spikeLine({
+        duration: '10s',
+        loadProfile: 'two-journeys',
+        capacities,
+        achieved: {
+          animals: 4.9,
+          animalsBackend: 4.9,
+          plants: 5,
+          plantsBackend: 5,
+          ins: 5.1,
+          signIns: 3,
+          sessionPath: 24.8
+        }
+      })
+    ).toBe(
+      'Spike (10s): animals frontend 4.9 RPS against 5, backend 4.9 RPS against 5 (derived: 1 backend call a page); plants frontend 5 RPS against 5, backend 5 RPS against 5; INS front door 5.1 RPS against 5 including 3 sign-ins; session path 24.8 RPS against 25 (derived: every frontend page plus 1 backend call a journey page)'
+    )
+  })
+
+  test('adds the IUU capacity to the INS part and 55 to the session path with IUU', () => {
+    const line = spikeLine({
+      duration: '10s',
+      loadProfile: 'with-iuu',
+      capacities: { ...capacities, iuu: 15, sessionPath: 55 },
+      achieved: {
+        animals: 5,
+        animalsBackend: 5,
+        plants: 5,
+        plantsBackend: 5,
+        ins: 19.8,
+        signIns: 9,
+        sessionPath: 54
+      }
+    })
+
+    expect(line).toContain(
+      'INS front door 19.8 RPS against 20 (5 core and 15 IUU) including 9 sign-ins'
+    )
+    expect(line).toContain('session path 54 RPS against 55')
+  })
+
+  test('states a recovery that is within', () => {
+    expect(recoveryLine(comparison)).toBe(
+      "Recovery P95 live-animals page: 640ms in the recovered 2m against the baseline's 600ms plus 10% (660ms): within"
+    )
+  })
+
+  test('states a recovery that is over', () => {
+    expect(
+      recoveryLine({ ...comparison, afterP95Ms: 700, verdict: 'over' })
+    ).toContain('(660ms): OVER')
+  })
+
+  test('states the two recoveries that are not judged', () => {
+    expect(
+      recoveryLine({ ...comparison, afterCount: 6, verdict: 'not judged' })
+    ).toBe(
+      'Recovery P95 live-animals page: not judged, 6 requests in the recovered 2m, fewer than 10'
+    )
+    expect(
+      recoveryLine({ ...comparison, beforeCount: 3, verdict: 'not judged' })
+    ).toBe(
+      'Recovery P95 live-animals page: not judged, 3 requests in the baseline, fewer than 10'
+    )
+  })
+
+  test('states a drift that is within, over and not judged', () => {
+    const drift = {
+      ...comparison,
+      beforeP95Ms: 700,
+      afterP95Ms: 812,
+      limitMs: 840
+    }
+
+    expect(driftLine(drift)).toBe(
+      "Drift P95 live-animals page: 812ms in the final hour against 1.2 times the first hour's 700ms (840ms): within"
+    )
+    expect(driftLine({ ...drift, verdict: 'over' })).toContain('(840ms): OVER')
+    expect(driftLine({ ...drift, afterCount: 3, verdict: 'not judged' })).toBe(
+      'Drift P95 live-animals page: not judged, 3 requests in the final hour, fewer than 10'
+    )
+    expect(driftLine({ ...drift, beforeCount: 0, verdict: 'not judged' })).toBe(
+      'Drift P95 live-animals page: not judged, 0 requests in the first hour, fewer than 10'
+    )
+  })
+
+  test('states whether a relative rule passed, failed or was only reported', () => {
+    const over = { ...comparison, verdict: 'over' }
+
+    expect(
+      comparisonOutcomeLine({
+        label: 'Recovery',
+        comparisons: [comparison],
+        gating: true
+      })
+    ).toBe('Recovery: passed')
+    expect(
+      comparisonOutcomeLine({
+        label: 'Drift',
+        comparisons: [comparison, over],
+        gating: true
+      })
+    ).toBe('Drift: FAILED: live-animals page')
+    expect(
+      comparisonOutcomeLine({
+        label: 'Recovery',
+        comparisons: [over],
+        gating: false
+      })
+    ).toBe('Recovery: reported, not gated (with-IUU profile)')
+  })
+
+  test('states that the Defra ID stub did not cascade', () => {
+    expect(signInCascadeLine({})).toBe(
+      'Defra ID stub: sign-in requests failed 0% in the spike and 0% in the recovery against 1%: no cascade'
+    )
+  })
+
+  test('states that the Defra ID stub cascaded when sign-ins failed in the recovery', () => {
+    const metrics = {
+      [subMetricKey('http_req_failed', {
+        endpoint: 'sign-in',
+        phase: 'recovery'
+      })]: metric({ rate: 0.05 })
+    }
+
+    expect(signInCascadeLine(metrics)).toBe(
+      'Defra ID stub: sign-in requests failed 0% in the spike and 5% in the recovery against 1%: CASCADED'
+    )
+  })
+
+  test('states how often each returning user signed in again', () => {
+    expect(
+      reauthenticationLines({
+        entries: [
+          { scenario: 'returning-ins', frontend: 'ins', count: 2, expected: 2 }
+        ],
+        expiry: 'sessions expire at the frontends after 4h'
+      })
+    ).toEqual([
+      'Re-authentication ins: 2 times, about 2 expected (sessions expire at the frontends after 4h)'
+    ])
+  })
+
+  test('counts the re-authentications of each returning scenario', () => {
+    const model = resolveTrafficModel({}, SCENARIO_LENGTH_PROFILES.local)
+    const metrics = {
+      'reauthentications{scenario:returning-animals}': metric({ count: 3 })
+    }
+
+    expect(reauthentications({ metrics, model, runSeconds: 960 })).toEqual([
+      { scenario: 'returning-ins', frontend: 'ins', count: 0, expected: 4 },
+      {
+        scenario: 'returning-animals',
+        frontend: 'animals',
+        count: 3,
+        expected: 4
+      },
+      {
+        scenario: 'returning-plants',
+        frontend: 'plants',
+        count: 0,
+        expected: 4
+      }
+    ])
+  })
+
+  test('states the re-authentication traffic', () => {
+    const tags = { auth: 're-authentication' }
+    const metrics = Object.fromEntries([
+      duration(tags, { count: 24, 'p(95)': 310 }),
+      [subMetricKey('http_req_failed', tags), metric({ rate: 0 })]
+    ])
+
+    expect(reauthenticationTrafficLine(metrics)).toBe(
+      'Re-authentication traffic (auth:re-authentication): 24 requests, P95 310ms, 0% failed'
+    )
+    expect(reauthenticationTrafficLine({})).toBe(
+      'Re-authentication traffic (auth:re-authentication): 0 requests'
+    )
+  })
+
+  test('states the transport errors', () => {
+    expect(transportErrorLine({})).toBe(
+      'Transport errors (refused, reset or timed out): 0'
+    )
+    expect(transportErrorLine({ transport_errors: metric({ count: 2 }) })).toBe(
+      'Transport errors (refused, reset or timed out): 2'
+    )
+  })
+})
+
+describe('designTargetReport for spike and recovery', () => {
+  const model = resolveTrafficModel({}, SCENARIO_LENGTH_PROFILES.local)
+  const scenarioSet = scenarioSetFor('two-journeys')
+  const schedule = phaseSchedule({
+    shape: SHAPES.SPIKE_RECOVERY,
+    model,
+    scenarioNames: Object.keys(scenarioSet)
+  })
+  const metrics = {
+    ...pairMetrics({
+      scenario: 'live-animals',
+      kind: 'page',
+      before: 'baseline',
+      after: 'recovered',
+      beforeP95: 600,
+      afterP95: 700
+    }),
+    [subMetricKey('page_requests', { frontend: 'animals', phase: 'spike' })]:
+      metric({ count: 49 }),
+    'checks{scenario:live-animals}': {
+      thresholds: { 'rate>0.99': { ok: true } }
+    }
+  }
+  const reportFor = (loadProfile) =>
+    designTargetReport({
+      metrics,
+      shape: SHAPES.SPIKE_RECOVERY,
+      loadProfile,
+      scenarioLength: 'local',
+      environment: 'local',
+      stubProfile: 'zero-delay',
+      schedule,
+      scenarioSet: scenarioSetFor(loadProfile),
+      model
+    })
+
+  test('compares the baseline with the recovered window at 1.1 times', () => {
+    const entry = reportFor('two-journeys').relative.find(
+      ({ scenario, kind }) => scenario === 'live-animals' && kind === 'page'
+    )
+
+    expect(entry.limitMs).toBeCloseTo(660, 6)
+    expect(entry).toMatchObject({ verdict: 'over', window: '1m' })
+  })
+
+  test('fails the run when a recovered P95 is over, but only reports it with IUU', () => {
+    expect(reportFor('two-journeys').relativeFailed).toBe(true)
+    expect(reportFor('with-iuu').relativeFailed).toBe(false)
+  })
+
+  test('reports the spike against the stated capacities', () => {
+    const { spike } = reportFor('two-journeys')
+
+    expect(spike).toMatchObject({
+      duration: '10s',
+      seconds: 10,
+      capacities: { sessionPath: 25 },
+      achieved: { animals: 4.9 }
+    })
+  })
+
+  test('writes text that states the profile, the spike, every recovery and the cascade', () => {
+    const report = reportFor('two-journeys')
+    const lines = designTargetText(report, metrics).trimEnd().split('\n')
+
+    expect(lines[0]).toBe(report.run.line)
+    expect(lines[1]).toMatch(/^Spike: 10s at the stated capacities/)
+    expect(lines.some((line) => line.startsWith('Spike (10s): animals'))).toBe(
+      true
+    )
+    expect(
+      lines.filter((line) => line.startsWith('Recovery P95 '))
+    ).toHaveLength(report.relative.length)
+    expect(report.relative.length).toBeGreaterThanOrEqual(4)
+    expect(lines).toContain('Recovery: FAILED: live-animals page')
+    expect(lines.some((line) => line.startsWith('Defra ID stub: '))).toBe(true)
+  })
+
+  test('writes HTML with the spike and recovery tables and escaped values', () => {
+    const report = reportFor('two-journeys')
+    const html = designTargetHtml({
+      ...report,
+      relative: [
+        { ...report.relative[0], scenario: '<script>alert(1)</script>' }
+      ]
+    })
+
+    expect(html).toContain('<h2>Achieved over the baseline</h2>')
+    expect(html).toContain('<h2>Spike (10s)</h2>')
+    expect(html).toContain('<h2>Recovery P95</h2>')
+    expect(html).not.toContain('<script>')
+    expect(html).toContain('&lt;script&gt;')
+  })
+
+  test('lists the pairs that are over as recovery lines', () => {
+    expect(failedComparisonLines(reportFor('two-journeys'))).toEqual([
+      "Recovery P95 live-animals page: 700ms in the recovered 1m against the baseline's 600ms plus 10% (660ms): OVER"
+    ])
+  })
+})
+
+describe('designTargetReport for endurance', () => {
+  const model = resolveTrafficModel({}, SCENARIO_LENGTH_PROFILES.local)
+  const scenarioSet = scenarioSetForShape({
+    shape: SHAPES.ENDURANCE,
+    loadProfile: 'two-journeys'
+  })
+  const schedule = phaseSchedule({
+    shape: SHAPES.ENDURANCE,
+    model,
+    scenarioNames: Object.keys(scenarioSetFor('two-journeys'))
+  })
+  const metrics = {
+    ...pairMetrics({
+      scenario: 'live-animals',
+      kind: 'page',
+      before: 'first-hour',
+      after: 'final-hour',
+      beforeP95: 700,
+      afterP95: 850
+    }),
+    'reauthentications{scenario:returning-ins}': metric({ count: 4 }),
+    transport_errors: metric({ count: 0 }),
+    'checks{scenario:live-animals}': {
+      thresholds: { 'rate>0.99': { ok: true } }
+    }
+  }
+  const report = designTargetReport({
+    metrics,
+    shape: SHAPES.ENDURANCE,
+    loadProfile: 'two-journeys',
+    scenarioLength: 'local',
+    environment: 'local',
+    stubProfile: 'zero-delay',
+    schedule,
+    scenarioSet,
+    model
+  })
+
+  test('compares the first hour with the final hour at 1.2 times', () => {
+    const entry = report.relative.find(
+      ({ scenario, kind }) => scenario === 'live-animals' && kind === 'page'
+    )
+
+    expect(entry.limitMs).toBeCloseTo(840, 6)
+    expect(entry.verdict).toBe('over')
+    expect(report.relativeFailed).toBe(true)
+  })
+
+  test('reports each window, the re-authentications and the transport errors', () => {
+    expect(report.windows.map(({ phase }) => phase)).toEqual([
+      'first-hour',
+      'final-hour'
+    ])
+    expect(report.reauthentication).toContainEqual({
+      scenario: 'returning-ins',
+      frontend: 'ins',
+      count: 4,
+      expected: 4
+    })
+    expect(report.transportErrors).toBe(0)
+    expect(report.run.runSeconds).toBe(960)
+  })
+
+  test('writes text with the profile, the drift, the re-authentication and the transport errors', () => {
+    const lines = designTargetText(report, metrics).trimEnd().split('\n')
+
+    expect(lines[0]).toBe(report.run.line)
+    expect(lines[1]).toMatch(/^Endurance: one returning user each/)
+    expect(lines.filter((line) => line.startsWith('Drift P95 '))).toHaveLength(
+      report.relative.length
+    )
+    expect(report.relative.length).toBeGreaterThanOrEqual(4)
+    expect(lines).toContain('Drift: FAILED: live-animals page')
+    expect(
+      lines.filter((line) => line.startsWith('Re-authentication '))
+    ).toHaveLength(4)
+    expect(lines).toContain('Transport errors (refused, reset or timed out): 0')
+  })
+
+  test('writes HTML with the drift and re-authentication tables and escaped values', () => {
+    const html = designTargetHtml({
+      ...report,
+      reauthentication: [
+        {
+          scenario: 'x',
+          frontend: '<script>alert(1)</script>',
+          count: 1,
+          expected: 1
+        }
+      ]
+    })
+
+    expect(html).toContain('<h2>Achieved over the first-hour</h2>')
+    expect(html).toContain('<h2>Achieved over the final-hour</h2>')
+    expect(html).toContain('<h2>Drift P95</h2>')
+    expect(html).toContain('<h2>Re-authentication</h2>')
+    expect(html).not.toContain('<script>')
+  })
+
+  test('lists the pairs that are over as drift lines', () => {
+    expect(failedComparisonLines(report)).toEqual([
+      "Drift P95 live-animals page: 850ms in the final hour against 1.2 times the first hour's 700ms (840ms): OVER"
+    ])
+  })
+})
+
+describe('failedComparisonLines for a burst', () => {
+  test('words the over pairs the way the burst always has', () => {
+    const verdict = {
+      scenario: 'live-animals',
+      kind: 'page',
+      peakP95Ms: 300,
+      burstP95Ms: 900,
+      burstCount: 40,
+      limitMs: 600,
+      verdict: 'over'
+    }
+
+    expect(
+      failedComparisonLines({
+        run: { shape: 'p99-burst' },
+        relative: [verdict, { ...verdict, kind: 'api', verdict: 'within' }]
+      })
+    ).toEqual([relativeLine(verdict)])
   })
 })
