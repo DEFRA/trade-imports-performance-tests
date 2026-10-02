@@ -13,12 +13,13 @@ import {
   JOURNEYS,
   PERF_ADDRESS,
   SETUP_TIMEOUT,
-  STUB_PROFILE,
   resolvePassword
 } from '../config/smoke.js'
+import { STUBBED_INTEGRATIONS } from '../config/stub-profiles.js'
 import {
   backgroundVolumeReportThresholds,
-  backgroundVolumeThresholds
+  backgroundVolumeThresholds,
+  stubProfileReportThresholds
 } from '../config/thresholds.js'
 import {
   resolveEnvironment,
@@ -40,6 +41,11 @@ import {
   reportBackgroundVolume
 } from '../k6/background-volume.js'
 import { waitForReadiness } from '../k6/readiness.js'
+import {
+  clearStubAnswered,
+  readStubProfiles,
+  reportStubProfiles
+} from '../k6/stub-profiles.js'
 
 const environment = resolveEnvironment(__ENV)
 const localhostAlias = resolveLocalhostAlias(__ENV)
@@ -60,30 +66,33 @@ const urls = {
   animalsBackend: resolveServiceUrl(__ENV, animals.backend),
   plantsBackend: resolveServiceUrl(__ENV, plants.backend),
   insBackend: resolveServiceUrl(__ENV, 'trade-imports-ins-backend'),
-  referenceData: resolveServiceUrl(__ENV, 'trade-imports-reference-data')
+  referenceData: resolveServiceUrl(__ENV, 'trade-imports-reference-data'),
+  tradeImportsStub: resolveServiceUrl(__ENV, 'trade-imports-stub'),
+  defraIdStub: resolveServiceUrl(__ENV, 'trade-imports-defra-id-stub')
 }
 
 export const options = {
   scenarios: backgroundScenarios(model),
   thresholds: {
     ...backgroundVolumeThresholds(Object.keys(BACKGROUND_SCENARIOS)),
-    ...backgroundVolumeReportThresholds(DATASTORES)
+    ...backgroundVolumeReportThresholds(DATASTORES),
+    ...stubProfileReportThresholds(STUBBED_INTEGRATIONS)
   },
   setupTimeout: SETUP_TIMEOUT,
   teardownTimeout: SETUP_TIMEOUT,
-  tags: { environment, stub_profile: STUB_PROFILE }
+  tags: { environment, stub_profile: 'as-reported' }
 }
 
 const measure = () =>
   measureBackgroundVolume({ urls, localhostAlias, credentials })
 
 export function setup() {
-  console.log(
-    `Background volume run in ${environment} with stub profile ${STUB_PROFILE}`
-  )
+  console.log(`Background volume run in ${environment}`)
   console.log(`Traffic model: ${JSON.stringify(model)}`)
 
   waitForReadiness({ urls, localhostAlias, credentials })
+  reportStubProfiles(readStubProfiles({ urls }), 'start', new Date())
+  clearStubAnswered({ urls })
   console.log(indexesBuiltLine())
   ensurePerfAddress({
     insUrl: urls.ins,
@@ -189,4 +198,5 @@ export function teardown(data) {
 
   reportBackgroundVolume(after, model.backgroundVolume, 'end')
   console.log(createdLine(data.before, after))
+  reportStubProfiles(readStubProfiles({ urls }), 'end', new Date())
 }

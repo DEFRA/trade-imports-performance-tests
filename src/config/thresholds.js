@@ -1,4 +1,5 @@
 import { kindOf } from './endpoints.js'
+import { FLAGS, PROFILES, QUANTILES } from './stub-profiles.js'
 
 // Pages that upload and scan a document: DR-EUDP-005 section 4.7, SYN-28, SYN-29.
 const UPLOAD_PAGE_ALLOWANCE_MS = 60_000
@@ -109,6 +110,47 @@ export const backgroundVolumeReportThresholds = (datastores) =>
       `background_volume{datastore:${datastore}}`,
       ['value>=0']
     ])
+  )
+
+const stubProfileKeys = ({ integration, stub }) => {
+  const latencyKeys = (source) =>
+    QUANTILES.map(
+      (quantile) =>
+        `stub_latency{integration:${integration},source:${source},quantile:${quantile}}`
+    )
+
+  return [
+    ...PROFILES.map(
+      (profile) => `stub_profile{integration:${integration},profile:${profile}}`
+    ),
+    ...FLAGS.map(
+      (flag) => `stub_profile_flagged{integration:${integration},flag:${flag}}`
+    ),
+    ...latencyKeys('target'),
+    ...(stub === null
+      ? []
+      : [
+          ...latencyKeys('answered'),
+          `stub_latency_answered_count{integration:${integration}}`
+        ])
+  ]
+}
+
+/**
+ * Builds the reporting-only thresholds that make k6 print each stubbed
+ * integration's profile, flags and latency.
+ *
+ * These can never fail: `value>=0` is always true, with or without data. They
+ * exist only so the end-of-test summary states each profile, flag and latency.
+ * Every gating threshold stays tied to a figure. The answered quantiles are
+ * meaningful only when `stub_latency_answered_count` is above 0.
+ *
+ * @param {Array<{ integration: string, stub: string | null }>} integrations - The stubbed integrations.
+ * @returns {Record<string, string[]>} k6 thresholds.
+ */
+export const stubProfileReportThresholds = (integrations) =>
+  Object.fromEntries(
+    integrations.flatMap(stubProfileKeys).map((key) => [key, ['value>=0']])
   )
 
 /**

@@ -9,16 +9,20 @@ import {
   PERF_ADDRESS,
   SCENARIOS,
   SETUP_TIMEOUT,
-  STUB_PROFILE,
   resolvePassword,
   notificationSplits,
   smokeScenarios
 } from '../config/smoke.js'
 import {
+  STUBBED_INTEGRATIONS,
+  resolveRequiredStubProfile
+} from '../config/stub-profiles.js'
+import {
   backgroundVolumeReportThresholds,
   documentScanThresholds,
   notificationSplitThresholds,
-  smokeThresholds
+  smokeThresholds,
+  stubProfileReportThresholds
 } from '../config/thresholds.js'
 import {
   documentScanAllowanceLine,
@@ -43,8 +47,15 @@ import { HIGH_RISK_PLANTS_STEPS } from '../k6/high-risk-plants.js'
 import { notificationJourney } from '../k6/journeys.js'
 import { LIVE_ANIMALS_STEPS } from '../k6/live-animals.js'
 import { waitForReadiness } from '../k6/readiness.js'
+import {
+  clearStubAnswered,
+  readStubProfiles,
+  reportStubProfiles,
+  requireStubProfiles
+} from '../k6/stub-profiles.js'
 
 const environment = resolveEnvironment(__ENV)
+const requiredStubProfile = resolveRequiredStubProfile(__ENV)
 const localhostAlias = resolveLocalhostAlias(__ENV)
 const credentials = {
   crn: IDENTITY.crn,
@@ -63,7 +74,9 @@ const urls = {
   animalsBackend: resolveServiceUrl(__ENV, animals.backend),
   plantsBackend: resolveServiceUrl(__ENV, plants.backend),
   insBackend: resolveServiceUrl(__ENV, 'trade-imports-ins-backend'),
-  referenceData: resolveServiceUrl(__ENV, 'trade-imports-reference-data')
+  referenceData: resolveServiceUrl(__ENV, 'trade-imports-reference-data'),
+  tradeImportsStub: resolveServiceUrl(__ENV, 'trade-imports-stub'),
+  defraIdStub: resolveServiceUrl(__ENV, 'trade-imports-defra-id-stub')
 }
 
 export const options = {
@@ -72,15 +85,18 @@ export const options = {
     ...smokeThresholds(SCENARIOS),
     ...documentScanThresholds('live-animals'),
     ...notificationSplitThresholds(notificationSplits(model)),
-    ...backgroundVolumeReportThresholds(DATASTORES)
+    ...backgroundVolumeReportThresholds(DATASTORES),
+    ...stubProfileReportThresholds(STUBBED_INTEGRATIONS)
   },
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'],
   setupTimeout: SETUP_TIMEOUT,
-  tags: { environment, stub_profile: STUB_PROFILE }
+  tags: { environment, stub_profile: requiredStubProfile ?? 'as-reported' }
 }
 
 export function setup() {
-  console.log(`Smoke run in ${environment} with stub profile ${STUB_PROFILE}`)
+  console.log(
+    `Smoke run in ${environment}, requiring stub profile ${requiredStubProfile ?? 'none'}`
+  )
   console.log(`Traffic model: ${JSON.stringify(model)}`)
   console.log(mixTargetLine(model))
   console.log(documentScanAllowanceLine())
@@ -92,6 +108,12 @@ export function setup() {
   }
 
   waitForReadiness({ urls, localhostAlias, credentials })
+
+  const stubProfiles = readStubProfiles({ urls })
+
+  reportStubProfiles(stubProfiles, 'start', new Date())
+  requireStubProfiles(stubProfiles, requiredStubProfile)
+  clearStubAnswered({ urls })
   console.log(indexesBuiltLine())
   ensurePerfAddress({
     insUrl: urls.ins,
@@ -106,6 +128,10 @@ export function setup() {
   )
 
   return { addressName: PERF_ADDRESS.name }
+}
+
+export function teardown() {
+  reportStubProfiles(readStubProfiles({ urls }), 'end', new Date())
 }
 
 const frontDoorOptions = () => ({

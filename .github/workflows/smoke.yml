@@ -79,6 +79,7 @@ jobs:
             --env-file perftests/compose/aws.env \
             -e ENVIRONMENT=local \
             -e TEST_SUITE=smoke \
+            -e STUB_PROFILE=zero-delay \
             -e S3_ENDPOINT=http://localhost:4566 \
             -e RESULTS_OUTPUT_S3_PATH=s3://perf-results/${{ github.run_id }} \
             -v "${{ github.workspace }}/perf-reports:/opt/perftest/reports" \

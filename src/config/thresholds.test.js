@@ -1,13 +1,15 @@
 import { describe, expect, test } from 'vitest'
 
 import { DATASTORES } from './background-volume.js'
+import { STUBBED_INTEGRATIONS } from './stub-profiles.js'
 import {
   backgroundVolumeReportThresholds,
   backgroundVolumeThresholds,
   documentScanThresholds,
   notificationSplitThresholds,
   scenarioThresholds,
-  smokeThresholds
+  smokeThresholds,
+  stubProfileReportThresholds
 } from './thresholds.js'
 
 const SCENARIO = 'live-animals'
@@ -190,6 +192,62 @@ describe('backgroundVolumeReportThresholds', () => {
       DATASTORES.map((datastore) => `background_volume{datastore:${datastore}}`)
     )
 
+    for (const limits of Object.values(report)) {
+      expect(limits).toEqual(['value>=0'])
+    }
+  })
+})
+
+describe('stubProfileReportThresholds', () => {
+  const report = stubProfileReportThresholds(STUBBED_INTEGRATIONS)
+  const keysStarting = (prefix) =>
+    Object.keys(report).filter((key) => key.startsWith(prefix))
+
+  test('is one profile key for each integration and profile', () => {
+    expect(keysStarting('stub_profile{')).toHaveLength(12)
+  })
+
+  test('is one flag key for each integration and flag', () => {
+    expect(keysStarting('stub_profile_flagged{')).toHaveLength(8)
+  })
+
+  test('is a target latency key for every integration and an answered key for each stub-hosted one', () => {
+    expect(
+      keysStarting('stub_latency{').filter((key) =>
+        key.includes('source:target')
+      )
+    ).toHaveLength(12)
+    expect(
+      keysStarting('stub_latency{').filter((key) =>
+        key.includes('source:answered')
+      )
+    ).toHaveLength(9)
+    expect(
+      Object.keys(report).filter(
+        (key) =>
+          key.includes('azure-service-bus') && key.includes('source:answered')
+      )
+    ).toEqual([])
+  })
+
+  test('is an answered count key for each stub-hosted integration and none for the others', () => {
+    const stubHosted = STUBBED_INTEGRATIONS.filter(({ stub }) => stub !== null)
+
+    expect(keysStarting('stub_latency_answered_count{')).toEqual(
+      stubHosted.map(
+        ({ integration }) =>
+          `stub_latency_answered_count{integration:${integration}}`
+      )
+    )
+    expect(stubHosted.length).toBeGreaterThan(0)
+    expect(
+      keysStarting('stub_latency_answered_count{').filter((key) =>
+        key.includes('azure-service-bus')
+      )
+    ).toEqual([])
+  })
+
+  test('is reporting-only: every threshold is value>=0', () => {
     for (const limits of Object.values(report)) {
       expect(limits).toEqual(['value>=0'])
     }

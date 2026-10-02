@@ -9,6 +9,7 @@ CDP builds this repo into a Docker image. The CDP Portal runs the image, and the
 - [Run in CDP](#run-in-cdp)
 - [Smoke run on pull requests](#smoke-run-on-pull-requests)
 - [Background volume](#background-volume)
+- [Stub latency profiles](#stub-latency-profiles)
 - [Traffic model](#traffic-model)
 - [Request mix](#request-mix)
 - [Thresholds](#thresholds)
@@ -17,17 +18,17 @@ CDP builds this repo into a Docker image. The CDP Portal runs the image, and the
 
 ## Layout
 
-| Path                 | What it holds                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/suites/`        | One k6 script per suite, named `<suite>.k6.js`                                                                                                                                                                                                                                                                                                                                                                                            |
-| `src/config/`        | Environment and service URLs, the endpoint catalogue, thresholds and smoke values, the traffic model (`traffic.js`), the journeys' endpoint names (`journey-endpoints.js`), the request-mix classes (`request-mix.js`) the stated facts the test data rests on (`test-data.js`) and the background volume's targets, scenarios and index line (`background-volume.js`)                                                                    |
-| `src/lib/`           | Pure helpers with unit tests, shared by suites, with no k6 imports                                                                                                                                                                                                                                                                                                                                                                        |
-| `src/k6/`            | k6-only modules: the browser-like session, the notification driver (`journeys.js`), the two journeys' steps (`live-animals.js`, `high-risk-plants.js`), the live-animals documents step (`documents.js`), the front door (`front-door.js`), shared step helpers (`journey-pages.js`), page requests and the request mix (`pages.js`), the readiness wait, and the background volume's reads and address creation (`background-volume.js`) |
-| `entrypoint.sh`      | What the image runs: one suite, then the S3 upload                                                                                                                                                                                                                                                                                                                                                                                        |
-| `Dockerfile`         | The image CDP runs, based on `grafana/k6` with the AWS CLI added                                                                                                                                                                                                                                                                                                                                                                          |
-| `compose.yml`        | Local runs: LocalStack for S3 and `target`, a stand-in service that has `/health`                                                                                                                                                                                                                                                                                                                                                         |
-| `compose/`           | LocalStack set-up and the stand-in service's nginx config                                                                                                                                                                                                                                                                                                                                                                                 |
-| `.github/workflows/` | Pull request checks, and the CDP publish on merge to `main`                                                                                                                                                                                                                                                                                                                                                                               |
+| Path                 | What it holds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/suites/`        | One k6 script per suite, named `<suite>.k6.js`                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `src/config/`        | Environment and service URLs, the endpoint catalogue, thresholds and smoke values, the traffic model (`traffic.js`), the journeys' endpoint names (`journey-endpoints.js`), the request-mix classes (`request-mix.js`) the stated facts the test data rests on (`test-data.js`) the background volume's targets, scenarios and index line (`background-volume.js`) and the stubbed integrations, their profiles, flags and conformance interval (`stub-profiles.js`)                              |
+| `src/lib/`           | Pure helpers with unit tests, shared by suites, with no k6 imports, including the stub profile lines and flags (`stub-profiles.js`)                                                                                                                                                                                                                                                                                                                                                               |
+| `src/k6/`            | k6-only modules: the browser-like session, the notification driver (`journeys.js`), the two journeys' steps (`live-animals.js`, `high-risk-plants.js`), the live-animals documents step (`documents.js`), the front door (`front-door.js`), shared step helpers (`journey-pages.js`), page requests and the request mix (`pages.js`), the readiness wait, the background volume's reads and address creation (`background-volume.js`), and the stub profile reads and report (`stub-profiles.js`) |
+| `entrypoint.sh`      | What the image runs: one suite, then the S3 upload                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `Dockerfile`         | The image CDP runs, based on `grafana/k6` with the AWS CLI added                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `compose.yml`        | Local runs: LocalStack for S3 and `target`, a stand-in service that has `/health`                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `compose/`           | LocalStack set-up and the stand-in service's nginx config                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `.github/workflows/` | Pull request checks, and the CDP publish on merge to `main`                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 Suites import shared modules with relative paths. k6 and Vitest both load them, so keep them free of Node-only and k6-only APIs. Pass k6's `__ENV` in rather than reading it inside the module.
 
@@ -98,16 +99,17 @@ Merging to `main` publishes the image. Run it from the CDP Portal.
 
 The image reads these environment variables:
 
-| Variable                 | Set by          | Purpose                                                                                                                                                              |
-| ------------------------ | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ENVIRONMENT`            | CDP Portal      | The environment to test, for example `perf-test`. Suites build service URLs from it. `prod` is refused                                                               |
-| `RESULTS_OUTPUT_S3_PATH` | CDP Portal      | Where the report goes. The run fails if it is not set                                                                                                                |
-| `S3_ENDPOINT`            | image           | Defaults to AWS S3 in `eu-west-2`. Compose points it at LocalStack                                                                                                   |
-| `TEST_SUITE`             | you, optionally | The suite to run, as a file name in `src/suites/` without `.k6.js`. Defaults to `smoke` in `dev` and `test`, and to `health-check` everywhere else                   |
-| `<SERVICE_NAME>_URL`     | you, optionally | Overrides a service's URL, for example `TRADE_IMPORTS_INS_FRONTEND_URL`                                                                                              |
-| `LOCALHOST_ALIAS`        | Compose         | The host a container uses for the machine's `localhost`, for example `host.docker.internal`                                                                          |
-| `AUTH_PASSWORD`          | you, optionally | The Defra ID stub's password. Defaults to `Password123`. In CDP, set it as a test-suite secret in the Portal when the stub in that environment uses another password |
-| `TRAFFIC_MODEL`          | you, optionally | JSON laid over the traffic model defaults and the smoke profile — see Traffic model                                                                                  |
+| Variable                 | Set by          | Purpose                                                                                                                                                                |
+| ------------------------ | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ENVIRONMENT`            | CDP Portal      | The environment to test, for example `perf-test`. Suites build service URLs from it. `prod` is refused                                                                 |
+| `RESULTS_OUTPUT_S3_PATH` | CDP Portal      | Where the report goes. The run fails if it is not set                                                                                                                  |
+| `S3_ENDPOINT`            | image           | Defaults to AWS S3 in `eu-west-2`. Compose points it at LocalStack                                                                                                     |
+| `TEST_SUITE`             | you, optionally | The suite to run, as a file name in `src/suites/` without `.k6.js`. Defaults to `smoke` in `dev` and `test`, and to `health-check` everywhere else                     |
+| `<SERVICE_NAME>_URL`     | you, optionally | Overrides a service's URL, for example `TRADE_IMPORTS_INS_FRONTEND_URL`                                                                                                |
+| `LOCALHOST_ALIAS`        | Compose         | The host a container uses for the machine's `localhost`, for example `host.docker.internal`                                                                            |
+| `AUTH_PASSWORD`          | you, optionally | The Defra ID stub's password. Defaults to `Password123`. In CDP, set it as a test-suite secret in the Portal when the stub in that environment uses another password   |
+| `TRAFFIC_MODEL`          | you, optionally | JSON laid over the traffic model defaults and the smoke profile — see Traffic model                                                                                    |
+| `STUB_PROFILE`           | you, optionally | The profile a run requires every stub-hosted integration to run, `zero-delay` or `sla`. Compose defaults it to `zero-delay`. Unset requires none and reports what runs |
 
 Without an override, a service's URL is `https://<service-name>.<ENVIRONMENT>.cdp-int.defra.cloud`. When `ENVIRONMENT` is `local`, it is the workspace Docker stack's host port for the service, on `localhost` or on `LOCALHOST_ALIAS` when that is set.
 
@@ -125,7 +127,7 @@ The same smoke suite runs in CDP `dev` and `test`, chosen by `ENVIRONMENT` alone
 - Sign-in goes through the real OIDC flow against the Defra ID stub deployed in that environment, with the secure cookies and the CSRF crumb the platform requires. Every session checks `sign-in went through Defra ID` when it opens the INS dashboard, so a run that bypassed Defra ID fails the `checks` threshold.
 - SNS and SQS are the CDP-provisioned ones, reached through animals saves, which publish a notification event.
 - Live-animals uploads go through the real cdp-uploader and its antivirus scan, and the run measures the scan: `document_scan_duration` is judged against the upload page allowance of P99 under 60 seconds.
-- Systems outside the INS boundary answer from the stubs deployed in that environment.
+- Systems outside the INS boundary answer from the stubs deployed in that environment. In perf-test those stubs run the `sla` profile, because cdp-app-config sets `STUB_LATENCY_PROFILE=sla` for `trade-imports-stub` and `trade-imports-defra-id-stub`; a run there should set `STUB_PROFILE=sla`. That cdp-app-config change is made by a person, not by this repo.
 - `prod` is refused: the run fails at start without a report.
 - The report (`index.html` and `summary.json`) is published with every run, even when a threshold fails.
 
@@ -144,7 +146,7 @@ smoke:
     branch: ${{ github.head_ref }}
 ```
 
-The stubs answer without added delay, which is the zero-delay profile. The question the pull request run asks is whether the change made INS slower.
+The run requires `STUB_PROFILE=zero-delay`, and the stubs default to it, so a run against stubs with added delay fails at start. The question the pull request run asks is whether the change made INS slower.
 
 ## Background volume
 
@@ -180,6 +182,45 @@ npm run test:docker-compose:background-volume   # workspace Docker stack
 Every run states the volume it started with: `Background volume at start: live-animals 12 of 42000, high-risk-plants 9 of 34000, dashboard-read-model 12, address-book 3 of 500`. It also records each count in the `background_volume` metric. The background run also logs `Background volume at end: ...` and `Created this run: ...`.
 
 Before any measurement, a run waits for the animals backend, the plants backend, the INS backend (the dashboard read model) and the address book to answer a read, then logs `Indexes: built ...`. Each of those services builds its indexes at start-up before it answers a request (Spring Data auto-index-creation), so an answer means its indexes are built. A service that never answers fails the run in `setup()` before anything is measured. This confirms the indexes that exist are built. It adds none.
+
+## Stub latency profiles
+
+A stub that answers at once makes INS look faster than it will be. Each system outside the INS boundary that an INS service calls today has a stand-in with its own latency profile:
+
+| Integration         | Stands in for                                          | Hosted by                                                                                                    |
+| ------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `defra-id`          | Defra ID: OIDC discovery, token and signing keys       | `trade-imports-defra-id-stub`                                                                                |
+| `trade-token`       | The Trade token endpoint called before MDM             | `trade-imports-stub`                                                                                         |
+| `mdm`               | MDM reference data: countries and border control posts | `trade-imports-stub`                                                                                         |
+| `azure-service-bus` | Azure Service Bus, the only route to Dynamics and PIMS | No stub service. Locally the workspace stack's toxiproxy in front of the emulator; in CDP, CDP configuration |
+
+SNS, SQS and cdp-uploader are real everywhere and are never profiled.
+
+Each stub answers with one of two profiles, chosen when it starts:
+
+- `zero-delay` adds no delay. It is the default, and what script development and the pull request smoke run use.
+- `sla` delays each answer by a draw from a lognormal distribution fitted to the integration's targets: the median matched exactly and the tail fitted to p95 and p99 by least squares in log space. The interim targets are p50 100ms, p95 400ms and p99 1,000ms, which fit to p95 470ms and p99 892ms. Every design-target, breakpoint and resilience scenario runs on `sla`.
+
+Azure Service Bus starts at zero added delay, because section 9.5 gives no figure for it.
+
+Each stub reports its profiles at `GET /latency-profiles`: the interface each represents, its owner, the service level it was derived from, whether it is agreed, when it was last conformed, the targets and the latency the stub actually answered with. The suites read both stubs at the start and the end of a run, and clear each stub's answered latencies (`DELETE /latency-profiles/answered`) straight after the start read, so the end figures cover only that run. A stub that answers 404 or 405 to the clear predates profiles and is left alone. The summary prints `stub_latency_answered_count` per stub-hosted integration, and when it is 0 the stub answered no calls, so its answered p50/p95/p99 (shown as 0) mean nothing. They log:
+
+```
+Stub profile: mdm (trade-imports-stub) runs sla, targets p50 100ms, p95 400ms, p99 1000ms (lognormal fit p95 470ms, p99 892ms); MDM reference data through APIM: countries and border control posts; owner MDM / data platform team; from Interim (c-011 default): §9.5 MDM through APIM latency is TBC; never conformed; flags: UNAGREED, CONFORMANCE OVERDUE
+Stub latency answered: mdm (trade-imports-stub) p50 98ms, p95 460ms, p99 880ms over 240 calls, beside targets p50 100ms, p95 400ms, p99 1000ms
+```
+
+A profile is flagged `unagreed` until it is agreed, which is every interim profile. A profile is flagged overdue when it has never been conformed, its date is malformed or after the run, or it was last conformed more than 7 days before the run (the volumetrics decision says stub profiles are re-checked weekly or per release). A stub that answers 404 predates profiles and adds no delay, so it is reported as `NOT REPORTED` and treated as `zero-delay`.
+
+The summary carries three gauges, each with reporting-only thresholds (`value>=0`) so they print:
+
+| Metric                 | Tags                                                                               | What it shows                                                                                 |
+| ---------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `stub_profile`         | `integration`, `profile`                                                           | 1 for the profile the integration ran (`zero-delay`, `sla`, `not-reported`), 0 for the others |
+| `stub_profile_flagged` | `integration`, `flag`                                                              | 1 or 0 for `unagreed` and `conformance-overdue`                                               |
+| `stub_latency`         | `integration`, `source` (`target` or `answered`), `quantile` (`p50`, `p95`, `p99`) | The targets, and the latency the stub answered with, in milliseconds                          |
+
+Setting `STUB_PROFILE` makes the smoke run require that profile: it stops at start with `Stub profiles do not match STUB_PROFILE=<profile>` when a stub-hosted integration runs another one. Azure Service Bus is never checked.
 
 ## Traffic model
 
@@ -249,17 +290,20 @@ Think time between pages is the session length divided by the pages in a session
 
 Every page request is recorded under one traffic class: `sign-in`, `dashboard-read` (the INS dashboard and both journey dashboards), `journey` (drafting, check answers before submit, the declaration), `post-submission-read` (the hub and notification view after submit), `amendment` (everything done while amending) and `address-book`. A page request is one navigation, so redirect hops and backend calls are not counted. A sign-in is recorded as a page request of its own, alongside the dashboard read it leads to. That is how the front door's core-page (C1) and dashboard-only session (C4) figures are counted, and it counts in the `dashboard_read_share` denominator.
 
-| Metric                   | What it shows                                                                            |
-| ------------------------ | ---------------------------------------------------------------------------------------- |
-| `dashboard_read_share`   | The share of page requests that are dashboard reads, printed in k6's end-of-test summary |
-| `page_requests`          | Page requests, tagged by `traffic_class`                                                 |
-| `post_submission_reads`  | Reads after submit                                                                       |
-| `amendment_pages`        | Pages requested while amending                                                           |
-| `pages_per_notification` | Journey pages one notification took, by scenario                                         |
-| `session_seconds`        | How long a user session lasted, by scenario                                              |
-| `notifications_started`  | Notifications started, tagged by `notification_type`                                     |
-| `document_scan_duration` | Milliseconds from a document's upload response until its scan settled                    |
-| `background_volume`      | The background volume each datastore held when the run started, tagged by `datastore`    |
+| Metric                   | What it shows                                                                             |
+| ------------------------ | ----------------------------------------------------------------------------------------- |
+| `dashboard_read_share`   | The share of page requests that are dashboard reads, printed in k6's end-of-test summary  |
+| `page_requests`          | Page requests, tagged by `traffic_class`                                                  |
+| `post_submission_reads`  | Reads after submit                                                                        |
+| `amendment_pages`        | Pages requested while amending                                                            |
+| `pages_per_notification` | Journey pages one notification took, by scenario                                          |
+| `session_seconds`        | How long a user session lasted, by scenario                                               |
+| `notifications_started`  | Notifications started, tagged by `notification_type`                                      |
+| `document_scan_duration` | Milliseconds from a document's upload response until its scan settled                     |
+| `background_volume`      | The background volume each datastore held when the run started, tagged by `datastore`     |
+| `stub_profile`           | The latency profile each stubbed integration ran, tagged by `integration` and `profile`   |
+| `stub_profile_flagged`   | Whether each profile is unagreed or overdue, tagged by `integration` and `flag`           |
+| `stub_latency`           | Each stub's target and answered latency, tagged by `integration`, `source` and `quantile` |
 
 `setup()` logs the target, `Request mix target: dashboard reads 25% of page requests (D7)`, so the achieved share sits beside it. The mix is reported, not gated: the share comes from the pages the frontends need, and a threshold on it would be run-wide, while every threshold here is scoped to a scenario, and response times to an endpoint as well.
 
@@ -277,7 +321,7 @@ Thresholds live in `src/config/thresholds.js`. The interim values come from the 
 | Checks                      | More than 99% pass, so a failed check fails the run                        |
 | Dropped iterations          | Under 1 per scenario, so a run that could not apply its arrival rate fails |
 
-Every threshold is scoped to its scenario, and response times are also scoped to an endpoint tag from the catalogue in `src/config/endpoints.js`. Scoping to the scenario keeps the readiness wait in `setup()` out of the measurement. A breached response-time, failed-request or check threshold aborts the run, after a 30 second evaluation delay. Dropped iterations are judged at the end of the run: they do not abort it, but they fail it. So is the document scan: a slow scan fails the run rather than cutting it short. The `notifications_started` thresholds (`count>=0`) are reporting-only and can never fail: they exist so the summary prints the split by notification type. The `background_volume` thresholds (`value>=0`) are reporting-only in the same way: they print each datastore's background volume. The background-volume run gates on failed requests, checks and dropped iterations only, never on response times.
+Every threshold is scoped to its scenario, and response times are also scoped to an endpoint tag from the catalogue in `src/config/endpoints.js`. Scoping to the scenario keeps the readiness wait in `setup()` out of the measurement. A breached response-time, failed-request or check threshold aborts the run, after a 30 second evaluation delay. Dropped iterations are judged at the end of the run: they do not abort it, but they fail it. So is the document scan: a slow scan fails the run rather than cutting it short. The `notifications_started` thresholds (`count>=0`) are reporting-only and can never fail: they exist so the summary prints the split by notification type. The `background_volume` thresholds (`value>=0`) are reporting-only in the same way: they print each datastore's background volume. The `stub_profile`, `stub_profile_flagged` and `stub_latency` thresholds (`value>=0`) are reporting-only too: they print each stubbed integration's profile, flags and latency. The background-volume run gates on failed requests, checks and dropped iterations only, never on response times.
 
 ## Add a suite
 
@@ -286,8 +330,9 @@ Every threshold is scoped to its scenario, and response times are also scoped to
 3. Give each scenario its thresholds with `scenarioThresholds` in `src/config/thresholds.js`. Tag requests with an endpoint from the catalogue in `src/config/endpoints.js`, which also sets the `name` tag. Follow the workspace's k6 best practices.
 4. Put any logic worth testing in `src/config/` (or a new folder under `src/`) with a `*.test.js` beside it.
 5. A suite that measures load reports the background volume and calls `requireBackgroundVolume` in `setup()` (both in `src/k6/background-volume.js`), so it never measures an empty environment.
-6. Run it with `npm run k6:local -- run --no-usage-report src/suites/<suite>.k6.js`.
-7. To make CDP run it by default in an environment, change `default_suite` in `entrypoint.sh`. Otherwise set `TEST_SUITE` to `<suite>` on the run.
+6. Every suite reports the stub profiles at the start and the end of a run (`readStubProfiles` and `reportStubProfiles` in `src/k6/stub-profiles.js`). A design-target, breakpoint or resilience suite also calls `requireStubProfiles(stubProfiles, SLA_PROFILE)` in `setup()`, in code, whatever `STUB_PROFILE` says, so it never measures against stubs that answer at once. In `setup()`, straight after the start `reportStubProfiles` call (and after `requireStubProfiles` where the suite has one), call `clearStubAnswered({ urls })`, so the end-of-run answered figures cover only this run.
+7. Run it with `npm run k6:local -- run --no-usage-report src/suites/<suite>.k6.js`.
+8. To make CDP run it by default in an environment, change `default_suite` in `entrypoint.sh`. Otherwise set `TEST_SUITE` to `<suite>` on the run.
 
 ## Licence
 

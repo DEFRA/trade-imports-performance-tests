@@ -48,6 +48,7 @@ services:
       LOCALHOST_ALIAS: host.docker.internal
       AUTH_PASSWORD: '${AUTH_PASSWORD:-Password123}'
       TRAFFIC_MODEL: '${TRAFFIC_MODEL:-}'
+      STUB_PROFILE: '${STUB_PROFILE:-zero-delay}'
 
   localstack:
     image: localstack/localstack:4.3.0
