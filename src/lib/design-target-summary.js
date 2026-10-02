@@ -4,20 +4,28 @@ import {
   JOURNEY_OF,
   LOAD_PROFILES,
   REPORTED_PHASES,
+  HOUR_PHASES,
   SHAPES,
-  runLine
+  averageLoadFactors,
+  averageLoadProfileLine,
+  hourLabel,
+  journeyScenariosIn,
+  percentText,
+  runLine,
+  segmentOf
 } from '../config/design-target.js'
 import { kindOf } from '../config/endpoints.js'
 import { INTERIM_TARGETS, subMetricKey } from '../config/thresholds.js'
-import { durationText } from '../config/traffic.js'
+import {
+  SECONDS_PER_HOUR,
+  durationSeconds,
+  durationText
+} from '../config/traffic.js'
 import { thresholdLines, thresholdResults } from './summary-text.js'
 
-const SECONDS_PER_HOUR = 3600
-const PERCENT = 100
 const RPS_DECIMALS = 2
 const FIGURE_DECIMALS = 1
 const BACKEND_NOTE = 'derived: 1 backend call a page'
-const JOURNEY_SCENARIOS = ['live-animals', 'high-risk-plants']
 const FRONTENDS = ['animals', 'plants', 'ins']
 const KINDS = ['page', 'api', 'upload']
 
@@ -25,7 +33,6 @@ const rounded = (value, decimals) => String(Number(value.toFixed(decimals)))
 const rpsText = (value) => rounded(value, RPS_DECIMALS)
 const figureText = (value) => rounded(value, FIGURE_DECIMALS)
 const millisecondsText = (value) => `${Math.round(value)}ms`
-const percentText = (share) => `${rounded(share * PERCENT, FIGURE_DECIMALS)}%`
 
 /**
  * Reads one statistic of a metric from k6's summary data.
@@ -214,13 +221,16 @@ const limitHolds = (value, limit) => limit === undefined || value < limit
  * @param {object} options - The phase.
  * @param {Record<string, object>} options.metrics - k6's summary metrics.
  * @param {Record<string, { endpoints: string[] }>} options.scenarioSet - Scenarios shaped like `SCENARIOS`.
- * @param {string} options.phase - The phase name.
+ * @param {string} [options.phase] - The phase name. Without one the rows cover the whole run.
  * @returns {Array<{ journey: string, scenario: string, endpoint: string, kind: string, count: number, p95Ms: number, p99Ms: number, p95LimitMs: number | undefined, p99LimitMs: number | undefined, within: boolean }>} One row per scenario and endpoint with samples.
  */
 export const endpointRows = ({ metrics, scenarioSet, phase }) =>
   Object.entries(scenarioSet).flatMap(([scenario, { endpoints }]) =>
     endpoints.flatMap((endpoint) => {
-      const tags = { scenario, endpoint, phase }
+      const tags =
+        phase === undefined
+          ? { scenario, endpoint }
+          : { scenario, endpoint, phase }
       const count = durationOf(metrics, tags, 'count') ?? 0
 
       if (count === 0) {
@@ -407,23 +417,140 @@ const burstTargets = (loadProfile) => ({
 const burstSeconds = (schedule) => phaseSeconds(schedule, 'burst')
 
 /**
- * Builds the JSON-ready report of a design-target run: the settings, what it
- * achieved against the volumetrics figures, the burst verdicts and every
- * endpoint's response times, tagged by journey, scenario and kind.
+ * Scales a volumetrics target to one hour of the average weekday.
+ *
+ * @param {object} target - A journey's or the front door's volumetrics figures.
+ * @param {number} factor - The hour's share of the sustained peak run's rate.
+ * @returns {object} The same figures, each number times the factor, without the burst rate. The source is kept.
+ */
+export const hourTarget = (target, factor) =>
+  Object.fromEntries(
+    Object.entries(target)
+      .filter(([key]) => key !== 'burstRps')
+      .map(([key, value]) => [
+        key,
+        typeof value === 'number' ? value * factor : value
+      ])
+  )
+
+/**
+ * Works out each hour of the average weekday: what the run achieved against
+ * that hour's target, per journey and for the front door.
  *
  * @param {object} options - The run.
  * @param {Record<string, object>} options.metrics - k6's summary metrics.
- * @param {string} options.shape - A value of `SHAPES`.
- * @param {string} options.loadProfile - A value of `LOAD_PROFILES`.
- * @param {string} options.scenarioLength - A value of `SCENARIO_LENGTHS`.
- * @param {string} options.environment - The environment the run was in.
- * @param {string | undefined} options.stubProfile - The stub profile the run required, if any.
  * @param {ReadonlyArray<object>} options.schedule - The run's phase schedule.
- * @param {Record<string, { endpoints: string[] }>} options.scenarioSet - Scenarios shaped like `SCENARIOS`.
  * @param {object} options.model - A resolved traffic model.
- * @returns {object} The report.
+ * @param {string} options.loadProfile - A value of `LOAD_PROFILES`.
+ * @param {Record<string, { endpoints: string[] }>} options.scenarioSet - Scenarios shaped like `SCENARIOS`.
+ * @returns {Array<{ hour: number, phase: string, label: string, segment: string, share: number, factor: number, seconds: number, journeys: Record<string, { achieved: object, target: object }>, frontDoor: { achieved: object, target: object } }>} One row per hour, hour 00 first.
  */
-export const designTargetReport = ({
+export const averageLoadHours = ({
+  metrics,
+  schedule,
+  model,
+  loadProfile,
+  scenarioSet
+}) => {
+  const factors = averageLoadFactors(model)
+
+  return HOUR_PHASES.map((phase, hour) => {
+    const seconds = phaseSeconds(schedule, phase)
+    const factor = factors[hour]
+
+    return {
+      hour,
+      phase,
+      label: hourLabel(hour),
+      segment: segmentOf(hour),
+      share: model.averageLoad.hourlyShares[hour],
+      factor,
+      seconds,
+      journeys: Object.fromEntries(
+        journeyScenariosIn(scenarioSet).map((scenario) => [
+          scenario,
+          {
+            achieved: achievedJourney({ metrics, scenario, phase, seconds }),
+            target: hourTarget(DESIGN_TARGETS[scenario], factor)
+          }
+        ])
+      ),
+      frontDoor: {
+        achieved: achievedFrontDoor({ metrics, phase, seconds }),
+        target: hourTarget(DESIGN_TARGETS.frontDoor[loadProfile], factor)
+      }
+    }
+  })
+}
+
+const hourJourneyText = (scenario, { achieved, target }) =>
+  `${scenario} ${labelledAgainst('notifications an hour', achieved.notificationsPerHour, target.notificationsPerHour, figureText)}, frontend ${labelledAgainst('RPS', achieved.frontendRps, target.frontendRps, rpsText)}, ${labelledAgainst('concurrent users', achieved.concurrentUsers, target.concurrentUsers, figureText)}`
+
+/**
+ * States one hour of the average weekday: each journey's and the front door's
+ * achieved figures against that hour's targets.
+ *
+ * @param {object} options - The hour.
+ * @param {ReturnType<typeof averageLoadHours>[number]} options.row - The hour's row.
+ * @param {string} options.loadProfile - A value of `LOAD_PROFILES`.
+ * @returns {string} The line.
+ */
+export const hourLine = ({ row, loadProfile }) => {
+  const { achieved, target } = row.frontDoor
+  const frontDoorText = `front door (${profileLabel(loadProfile)}) ${labelledAgainst('sign-ins an hour', achieved.signInsPerHour, target.signInsPerHour, figureText)}, core pages ${labelledAgainst('RPS', achieved.coreRps, target.coreRps, rpsText)}, ${labelledAgainst('concurrent users', achieved.concurrentUsers, target.concurrentUsers, figureText)}`
+
+  return `Hour ${row.label} (${row.segment}, ${percentText(row.share)} of a weekday, ${durationText(row.seconds)}): ${[
+    ...Object.entries(row.journeys).map(([scenario, figures]) =>
+      hourJourneyText(scenario, figures)
+    ),
+    frontDoorText
+  ].join('; ')}`
+}
+
+const averageLoadReport = ({
+  metrics,
+  shape,
+  loadProfile,
+  scenarioLength,
+  environment,
+  stubProfile,
+  schedule,
+  scenarioSet,
+  model
+}) => ({
+  run: {
+    line: runLine({
+      shape,
+      loadProfile,
+      scenarioLength,
+      environment,
+      stubProfile,
+      model
+    }),
+    profileLine: averageLoadProfileLine(model),
+    shape,
+    loadProfile,
+    scenarioLength,
+    environment,
+    stubProfile: stubProfile ?? 'as-reported',
+    gating: loadProfile === LOAD_PROFILES.TWO_JOURNEYS,
+    hourSeconds: durationSeconds(model.averageLoad.hourDuration),
+    schedule
+  },
+  hours: averageLoadHours({
+    metrics,
+    schedule,
+    model,
+    loadProfile,
+    scenarioSet
+  }),
+  relative: [],
+  endpoints: endpointRows({ metrics, scenarioSet }),
+  thresholds: thresholdResults(metrics),
+  relativeFailed: false
+})
+
+const peakReport = ({
   metrics,
   shape,
   loadProfile,
@@ -464,20 +591,18 @@ export const designTargetReport = ({
     },
     achieved: {
       journeys: Object.fromEntries(
-        JOURNEY_SCENARIOS.filter((scenario) => scenario in scenarioSet).map(
-          (scenario) => [
-            scenario,
-            {
-              achieved: achievedJourney({
-                metrics,
-                scenario,
-                phase: steady,
-                seconds
-              }),
-              target: DESIGN_TARGETS[scenario]
-            }
-          ]
-        )
+        journeyScenariosIn(scenarioSet).map((scenario) => [
+          scenario,
+          {
+            achieved: achievedJourney({
+              metrics,
+              scenario,
+              phase: steady,
+              seconds
+            }),
+            target: DESIGN_TARGETS[scenario]
+          }
+        ])
       ),
       frontDoor: {
         achieved: achievedFrontDoor({ metrics, phase: steady, seconds }),
@@ -504,6 +629,30 @@ export const designTargetReport = ({
   }
 }
 
+/**
+ * Builds the JSON-ready report of a design-target run: the settings, what it
+ * achieved against the volumetrics figures, the burst verdicts and every
+ * endpoint's response times, tagged by journey, scenario and kind. The
+ * average-load run reports each hour of its weekday against that hour's target
+ * instead.
+ *
+ * @param {object} options - The run.
+ * @param {Record<string, object>} options.metrics - k6's summary metrics.
+ * @param {string} options.shape - A value of `SHAPES`.
+ * @param {string} options.loadProfile - A value of `LOAD_PROFILES`.
+ * @param {string} options.scenarioLength - A value of `SCENARIO_LENGTHS`.
+ * @param {string} options.environment - The environment the run was in.
+ * @param {string | undefined} options.stubProfile - The stub profile the run required, if any.
+ * @param {ReadonlyArray<object>} options.schedule - The run's phase schedule.
+ * @param {Record<string, { endpoints: string[] }>} options.scenarioSet - Scenarios shaped like `SCENARIOS`.
+ * @param {object} options.model - A resolved traffic model.
+ * @returns {object} The report.
+ */
+export const designTargetReport = (options) =>
+  options.shape === SHAPES.AVERAGE_LOAD
+    ? averageLoadReport(options)
+    : peakReport(options)
+
 const journeyLines = ({ achieved, run }) =>
   Object.entries(achieved.journeys).map(([scenario, figures]) =>
     achievedJourneyLine({
@@ -528,14 +677,18 @@ const burstLines = ({ burst, relative, run }) =>
         relativeOutcomeLine({ verdicts: relative, gating: run.gating })
       ]
 
-/**
- * Writes a design-target run's end-of-test text.
- *
- * @param {ReturnType<typeof designTargetReport>} report - The run's report.
- * @param {Record<string, object>} metrics - k6's summary metrics, for the threshold lines.
- * @returns {string} Lines joined with newlines, ending in one.
- */
-export const designTargetText = (report, metrics) =>
+const averageLoadText = (report, metrics) =>
+  `${[
+    report.run.line,
+    report.run.profileLine,
+    ...report.hours.map((row) =>
+      hourLine({ row, loadProfile: report.run.loadProfile })
+    ),
+    ...report.endpoints.map(endpointLine),
+    ...thresholdLines(metrics)
+  ].join('\n')}\n`
+
+const peakText = (report, metrics) =>
   `${[
     report.run.line,
     ...journeyLines(report),
@@ -553,6 +706,18 @@ export const designTargetText = (report, metrics) =>
     ...report.endpoints.map(endpointLine),
     ...thresholdLines(metrics)
   ].join('\n')}\n`
+
+/**
+ * Writes a design-target run's end-of-test text.
+ *
+ * @param {ReturnType<typeof designTargetReport>} report - The run's report.
+ * @param {Record<string, object>} metrics - k6's summary metrics, for the threshold lines.
+ * @returns {string} Lines joined with newlines, ending in one.
+ */
+export const designTargetText = (report, metrics) =>
+  report.hours === undefined
+    ? peakText(report, metrics)
+    : averageLoadText(report, metrics)
 
 const HTML_ESCAPES = {
   '&': '&amp;',
@@ -606,6 +771,117 @@ const achievedRows = ({ achieved }) => [
   ]
 ]
 
+const burstTable = (report) =>
+  table(
+    'Burst',
+    ['Frontend', 'RPS', 'Target'],
+    report.burst === undefined
+      ? []
+      : Object.keys(report.burst.achieved).map((frontend) => [
+          frontend,
+          rpsText(report.burst.achieved[frontend]),
+          String(report.burst.targets[frontend])
+        ])
+  )
+
+const relativeTable = (report) =>
+  table(
+    'Relative P95 in the burst minute',
+    ['Scenario', 'Kind', 'Peak P95 ms', 'Burst P95 ms', 'Requests', 'Verdict'],
+    report.relative.map((entry) => [
+      entry.scenario,
+      entry.kind,
+      entry.peakP95Ms === undefined ? '' : Math.round(entry.peakP95Ms),
+      entry.burstP95Ms === undefined ? '' : Math.round(entry.burstP95Ms),
+      entry.burstCount,
+      entry.verdict
+    ])
+  )
+
+const peakTables = (report) => [
+  table(
+    `Achieved over the ${report.run.steadyPhase}`,
+    [
+      'Scenario',
+      'Starts or sign-ins an hour',
+      'Target',
+      'Frontend RPS',
+      'Target',
+      'Concurrent users',
+      'Target'
+    ],
+    achievedRows(report)
+  ),
+  burstTable(report),
+  relativeTable(report)
+]
+
+const hourRow = (row) => [
+  row.label,
+  row.segment,
+  percentText(row.share),
+  ...Object.values(row.journeys).flatMap(({ achieved, target }) => [
+    figureText(achieved.notificationsPerHour),
+    figureText(target.notificationsPerHour),
+    rpsText(achieved.frontendRps),
+    rpsText(target.frontendRps)
+  ]),
+  figureText(row.frontDoor.achieved.signInsPerHour),
+  figureText(row.frontDoor.target.signInsPerHour),
+  rpsText(row.frontDoor.achieved.coreRps),
+  rpsText(row.frontDoor.target.coreRps)
+]
+
+const hourColumns = (report) => [
+  'Hour',
+  'Row',
+  'Share',
+  ...Object.keys(report.hours[0].journeys).flatMap((scenario) => [
+    `${scenario} started an hour`,
+    'Target',
+    `${scenario} frontend RPS`,
+    'Target'
+  ]),
+  'Front door sign-ins an hour',
+  'Target',
+  'INS core RPS',
+  'Target'
+]
+
+const averageLoadTables = (report) => [
+  `<p>${escapeHtml(report.run.profileLine)}</p>`,
+  table(
+    'Each hour of the weekday',
+    hourColumns(report),
+    report.hours.map(hourRow)
+  )
+]
+
+const endpointsTable = (report) =>
+  table(
+    'Endpoints',
+    [
+      'Journey',
+      'Scenario',
+      'Endpoint',
+      'Kind',
+      'Requests',
+      'P95 ms',
+      'P99 ms',
+      'Within'
+    ],
+    report.endpoints.map((row) => [
+      row.journey,
+      row.scenario,
+      row.endpoint,
+      row.kind,
+      row.count,
+      Math.round(row.p95Ms),
+      Math.round(row.p99Ms),
+      row.within ? 'yes' : 'no'
+    ])
+  )
+
 /**
  * Writes a design-target run's report as a complete HTML page.
  *
@@ -623,72 +899,10 @@ export const designTargetHtml = (report) =>
     '<body style="font-family:sans-serif;margin:16px">',
     `<h1>Design-target run: ${escapeHtml(report.run.shape)}</h1>`,
     `<p>${escapeHtml(report.run.line)}</p>`,
-    table(
-      `Achieved over the ${report.run.steadyPhase}`,
-      [
-        'Scenario',
-        'Starts or sign-ins an hour',
-        'Target',
-        'Frontend RPS',
-        'Target',
-        'Concurrent users',
-        'Target'
-      ],
-      achievedRows(report)
-    ),
-    table(
-      'Burst',
-      ['Frontend', 'RPS', 'Target'],
-      report.burst === undefined
-        ? []
-        : Object.keys(report.burst.achieved).map((frontend) => [
-            frontend,
-            rpsText(report.burst.achieved[frontend]),
-            String(report.burst.targets[frontend])
-          ])
-    ),
-    table(
-      'Relative P95 in the burst minute',
-      [
-        'Scenario',
-        'Kind',
-        'Peak P95 ms',
-        'Burst P95 ms',
-        'Requests',
-        'Verdict'
-      ],
-      report.relative.map((entry) => [
-        entry.scenario,
-        entry.kind,
-        entry.peakP95Ms === undefined ? '' : Math.round(entry.peakP95Ms),
-        entry.burstP95Ms === undefined ? '' : Math.round(entry.burstP95Ms),
-        entry.burstCount,
-        entry.verdict
-      ])
-    ),
-    table(
-      'Endpoints',
-      [
-        'Journey',
-        'Scenario',
-        'Endpoint',
-        'Kind',
-        'Requests',
-        'P95 ms',
-        'P99 ms',
-        'Within'
-      ],
-      report.endpoints.map((row) => [
-        row.journey,
-        row.scenario,
-        row.endpoint,
-        row.kind,
-        row.count,
-        Math.round(row.p95Ms),
-        Math.round(row.p99Ms),
-        row.within ? 'yes' : 'no'
-      ])
-    ),
+    ...(report.hours === undefined
+      ? peakTables(report)
+      : averageLoadTables(report)),
+    endpointsTable(report),
     '</body>',
     '</html>',
     ''

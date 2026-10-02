@@ -16,11 +16,14 @@ import {
   achievedFrontDoorLine,
   achievedJourney,
   achievedJourneyLine,
+  averageLoadHours,
   designTargetHtml,
   designTargetReport,
   designTargetText,
   endpointLine,
   endpointRows,
+  hourLine,
+  hourTarget,
   phaseSeconds,
   relativeBurstVerdicts,
   relativeLine,
@@ -546,5 +549,221 @@ describe('designTargetReport for a sustained peak', () => {
     )
 
     expect(burstTable).not.toContain('<td')
+  })
+})
+
+describe('hourTarget', () => {
+  test('scales a journey target, drops the burst rate and keeps the source', () => {
+    expect(hourTarget(DESIGN_TARGETS['live-animals'], 0.25)).toEqual({
+      notificationsPerHour: 11,
+      frontendRps: 0.125,
+      backendRps: 0.125,
+      concurrentUsers: 5.5,
+      source: 'NFR-VOL-AG-01 to AG-04'
+    })
+  })
+
+  test('scales the front door target', () => {
+    expect(hourTarget(DESIGN_TARGETS.frontDoor['two-journeys'], 0.25)).toEqual({
+      signInsPerHour: 50,
+      coreRps: 0.1,
+      concurrentUsers: 12.75,
+      source: 'NFR-VOL-CORE-01 to CORE-04'
+    })
+  })
+})
+
+describe('average-load hours', () => {
+  const model = resolveTrafficModel({
+    TRAFFIC_MODEL: '{"averageLoad":{"hourDuration":"10m"}}'
+  })
+  const scheduleFor = (loadProfile) =>
+    phaseSchedule({
+      shape: SHAPES.AVERAGE_LOAD,
+      model,
+      scenarioNames: Object.keys(scenarioSetFor(loadProfile))
+    })
+  const metrics = Object.fromEntries([
+    [
+      subMetricKey('notifications_started', {
+        scenario: 'live-animals',
+        phase: 'hour-11'
+      }),
+      metric({ count: 2 })
+    ],
+    [
+      subMetricKey('page_requests', { frontend: 'animals', phase: 'hour-11' }),
+      metric({ count: 72 })
+    ],
+    [
+      subMetricKey('session_seconds', {
+        scenario: 'live-animals',
+        phase: 'hour-11'
+      }),
+      metric({ avg: 600, count: 5 })
+    ],
+    [
+      subMetricKey('page_requests', {
+        traffic_class: 'sign-in',
+        phase: 'hour-11'
+      }),
+      metric({ count: 20 })
+    ],
+    [
+      subMetricKey('page_requests', { frontend: 'ins', phase: 'hour-11' }),
+      metric({ count: 60 })
+    ],
+    [
+      subMetricKey('session_seconds', { phase: 'hour-11' }),
+      metric({ avg: 60, count: 300 })
+    ]
+  ])
+  const hoursFor = (loadProfile) =>
+    averageLoadHours({
+      metrics,
+      schedule: scheduleFor(loadProfile),
+      model,
+      loadProfile,
+      scenarioSet: scenarioSetFor(loadProfile)
+    })
+
+  test('works out one row per hour against that hour of the profile', () => {
+    const hours = hoursFor('two-journeys')
+
+    expect(hours).toHaveLength(24)
+    expect(hours[11]).toMatchObject({
+      hour: 11,
+      phase: 'hour-11',
+      label: '11:00',
+      segment: 'sustained window',
+      share: 0.08,
+      factor: 0.25,
+      seconds: 600
+    })
+    expect(
+      hours[11].journeys['live-animals'].achieved.notificationsPerHour
+    ).toBe(12)
+    expect(hours[11].journeys['live-animals'].achieved.frontendRps).toBeCloseTo(
+      0.12,
+      9
+    )
+    expect(hours[11].journeys['live-animals'].target.notificationsPerHour).toBe(
+      11
+    )
+  })
+
+  test('gives an hour with no metrics zeros, never NaN', () => {
+    const { journeys, frontDoor } = hoursFor('two-journeys')[3]
+
+    expect(journeys['live-animals'].achieved).toEqual({
+      notificationsPerHour: 0,
+      frontendRps: 0,
+      backendRps: 0,
+      concurrentUsers: 0
+    })
+    expect(frontDoor.achieved).toMatchObject({
+      signInsPerHour: 0,
+      coreRps: 0,
+      concurrentUsers: 0
+    })
+  })
+
+  test('states an hour for both journeys and the front door', () => {
+    expect(
+      hourLine({
+        row: hoursFor('two-journeys')[11],
+        loadProfile: 'two-journeys'
+      })
+    ).toBe(
+      'Hour 11:00 (sustained window, 8% of a weekday, 10m): live-animals 12 notifications an hour against 11, frontend 0.12 RPS against 0.13, 5 concurrent users against 5.5; high-risk-plants 0 notifications an hour against 9, frontend 0 RPS against 0.13, 0 concurrent users against 5.5; front door (two journeys) 120 sign-ins an hour against 50, core pages 0.1 RPS against 0.1, 30 concurrent users against 12.8'
+    )
+  })
+
+  test('names the with-IUU front door', () => {
+    expect(
+      hourLine({ row: hoursFor('with-iuu')[11], loadProfile: 'with-iuu' })
+    ).toContain('front door (with IUU) 120 sign-ins an hour against 192.5')
+  })
+
+  test('reads endpoint rows over the whole run when no phase is given', () => {
+    const rows = endpointRows({
+      metrics: Object.fromEntries([
+        duration(
+          { scenario: 'live-animals', endpoint: 'animals-origin' },
+          { count: 50, 'p(95)': 1500, 'p(99)': 2000 }
+        )
+      ]),
+      scenarioSet: SCENARIO_SET
+    })
+
+    expect(rows.map(({ endpoint }) => endpoint)).toEqual(['animals-origin'])
+  })
+})
+
+describe('designTargetReport for average load', () => {
+  const model = resolveTrafficModel({}, SCENARIO_LENGTH_PROFILES.local)
+  const scenarioSet = scenarioSetFor('two-journeys')
+  const schedule = phaseSchedule({
+    shape: SHAPES.AVERAGE_LOAD,
+    model,
+    scenarioNames: Object.keys(scenarioSet)
+  })
+  const metrics = Object.fromEntries([
+    duration(
+      { scenario: 'live-animals', endpoint: 'animals-origin' },
+      { 'p(95)': 300, 'p(99)': 400, count: 500 }
+    ),
+    [
+      'checks{scenario:live-animals}',
+      { thresholds: { 'rate>0.99': { ok: true } } }
+    ]
+  ])
+  const report = designTargetReport({
+    metrics,
+    shape: SHAPES.AVERAGE_LOAD,
+    loadProfile: 'two-journeys',
+    scenarioLength: 'local',
+    environment: 'local',
+    stubProfile: 'zero-delay',
+    schedule,
+    scenarioSet,
+    model
+  })
+
+  test('reports 24 hours, with no relative verdicts, achieved figure or burst', () => {
+    expect(report.hours).toHaveLength(24)
+    expect(report.relative).toEqual([])
+    expect(report.relativeFailed).toBe(false)
+    expect(report.run.profileLine).toContain('Average weekday:')
+    expect(report).not.toHaveProperty('achieved')
+    expect(report).not.toHaveProperty('burst')
+    expect(report.endpoints).toHaveLength(1)
+  })
+
+  test('writes text with the run line, the profile line, 24 hours and the threshold lines', () => {
+    const lines = designTargetText(report, metrics).trimEnd().split('\n')
+
+    expect(lines[0]).toBe(report.run.line)
+    expect(lines[1]).toBe(report.run.profileLine)
+    expect(lines.filter((line) => line.startsWith('Hour '))).toHaveLength(24)
+    expect(lines.at(-1)).toBe(
+      'Threshold checks{scenario:live-animals} rate>0.99: passed'
+    )
+  })
+
+  test('writes HTML with the hour table, no burst table, and escaped values', () => {
+    const html = designTargetHtml({
+      ...report,
+      hours: [
+        { ...report.hours[0], segment: '<script>alert(1)</script>' },
+        ...report.hours.slice(1)
+      ]
+    })
+
+    expect(html.startsWith('<!doctype html>')).toBe(true)
+    expect(html).toContain('<h2>Each hour of the weekday</h2>')
+    expect(html).not.toContain('<h2>Burst</h2>')
+    expect(html).not.toContain('<script>')
+    expect(html).toContain('&lt;script&gt;')
   })
 })

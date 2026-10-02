@@ -33,16 +33,30 @@ const T1_HOLD_DURATION = '7h'
 const BURST_PEAK_DURATION = '30m'
 const BURST_DURATION = '60s'
 const T5_BURST_FACTOR = 1.5
+// Volumetrics section 4.4 A1 and A3: the seasonal peak-day factor and the design headroom the average weekday leaves out.
+const A1_SEASONAL_PEAK_FACTOR = 2
+const A3_DESIGN_HEADROOM = 2
+const AVERAGE_LOAD_HOUR_DURATION = '1h'
+// Volumetrics section 4.3 daily profile, each row read hour by hour and interpolated linearly: the 09:00 to 16:00 window sums to 54.4% against T2's "about 54%", and the busiest hour, 11:00, is T2's 8%.
+const WEEKDAY_HOURLY_SHARES = [
+  0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.019, 0.036, 0.053, 0.077, 0.078,
+  0.08, 0.078, 0.077, 0.077, 0.077, 0.072, 0.058, 0.041, 0.036, 0.031, 0.026,
+  0.021, 0.016
+]
 
 const ADDRESS_BOOK_SESSION_PAGES = 12
 const SECONDS_PER_MINUTE = 60
 const SIGN_IN_PAGES_WITHOUT_WAIT = 1
-const SECONDS_PER_HOUR = 3600
+export const SECONDS_PER_HOUR = 3600
 const GRACEFUL_STOP_FACTOR = 2
 const MAX_VUS_FACTOR = 2
 const DURATION_FORMAT = /^\d+[smh]$/
 // The burst stage list spends one second ramping to the burst rate, then holds it.
 const MIN_BURST_SECONDS = 2
+// Each hour after the first spends one second stepping to its rate, then holds it.
+const MIN_HOUR_SECONDS = 2
+
+export const HOURS_PER_DAY = 24
 
 /**
  * Freezes a value and everything inside it.
@@ -122,6 +136,12 @@ export const TRAFFIC_DEFAULTS = freezeDeep({
     burstDuration: BURST_DURATION,
     burstFactor: T5_BURST_FACTOR
   },
+  averageLoad: {
+    hourDuration: AVERAGE_LOAD_HOUR_DURATION,
+    hourlyShares: WEEKDAY_HOURLY_SHARES,
+    seasonalPeakFactor: A1_SEASONAL_PEAK_FACTOR,
+    designHeadroom: A3_DESIGN_HEADROOM
+  },
   mix: { dashboardReadShareTarget: D7_DASHBOARD_READ_SHARE },
   backgroundVolume: {
     liveAnimalsNotifications: GBN_AG_ANNUAL_NOTIFICATIONS,
@@ -196,7 +216,8 @@ const DURATION_KEYS = new Set([
   'rampDuration',
   'holdDuration',
   'peakDuration',
-  'burstDuration'
+  'burstDuration',
+  'hourDuration'
 ])
 const SHARE_KEYS = new Set([
   'amendShare',
@@ -334,9 +355,28 @@ const kilobyteRangeFailure = ({ min, max }) =>
     ? undefined
     : `a range from min to max of at most ${DOCUMENT_CAP_KILOBYTES}`
 
+const isShare = (value) =>
+  typeof value === 'number' &&
+  Number.isFinite(value) &&
+  value >= 0 &&
+  value <= 1
+
+const hourlySharesFailure = (shares) =>
+  Array.isArray(shares) &&
+  shares.length === HOURS_PER_DAY &&
+  shares.every(isShare) &&
+  shares.some((share) => share > 0)
+    ? undefined
+    : `${HOURS_PER_DAY} shares from 0 to 1, at least one above 0`
+
 const validate = (model, parent = '') => {
   for (const [key, value] of Object.entries(model)) {
     const path = joinPath(parent, key)
+
+    if (key === 'hourlyShares') {
+      failIfAny(path, hourlySharesFailure(value))
+      continue
+    }
 
     if (isDistributionKey(key)) {
       failIfAny(path, distributionFailure(key, value))
@@ -389,6 +429,14 @@ const failIfBurstTooShort = (burstDuration) => {
   }
 }
 
+const failIfHourTooShort = (hourDuration) => {
+  if (durationSeconds(hourDuration) < MIN_HOUR_SECONDS) {
+    throw new Error(
+      `TRAFFIC_MODEL averageLoad.hourDuration must be at least ${MIN_HOUR_SECONDS}s, got '${hourDuration}'`
+    )
+  }
+}
+
 /**
  * Works out the traffic model a run applies.
  *
@@ -407,6 +455,7 @@ export const resolveTrafficModel = (env, profile = {}) => {
 
   validate(model)
   failIfBurstTooShort(model.p99Burst.burstDuration)
+  failIfHourTooShort(model.averageLoad.hourDuration)
 
   return freezeDeep(model)
 }

@@ -2,10 +2,18 @@ import { describe, expect, test } from 'vitest'
 
 import {
   DESIGN_TARGETS,
+  HOUR_PHASES,
   LOAD_PROFILES,
   SCENARIO_LENGTH_PROFILES,
   SHAPES,
+  averageLoadFactors,
+  averageLoadProfileLine,
   designTargetScenarios,
+  hourLabel,
+  hourPhase,
+  journeyScenariosIn,
+  percentText,
+  segmentOf,
   localRunLine,
   phaseSchedule,
   requiredStubProfileFor,
@@ -15,7 +23,7 @@ import {
   scenarioSetFor
 } from './design-target.js'
 import { SCENARIOS } from './smoke.js'
-import { resolveTrafficModel } from './traffic.js'
+import { durationSeconds, resolveTrafficModel } from './traffic.js'
 
 const modelFor = (length) =>
   resolveTrafficModel({}, SCENARIO_LENGTH_PROFILES[length])
@@ -129,7 +137,117 @@ describe('scenarioSetFor', () => {
   })
 })
 
+describe('hours of the weekday', () => {
+  test('names the phase of each hour', () => {
+    expect(hourPhase(0)).toBe('hour-00')
+    expect(hourPhase(23)).toBe('hour-23')
+    expect(HOUR_PHASES).toHaveLength(24)
+  })
+
+  test('labels each hour with two digits', () => {
+    expect(hourLabel(9)).toBe('09:00')
+    expect(hourLabel(23)).toBe('23:00')
+  })
+
+  test('writes a share as a percentage to one decimal place', () => {
+    expect(percentText(0.25)).toBe('25%')
+    expect(percentText(0.0417)).toBe('4.2%')
+  })
+
+  test('lists only the journey scenarios a scenario set runs', () => {
+    expect(
+      journeyScenariosIn({ 'high-risk-plants': {}, 'ins-front-door': {} })
+    ).toEqual(['high-risk-plants'])
+  })
+
+  test.each([
+    [0, 'overnight baseline'],
+    [5, 'overnight baseline'],
+    [6, 'ramp-up'],
+    [9, 'sustained window'],
+    [15, 'sustained window'],
+    [16, 'early ramp-down'],
+    [18, 'evening ramp-down'],
+    [23, 'evening ramp-down']
+  ])('puts hour %i in the %s row', (hour, segment) => {
+    expect(segmentOf(hour)).toBe(segment)
+  })
+})
+
+describe('averageLoadFactors', () => {
+  test('runs the busiest hour at a quarter of the sustained peak rate', () => {
+    expect(averageLoadFactors(modelFor('full'))[11]).toBe(0.25)
+  })
+
+  test('runs the overnight hour at 0.9% over the busiest 8%, over four', () => {
+    expect(averageLoadFactors(modelFor('full'))[0]).toBeCloseTo(0.028125, 9)
+  })
+
+  test('averages about an eighth across the day', () => {
+    const factors = averageLoadFactors(modelFor('full'))
+    const mean = factors.reduce((sum, factor) => sum + factor, 0) / 24
+
+    expect(mean).toBeCloseTo(0.1311, 4)
+    expect(mean).toBeGreaterThan(0.12)
+    expect(mean).toBeLessThan(0.14)
+  })
+
+  test('doubles the busiest hour when the seasonal peak factor is taken to 1', () => {
+    const model = resolveTrafficModel({
+      TRAFFIC_MODEL: '{"averageLoad":{"seasonalPeakFactor":1}}'
+    })
+
+    expect(averageLoadFactors(model)[11]).toBe(0.5)
+  })
+})
+
+describe('averageLoadProfileLine', () => {
+  test('states what the run took out and what is left', () => {
+    expect(averageLoadProfileLine(modelFor('full'))).toBe(
+      "Average weekday: seasonal peak factor (A1) 2 and design headroom (A3) 2 taken out, so the busiest hour runs at 25% of the sustained peak run's rate and the day averages 13.1% of it"
+    )
+  })
+})
+
 describe('phaseSchedule', () => {
+  test('gives each weekday hour a phase, then the tail', () => {
+    const schedule = scheduleFor(SHAPES.AVERAGE_LOAD, 'full')
+
+    expect(schedule).toHaveLength(25)
+    expect(schedule[0]).toEqual({
+      phase: 'hour-00',
+      startSeconds: 0,
+      endSeconds: 3600,
+      paceFactor: 1
+    })
+    expect(schedule[11]).toMatchObject({
+      phase: 'hour-11',
+      startSeconds: 39_600,
+      endSeconds: 43_200
+    })
+    expect(schedule[23]).toMatchObject({
+      phase: 'hour-23',
+      startSeconds: 82_800,
+      endSeconds: 86_400
+    })
+    expect(schedule[24]).toEqual({
+      phase: 'tail',
+      startSeconds: 86_400,
+      endSeconds: null,
+      paceFactor: 1
+    })
+    expect(schedule.every(({ paceFactor }) => paceFactor === 1)).toBe(true)
+  })
+
+  test.each([
+    ['nightly', 14_400],
+    ['local', 2880]
+  ])('ends the weekday at %s length after %i seconds', (length, seconds) => {
+    expect(scheduleFor(SHAPES.AVERAGE_LOAD, length)[23].endSeconds).toBe(
+      seconds
+    )
+  })
+
   test('ramps 3h then holds 7h at full length', () => {
     expect(scheduleFor(SHAPES.SUSTAINED_PEAK, 'full')).toEqual([
       { phase: 'ramp', startSeconds: 0, endSeconds: 10_800, paceFactor: 1 },
@@ -168,8 +286,11 @@ describe('phaseSchedule', () => {
 })
 
 describe('designTargetScenarios', () => {
-  const build = (shape, loadProfile = LOAD_PROFILES.TWO_JOURNEYS) => {
-    const model = modelFor('full')
+  const build = (
+    shape,
+    loadProfile = LOAD_PROFILES.TWO_JOURNEYS,
+    model = modelFor('full')
+  ) => {
     const scenarioSet = scenarioSetFor(loadProfile)
 
     return designTargetScenarios({
@@ -244,6 +365,104 @@ describe('designTargetScenarios', () => {
     ])
   })
 
+  describe('for average load', () => {
+    test('counts every scenario per day, as an open model with a journey tag', () => {
+      for (const scenario of Object.values(build(SHAPES.AVERAGE_LOAD))) {
+        expect(scenario).toMatchObject({
+          executor: 'ramping-arrival-rate',
+          timeUnit: '24h'
+        })
+        expect(scenario).not.toHaveProperty('vus')
+        expect(scenario.tags.journey).toBeTypeOf('string')
+      }
+    })
+
+    test('steps live animals through 24 hours of paces, 30 overnight and 264 at 11:00', () => {
+      const scenario = build(SHAPES.AVERAGE_LOAD)['live-animals']
+
+      expect(scenario).toMatchObject({
+        startRate: 30,
+        preAllocatedVUs: 8,
+        maxVUs: 16,
+        gracefulStop: '4800s'
+      })
+      expect(scenario.stages).toHaveLength(47)
+      expect(scenario.stages[0]).toEqual({ duration: '3600s', target: 30 })
+      expect(scenario.stages.slice(21, 23)).toEqual([
+        { duration: '1s', target: 264 },
+        { duration: '3599s', target: 264 }
+      ])
+    })
+
+    test('paces the other scenarios at a quarter of their peak rate at 11:00', () => {
+      const scenarios = build(SHAPES.AVERAGE_LOAD)
+      const hourEleven = (name) => scenarios[name].stages[21].target
+
+      expect(hourEleven('high-risk-plants')).toBe(216)
+      expect(hourEleven('ins-front-door')).toBe(480)
+      expect(hourEleven('ins-address-book')).toBe(120)
+    })
+
+    test.each(['full', 'nightly', 'local'])(
+      'fits 24 hours into the %s hour length, with each hour stepped in at its window start',
+      (length) => {
+        const model = modelFor(length)
+        const hourSeconds = durationSeconds(model.averageLoad.hourDuration)
+        const scenarios = build(
+          SHAPES.AVERAGE_LOAD,
+          LOAD_PROFILES.TWO_JOURNEYS,
+          model
+        )
+        const schedule = phaseSchedule({
+          shape: SHAPES.AVERAGE_LOAD,
+          model,
+          scenarioNames: Object.keys(scenarios)
+        })
+
+        for (const { stages } of Object.values(scenarios)) {
+          const startOf = (index) =>
+            stages
+              .slice(0, index)
+              .reduce((sum, { duration }) => sum + durationSeconds(duration), 0)
+          const total = startOf(stages.length)
+
+          expect(total).toBe(24 * hourSeconds)
+
+          for (let hour = 1; hour < 24; hour++) {
+            expect(stages[2 * hour - 1].duration).toBe('1s')
+            expect(startOf(2 * hour - 1)).toBe(schedule[hour].startSeconds)
+            expect(startOf(2 * hour - 1) + 1).toBe(startOf(2 * hour))
+            expect(startOf(2 * hour + 1)).toBe(schedule[hour].endSeconds)
+          }
+        }
+      }
+    )
+
+    test('steps in 1s and holds 1s for the shortest hour the model allows', () => {
+      const model = resolveTrafficModel({
+        TRAFFIC_MODEL: JSON.stringify({ averageLoad: { hourDuration: '2s' } })
+      })
+      const { stages } = build(
+        SHAPES.AVERAGE_LOAD,
+        LOAD_PROFILES.TWO_JOURNEYS,
+        model
+      )['live-animals']
+
+      expect(stages[0].duration).toBe('2s')
+      expect(stages.slice(1).every(({ duration }) => duration === '1s')).toBe(
+        true
+      )
+      expect(stages).toHaveLength(47)
+    })
+
+    test('paces the IUU journey sessions at 2,064 a day at 11:00', () => {
+      expect(
+        build(SHAPES.AVERAGE_LOAD, 'with-iuu')['iuu-journey-sessions']
+          .stages[21].target
+      ).toBe(2064)
+    })
+  })
+
   test('sizes the IUU journey sessions at 344 an hour and 172 users', () => {
     const scenario = build(SHAPES.SUSTAINED_PEAK, 'with-iuu')[
       'iuu-journey-sessions'
@@ -309,6 +528,24 @@ describe('run lines', () => {
       })
     ).toBe(
       'Design-target run: p99-burst, two-journeys profile, full length (warm-up 50m, peak 30m, burst 60s at 1.5x), in test, requiring stub profile sla'
+    )
+  })
+
+  test.each([
+    ['nightly', 'test', '10m each, 4h in all'],
+    ['local', 'local', '2m each, 48m in all']
+  ])('names an average-load run at %s length', (length, environment, text) => {
+    expect(
+      runLine({
+        shape: 'average-load',
+        loadProfile: 'two-journeys',
+        scenarioLength: length,
+        environment,
+        stubProfile: 'sla',
+        model: modelFor(length)
+      })
+    ).toBe(
+      `Design-target run: average-load, two-journeys profile, ${length} length (24 weekday hours of ${text}), in ${environment}, requiring stub profile sla`
     )
   })
 

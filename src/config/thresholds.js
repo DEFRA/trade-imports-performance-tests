@@ -1,4 +1,4 @@
-import { PHASES, SHAPES } from './design-target.js'
+import { PHASES, SHAPES, journeyScenariosIn } from './design-target.js'
 import { kindOf } from './endpoints.js'
 import { HEADROOM_MEASURES } from './stub-ceilings.js'
 import { FLAGS, PROFILES, QUANTILES } from './stub-profiles.js'
@@ -330,6 +330,18 @@ export const asReportingOnly = (thresholds) =>
     ])
   )
 
+const endOfRunHealthThresholds = (scenario) => ({
+  [`http_req_failed{scenario:${scenario}}`]: [
+    `rate<${INTERIM_TARGETS.maxFailureRate}`
+  ],
+  [`checks{scenario:${scenario}}`]: [
+    `rate>${INTERIM_TARGETS.minCheckPassRate}`
+  ],
+  [`dropped_iterations{scenario:${scenario}}`]: [
+    `count<${MAX_DROPPED_ITERATIONS}`
+  ]
+})
+
 const burstScenarioThresholds = (scenario, endpoints) => ({
   [subMetricKey('server_errors', { scenario, phase: PHASES.BURST })]: [
     `rate<${INTERIM_TARGETS.burst.maxServerErrorRate}`
@@ -352,8 +364,27 @@ const burstScenarioThresholds = (scenario, endpoints) => ({
   )
 })
 
+const wholeRunScenarioThresholds = (scenario, endpoints) => ({
+  ...Object.fromEntries(
+    endpoints.map((endpoint) => [
+      subMetricKey('http_req_duration', { scenario, endpoint }),
+      durationLimits(kindOf(endpoint))
+    ])
+  ),
+  ...endOfRunHealthThresholds(scenario)
+})
+
 const gatingDesignTargetThresholds = (shape, scenarioSet) => {
   const entries = Object.entries(scenarioSet)
+
+  if (shape === SHAPES.AVERAGE_LOAD) {
+    return Object.assign(
+      {},
+      ...entries.map(([scenario, { endpoints }]) =>
+        wholeRunScenarioThresholds(scenario, endpoints)
+      )
+    )
+  }
 
   if (shape === SHAPES.SUSTAINED_PEAK) {
     return Object.assign(
@@ -378,11 +409,14 @@ const gatingDesignTargetThresholds = (shape, scenarioSet) => {
  * Sustained peak judges response times in the hold phase, and failed requests,
  * checks and dropped iterations across the whole scenario. The burst run
  * judges 5xx in the burst minute, checks and dropped iterations across the
- * whole run, and only reports the peak phase's response times. With `gating`
+ * whole run, and only reports the peak phase's response times. The average-load
+ * run judges response times, failed requests and checks over the whole run at
+ * the end, never aborting, because the overnight hours it starts in have too
+ * few samples; dropped iterations are judged as sustained peak does. With `gating`
  * false (the with-IUU profile) every limit can never fail.
  *
  * @param {object} options - The run.
- * @param {string} options.shape - `sustained-peak` or `p99-burst`.
+ * @param {string} options.shape - `sustained-peak`, `p99-burst` or `average-load`.
  * @param {Record<string, { endpoints: string[] }>} options.scenarioSet - Scenarios shaped like `SCENARIOS`.
  * @param {boolean} options.gating - False makes the whole set reporting-only.
  * @returns {Record<string, Array<string | { threshold: string, abortOnFail: boolean, delayAbortEval: string }>>} k6 thresholds.
@@ -435,6 +469,36 @@ export const designTargetReportThresholds = ({ scenarioSet, phases }) =>
             scenarioReportKeys(scenario, endpoints, phase)
           ),
           ...runReportKeys(phase)
+        ])
+        .map((key) => [key, null])
+    )
+  )
+
+const hourlyJourneyKeys = (scenarioSet, phase) =>
+  journeyScenariosIn(scenarioSet).flatMap((scenario) => [
+    subMetricKey('notifications_started', { scenario, phase }),
+    subMetricKey('session_seconds', { scenario, phase })
+  ])
+
+/**
+ * Builds the reporting-only thresholds that put each hour's figures in the
+ * summary data the average-load report reads.
+ *
+ * These can never fail. k6 keeps a sub-metric's figures only when a threshold
+ * names it, and the hourly report states each hour's achieved rates from them.
+ *
+ * @param {object} options - The run.
+ * @param {Record<string, { endpoints: string[] }>} options.scenarioSet - Scenarios shaped like `SCENARIOS`.
+ * @param {string[]} options.phases - The hourly phases the run reports.
+ * @returns {Record<string, string[]>} k6 thresholds.
+ */
+export const hourlyReportThresholds = ({ scenarioSet, phases }) =>
+  asReportingOnly(
+    Object.fromEntries(
+      phases
+        .flatMap((phase) => [
+          ...runReportKeys(phase),
+          ...hourlyJourneyKeys(scenarioSet, phase)
         ])
         .map((key) => [key, null])
     )

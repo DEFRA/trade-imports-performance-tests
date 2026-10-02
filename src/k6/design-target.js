@@ -6,6 +6,8 @@ import {
   LOAD_PROFILES,
   REPORTED_PHASES,
   SCENARIO_LENGTH_PROFILES,
+  SHAPES,
+  averageLoadProfileLine,
   designTargetScenarios,
   isScriptCheck,
   localRunLine,
@@ -33,6 +35,7 @@ import {
   designTargetReportThresholds,
   designTargetThresholds,
   documentScanThresholds,
+  hourlyReportThresholds,
   notificationSplitThresholds,
   stubHeadroomReportThresholds,
   stubProfileReportThresholds
@@ -134,10 +137,15 @@ const resolveUrls = (env) => {
 }
 
 const thresholdsFor = ({ shape, run }) => ({
-  ...designTargetReportThresholds({
-    scenarioSet: run.scenarioSet,
-    phases: REPORTED_PHASES[shape]
-  }),
+  ...(shape === SHAPES.AVERAGE_LOAD
+    ? hourlyReportThresholds({
+        scenarioSet: run.scenarioSet,
+        phases: REPORTED_PHASES[shape]
+      })
+    : designTargetReportThresholds({
+        scenarioSet: run.scenarioSet,
+        phases: REPORTED_PHASES[shape]
+      })),
   ...designTargetThresholds({
     shape,
     scenarioSet: run.scenarioSet,
@@ -156,7 +164,7 @@ const thresholdsFor = ({ shape, run }) => ({
  * Builds a design-target run: the options, set-up, tear-down, summary and exec
  * functions a suite file re-exports.
  *
- * The shape (sustained peak or P99 burst), the run length and the load profile
+ * The shape (sustained peak, P99 burst or average load), the run length and the load profile
  * come from configuration, so a suite is the import and the re-exports only.
  * Run it at k6's init stage: it reads the environment and resolves the model.
  *
@@ -206,6 +214,11 @@ export const createDesignTargetRun = ({ shape, env }) => {
 
   const logRunSettings = () => {
     console.log(runLine(settings))
+
+    if (shape === SHAPES.AVERAGE_LOAD) {
+      console.log(averageLoadProfileLine(model))
+    }
+
     console.log(`Traffic model: ${JSON.stringify(model)}`)
     console.log(mixTargetLine(model))
     console.log(documentScanAllowanceLine())

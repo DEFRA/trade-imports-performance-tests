@@ -63,9 +63,21 @@ describe('TRAFFIC_DEFAULTS', () => {
     ['sustainedPeak.holdDuration', '7h'],
     ['p99Burst.peakDuration', '30m'],
     ['p99Burst.burstDuration', '60s'],
-    ['p99Burst.burstFactor', 1.5]
+    ['p99Burst.burstFactor', 1.5],
+    ['averageLoad.hourDuration', '1h'],
+    ['averageLoad.seasonalPeakFactor', 2],
+    ['averageLoad.designHeadroom', 2]
   ])('%s is %s', (path, expected) => {
     expect(pathOf(TRAFFIC_DEFAULTS, path)).toBe(expected)
+  })
+
+  test('holds 24 weekday shares, busiest at 11:00 with 8%, adding up to 100.7%', () => {
+    const shares = TRAFFIC_DEFAULTS.averageLoad.hourlyShares
+
+    expect(shares).toHaveLength(24)
+    expect(Math.max(...shares)).toBe(0.08)
+    expect(shares.indexOf(0.08)).toBe(11)
+    expect(shares.reduce((sum, share) => sum + share, 0)).toBeCloseTo(1.007, 6)
   })
 
   test.each([
@@ -345,6 +357,53 @@ describe('resolveTrafficModel', () => {
         TRAFFIC_MODEL: '{"p99Burst":{"burstDuration":"2s"}}'
       }).p99Burst.burstDuration
     ).toBe('2s')
+  })
+
+  test.each([
+    JSON.stringify({ averageLoad: { hourlyShares: [0.5] } }),
+    JSON.stringify({
+      averageLoad: { hourlyShares: [...Array(23).fill(0.04), 1.5] }
+    }),
+    JSON.stringify({ averageLoad: { hourlyShares: Array(24).fill(0) } }),
+    JSON.stringify({
+      averageLoad: { hourlyShares: [...Array(23).fill(0.04), -0.1] }
+    }),
+    JSON.stringify({ averageLoad: { hourlyShares: 0.04 } }),
+    JSON.stringify({ averageLoad: { hourlyShares: 'flat' } })
+  ])('rejects the weekday shares in %s', (text) => {
+    expect(() => resolveTrafficModel({ TRAFFIC_MODEL: text })).toThrow(
+      'Traffic model value "averageLoad.hourlyShares" must be 24 shares from 0 to 1, at least one above 0'
+    )
+  })
+
+  test('accepts a whole replacement list of 24 weekday shares', () => {
+    const hourlyShares = Array(24).fill(0.04)
+
+    expect(
+      resolveTrafficModel({
+        TRAFFIC_MODEL: JSON.stringify({ averageLoad: { hourlyShares } })
+      }).averageLoad.hourlyShares
+    ).toEqual(hourlyShares)
+  })
+
+  test('rejects an hour that is not a duration', () => {
+    expect(() =>
+      resolveTrafficModel({
+        TRAFFIC_MODEL: '{"averageLoad":{"hourDuration":"an hour"}}'
+      })
+    ).toThrow(
+      'Traffic model value "averageLoad.hourDuration" must be a duration such as 2m'
+    )
+  })
+
+  test('rejects an hour of 1s', () => {
+    expect(() =>
+      resolveTrafficModel({
+        TRAFFIC_MODEL: '{"averageLoad":{"hourDuration":"1s"}}'
+      })
+    ).toThrow(
+      "TRAFFIC_MODEL averageLoad.hourDuration must be at least 2s, got '1s'"
+    )
   })
 
   test('accepts a share of 0', () => {

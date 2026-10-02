@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 
 import { DATASTORES } from './background-volume.js'
+import { HOUR_PHASES } from './design-target.js'
 import { STUBBED_INTEGRATIONS } from './stub-profiles.js'
 import {
   INTERIM_TARGETS,
@@ -10,6 +11,7 @@ import {
   designTargetReportThresholds,
   designTargetThresholds,
   documentScanThresholds,
+  hourlyReportThresholds,
   notificationSplitThresholds,
   scenarioThresholds,
   signInTargetThresholds,
@@ -513,7 +515,26 @@ describe('designTargetThresholds', () => {
     }
   })
 
-  test.each(['sustained-peak', 'p99-burst'])(
+  test('judges average-load response times, failed requests and checks over the whole run, without aborting', () => {
+    const set = designTargetThresholds({
+      shape: 'average-load',
+      scenarioSet,
+      gating: true
+    })
+    const key = `http_req_duration{scenario:${SCENARIO},endpoint:ins-dashboard}`
+
+    expect(set[key]).toEqual(['p(95)<2000', 'p(99)<5000'])
+    expect(set[`http_req_failed{scenario:${SCENARIO}}`]).toEqual(['rate<0.01'])
+    expect(set[`checks{scenario:${SCENARIO}}`]).toEqual(['rate>0.99'])
+    expect(set[`dropped_iterations{scenario:${SCENARIO}}`]).toEqual(['count<1'])
+    expect(Object.keys(set).some((name) => name.includes('phase:'))).toBe(false)
+
+    for (const limits of Object.values(set)) {
+      expect(limits.every((limit) => typeof limit === 'string')).toBe(true)
+    }
+  })
+
+  test.each(['sustained-peak', 'p99-burst', 'average-load'])(
     'can never fail %s when it is not gating',
     (shape) => {
       const set = designTargetThresholds({
@@ -528,6 +549,51 @@ describe('designTargetThresholds', () => {
       }
     }
   )
+})
+
+describe('hourlyReportThresholds', () => {
+  const set = hourlyReportThresholds({
+    scenarioSet: {
+      'live-animals': { endpoints: ['ins-dashboard'] },
+      'high-risk-plants': { endpoints: ['ins-dashboard'] },
+      'ins-front-door': { endpoints: ['ins-dashboard'] }
+    },
+    phases: HOUR_PHASES
+  })
+
+  test('holds the ten keys of each hour', () => {
+    expect(Object.keys(set)).toHaveLength(240)
+  })
+
+  test('holds each hour for each journey and for the front door', () => {
+    expect(set).toHaveProperty([
+      'notifications_started{scenario:live-animals,phase:hour-11}'
+    ])
+    expect(set).toHaveProperty([
+      'session_seconds{scenario:high-risk-plants,phase:hour-00}'
+    ])
+    expect(set).toHaveProperty(['page_requests{frontend:ins,phase:hour-23}'])
+    expect(set).toHaveProperty([
+      'page_requests{traffic_class:sign-in,phase:hour-06}'
+    ])
+  })
+
+  test('holds no notification count for the front door', () => {
+    expect(
+      Object.keys(set).some(
+        (key) =>
+          key.startsWith('notifications_started') &&
+          key.includes('ins-front-door')
+      )
+    ).toBe(false)
+  })
+
+  test('can never fail', () => {
+    for (const limits of Object.values(set)) {
+      expect(limits).toHaveLength(1)
+      expect(limits[0].endsWith('>=0')).toBe(true)
+    }
+  })
 })
 
 describe('designTargetReportThresholds', () => {
