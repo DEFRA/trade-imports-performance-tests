@@ -15,10 +15,12 @@ import {
   SETUP_TIMEOUT,
   resolvePassword
 } from '../config/smoke.js'
+import { resolveRecordedCeilings } from '../config/stub-ceilings.js'
 import { STUBBED_INTEGRATIONS } from '../config/stub-profiles.js'
 import {
   backgroundVolumeReportThresholds,
   backgroundVolumeThresholds,
+  stubHeadroomReportThresholds,
   stubProfileReportThresholds
 } from '../config/thresholds.js'
 import {
@@ -41,6 +43,7 @@ import {
   reportBackgroundVolume
 } from '../k6/background-volume.js'
 import { waitForReadiness } from '../k6/readiness.js'
+import { reportStubHeadroom } from '../k6/stub-ceilings.js'
 import {
   clearStubAnswered,
   readStubProfiles,
@@ -48,6 +51,7 @@ import {
 } from '../k6/stub-profiles.js'
 
 const environment = resolveEnvironment(__ENV)
+const ceilings = resolveRecordedCeilings(__ENV, environment)
 const localhostAlias = resolveLocalhostAlias(__ENV)
 const credentials = {
   crn: IDENTITY.crn,
@@ -76,7 +80,8 @@ export const options = {
   thresholds: {
     ...backgroundVolumeThresholds(Object.keys(BACKGROUND_SCENARIOS)),
     ...backgroundVolumeReportThresholds(DATASTORES),
-    ...stubProfileReportThresholds(STUBBED_INTEGRATIONS)
+    ...stubProfileReportThresholds(STUBBED_INTEGRATIONS),
+    ...stubHeadroomReportThresholds(STUBBED_INTEGRATIONS)
   },
   setupTimeout: SETUP_TIMEOUT,
   teardownTimeout: SETUP_TIMEOUT,
@@ -93,6 +98,9 @@ export function setup() {
   waitForReadiness({ urls, localhostAlias, credentials })
   reportStubProfiles(readStubProfiles({ urls }), 'start', new Date())
   clearStubAnswered({ urls })
+
+  const stubLoadSince = Date.now()
+
   console.log(indexesBuiltLine())
   ensurePerfAddress({
     insUrl: urls.ins,
@@ -109,6 +117,7 @@ export function setup() {
 
   return {
     addressName: PERF_ADDRESS.name,
+    stubLoadSince,
     before,
     toCreate: Object.fromEntries(
       Object.keys(targets).map((datastore) => [
@@ -198,5 +207,14 @@ export function teardown(data) {
 
   reportBackgroundVolume(after, model.backgroundVolume, 'end')
   console.log(createdLine(data.before, after))
-  reportStubProfiles(readStubProfiles({ urls }), 'end', new Date())
+  const entries = readStubProfiles({ urls })
+
+  reportStubProfiles(entries, 'end', new Date())
+  reportStubHeadroom({
+    entries,
+    ceilings,
+    environment,
+    since: data.stubLoadSince,
+    now: Date.now()
+  })
 }

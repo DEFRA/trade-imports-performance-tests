@@ -1,4 +1,5 @@
 import { kindOf } from './endpoints.js'
+import { HEADROOM_MEASURES } from './stub-ceilings.js'
 import { FLAGS, PROFILES, QUANTILES } from './stub-profiles.js'
 
 // Pages that upload and scan a document: DR-EUDP-005 section 4.7, SYN-28, SYN-29.
@@ -186,3 +187,81 @@ export const notificationSplitThresholds = (splits) =>
       ['count>=0']
     ])
   )
+
+const reportingOnly = (keys) =>
+  Object.fromEntries(keys.map((key) => [key, ['value>=0']]))
+
+const stepReportKeys = (scenario) => ({
+  [`http_req_failed{scenario:${scenario}}`]: ['rate>=0'],
+  [`checks{scenario:${scenario}}`]: ['rate>=0'],
+  [`dropped_iterations{scenario:${scenario}}`]: ['count>=0'],
+  [`iterations{scenario:${scenario}}`]: ['count>=0'],
+  [`http_req_duration{scenario:${scenario},profiled:yes}`]: ['p(95)>=0']
+})
+
+/**
+ * Builds the reporting-only thresholds that put each ladder step's figures in
+ * the summary data `handleSummary` reads.
+ *
+ * These can never fail: each limit is always true. k6 keeps a sub-metric's
+ * figures only when a threshold names it, and the suite judges each step from
+ * them itself.
+ *
+ * @param {string[]} stepScenarios - The ladder steps' scenario names.
+ * @returns {Record<string, string[]>} k6 thresholds.
+ */
+export const stubCeilingStepThresholds = (stepScenarios) =>
+  Object.assign({}, ...stepScenarios.map(stepReportKeys))
+
+const signInTargetGatingKeys = (scenario) => ({
+  [`http_req_failed{scenario:${scenario}}`]: [
+    `rate<${INTERIM_TARGETS.maxFailureRate}`
+  ],
+  [`checks{scenario:${scenario}}`]: [
+    `rate>${INTERIM_TARGETS.minCheckPassRate}`
+  ],
+  [`dropped_iterations{scenario:${scenario}}`]: ['count<1'],
+  [`http_req_duration{scenario:${scenario},profiled:yes}`]: ['p(95)>=0']
+})
+
+/**
+ * Builds the thresholds of the Defra ID sign-in targets.
+ *
+ * A gating scenario must carry its sign-ins with failed requests under 1%,
+ * checks over 99% and no dropped iteration. A reporting scenario states the
+ * same figures and can never fail: with-IUU figures are reporting-only.
+ *
+ * @param {{ gating: string[], reporting: string[] }} scenarios - The scenario names of each kind.
+ * @returns {Record<string, string[]>} k6 thresholds.
+ */
+export const signInTargetThresholds = ({ gating, reporting }) =>
+  Object.assign(
+    {},
+    ...gating.map(signInTargetGatingKeys),
+    ...reporting.map(stepReportKeys)
+  )
+
+/**
+ * Builds the reporting-only thresholds that make k6 print each stubbed
+ * integration's load, ceiling and headroom, and whether the run is trusted.
+ *
+ * These can never fail: `value>=0` is always true, with or without data. The
+ * verdict is reported, never gated.
+ *
+ * @param {Array<{ integration: string, stub: string | null }>} integrations - The stubbed integrations.
+ * @returns {Record<string, string[]>} k6 thresholds.
+ */
+export const stubHeadroomReportThresholds = (integrations) =>
+  reportingOnly([
+    ...integrations
+      .filter(({ stub }) => stub !== null)
+      .flatMap(({ integration }) => [
+        ...HEADROOM_MEASURES.map(
+          (measure) =>
+            `stub_load{integration:${integration},measure:${measure}}`
+        ),
+        `stub_ceiling{integration:${integration}}`,
+        `stub_headroom{integration:${integration}}`
+      ]),
+    'run_trusted'
+  ])

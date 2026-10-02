@@ -18,11 +18,13 @@
     "test:watch": "vitest",
     "test:docker-compose": "docker compose run --rm k6-workspace",
     "test:docker-compose:background-volume": "docker compose run --rm k6-workspace run --no-usage-report src/suites/background-volume.k6.js",
+    "test:docker-compose:stub-ceilings": "docker compose run --rm k6-stub-ceilings",
     "k6:local": "docker compose run --rm k6-local",
     "k6:inspect": "docker compose run --rm k6-local inspect --include-system-env-vars --execution-requirements src/suites/smoke.k6.js",
     "k6:inspect:background-volume": "docker compose run --rm k6-local inspect --include-system-env-vars --execution-requirements src/suites/background-volume.k6.js",
+    "k6:inspect:stub-ceilings": "docker compose run --rm k6-local inspect --include-system-env-vars --execution-requirements src/suites/breakpoint-stubs.k6.js",
     "k6:image": "docker compose up --build --exit-code-from development development",
-    "k6:down": "docker compose --profile local --profile workspace down"
+    "k6:down": "docker compose --profile local --profile workspace --profile stub-ceiling down"
   },
   "author": "Defra DDTS",
   "license": "OGL-UK-3.0",

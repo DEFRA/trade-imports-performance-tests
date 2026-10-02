@@ -29,6 +29,11 @@ describe('kindOf', () => {
     expect(kindOf('animals-backend-replace')).toBe('api')
   })
 
+  test('returns stub for a stub call', () => {
+    expect(kindOf('stub-defra-id-token')).toBe('stub')
+    expect(kindOf('stub-mdm-countries')).toBe('stub')
+  })
+
   test('throws for a name outside the catalogue', () => {
     expect(() => kindOf('ins-dashbord')).toThrow(
       'Unknown endpoint "ins-dashbord"'

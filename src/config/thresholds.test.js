@@ -8,7 +8,10 @@ import {
   documentScanThresholds,
   notificationSplitThresholds,
   scenarioThresholds,
+  signInTargetThresholds,
   smokeThresholds,
+  stubCeilingStepThresholds,
+  stubHeadroomReportThresholds,
   stubProfileReportThresholds
 } from './thresholds.js'
 
@@ -278,5 +281,97 @@ describe('smokeThresholds', () => {
       expect(unscoped).not.toContain(key)
       expect(key).toContain('scenario:')
     }
+  })
+})
+
+describe('stubCeilingStepThresholds', () => {
+  const keys = stubCeilingStepThresholds(['ceiling-mdm-0010'])
+
+  test('gives the five figures of a step', () => {
+    expect(Object.keys(keys)).toEqual([
+      'http_req_failed{scenario:ceiling-mdm-0010}',
+      'checks{scenario:ceiling-mdm-0010}',
+      'dropped_iterations{scenario:ceiling-mdm-0010}',
+      'iterations{scenario:ceiling-mdm-0010}',
+      'http_req_duration{scenario:ceiling-mdm-0010,profiled:yes}'
+    ])
+  })
+
+  test('can never fail', () => {
+    expect(Object.values(keys).flat()).toEqual([
+      'rate>=0',
+      'rate>=0',
+      'count>=0',
+      'count>=0',
+      'p(95)>=0'
+    ])
+  })
+})
+
+describe('signInTargetThresholds', () => {
+  const keys = signInTargetThresholds({
+    gating: ['defra-id-target-two-journeys'],
+    reporting: ['defra-id-target-with-iuu']
+  })
+
+  test('gates the two-journey target on failures, checks and dropped iterations', () => {
+    expect(
+      keys['http_req_failed{scenario:defra-id-target-two-journeys}']
+    ).toEqual(['rate<0.01'])
+    expect(keys['checks{scenario:defra-id-target-two-journeys}']).toEqual([
+      'rate>0.99'
+    ])
+    expect(
+      keys['dropped_iterations{scenario:defra-id-target-two-journeys}']
+    ).toEqual(['count<1'])
+  })
+
+  test('only reports the with-IUU target', () => {
+    expect(keys['http_req_failed{scenario:defra-id-target-with-iuu}']).toEqual([
+      'rate>=0'
+    ])
+    expect(keys['checks{scenario:defra-id-target-with-iuu}']).toEqual([
+      'rate>=0'
+    ])
+    expect(
+      keys['dropped_iterations{scenario:defra-id-target-with-iuu}']
+    ).toEqual(['count>=0'])
+  })
+
+  test('reports the p95 of the profiled requests of both', () => {
+    expect(
+      keys[
+        'http_req_duration{scenario:defra-id-target-two-journeys,profiled:yes}'
+      ]
+    ).toEqual(['p(95)>=0'])
+    expect(
+      keys['http_req_duration{scenario:defra-id-target-with-iuu,profiled:yes}']
+    ).toEqual(['p(95)>=0'])
+  })
+})
+
+describe('stubHeadroomReportThresholds', () => {
+  const keys = Object.keys(stubHeadroomReportThresholds(STUBBED_INTEGRATIONS))
+
+  test('has a load for each measure of each stub-hosted integration', () => {
+    expect(keys.filter((key) => key.startsWith('stub_load'))).toHaveLength(6)
+  })
+
+  test('has a ceiling and a headroom for each stub-hosted integration', () => {
+    expect(keys.filter((key) => key.startsWith('stub_ceiling'))).toHaveLength(3)
+    expect(keys.filter((key) => key.startsWith('stub_headroom'))).toHaveLength(
+      3
+    )
+  })
+
+  test('has the trust verdict and nothing for Azure Service Bus', () => {
+    expect(keys).toContain('run_trusted')
+    expect(keys.filter((key) => key.includes('azure-service-bus'))).toEqual([])
+  })
+
+  test('can never fail', () => {
+    expect(
+      Object.values(stubHeadroomReportThresholds(STUBBED_INTEGRATIONS)).flat()
+    ).toEqual(Array(13).fill('value>=0'))
   })
 })

@@ -13,6 +13,7 @@ import {
   notificationSplits,
   smokeScenarios
 } from '../config/smoke.js'
+import { resolveRecordedCeilings } from '../config/stub-ceilings.js'
 import {
   STUBBED_INTEGRATIONS,
   resolveRequiredStubProfile
@@ -22,6 +23,7 @@ import {
   documentScanThresholds,
   notificationSplitThresholds,
   smokeThresholds,
+  stubHeadroomReportThresholds,
   stubProfileReportThresholds
 } from '../config/thresholds.js'
 import {
@@ -47,6 +49,7 @@ import { HIGH_RISK_PLANTS_STEPS } from '../k6/high-risk-plants.js'
 import { notificationJourney } from '../k6/journeys.js'
 import { LIVE_ANIMALS_STEPS } from '../k6/live-animals.js'
 import { waitForReadiness } from '../k6/readiness.js'
+import { reportStubHeadroom } from '../k6/stub-ceilings.js'
 import {
   clearStubAnswered,
   readStubProfiles,
@@ -55,6 +58,7 @@ import {
 } from '../k6/stub-profiles.js'
 
 const environment = resolveEnvironment(__ENV)
+const ceilings = resolveRecordedCeilings(__ENV, environment)
 const requiredStubProfile = resolveRequiredStubProfile(__ENV)
 const localhostAlias = resolveLocalhostAlias(__ENV)
 const credentials = {
@@ -86,7 +90,8 @@ export const options = {
     ...documentScanThresholds('live-animals'),
     ...notificationSplitThresholds(notificationSplits(model)),
     ...backgroundVolumeReportThresholds(DATASTORES),
-    ...stubProfileReportThresholds(STUBBED_INTEGRATIONS)
+    ...stubProfileReportThresholds(STUBBED_INTEGRATIONS),
+    ...stubHeadroomReportThresholds(STUBBED_INTEGRATIONS)
   },
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'],
   setupTimeout: SETUP_TIMEOUT,
@@ -114,6 +119,9 @@ export function setup() {
   reportStubProfiles(stubProfiles, 'start', new Date())
   requireStubProfiles(stubProfiles, requiredStubProfile)
   clearStubAnswered({ urls })
+
+  const stubLoadSince = Date.now()
+
   console.log(indexesBuiltLine())
   ensurePerfAddress({
     insUrl: urls.ins,
@@ -127,11 +135,20 @@ export function setup() {
     'start'
   )
 
-  return { addressName: PERF_ADDRESS.name }
+  return { addressName: PERF_ADDRESS.name, stubLoadSince }
 }
 
-export function teardown() {
-  reportStubProfiles(readStubProfiles({ urls }), 'end', new Date())
+export function teardown(data) {
+  const entries = readStubProfiles({ urls })
+
+  reportStubProfiles(entries, 'end', new Date())
+  reportStubHeadroom({
+    entries,
+    ceilings,
+    environment,
+    since: data.stubLoadSince,
+    now: Date.now()
+  })
 }
 
 const frontDoorOptions = () => ({

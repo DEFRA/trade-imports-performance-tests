@@ -188,6 +188,24 @@ describe('answeredLine', () => {
     )
   })
 
+  test('adds the peak a second when the stub reports one', () => {
+    expect(
+      answeredLine(
+        slaEntry({
+          answered: {
+            count: 12,
+            peakPerSecond: 5,
+            p50Ms: 98,
+            p95Ms: 460,
+            p99Ms: 880
+          }
+        })
+      )
+    ).toBe(
+      'Stub latency answered: mdm (trade-imports-stub) p50 98ms, p95 460ms, p99 880ms over 12 calls, peak 5 a second, beside targets p50 100ms, p95 400ms, p99 1000ms'
+    )
+  })
+
   test('says when no calls were recorded', () => {
     expect(answeredLine(entry())).toBe(
       'Stub latency answered: mdm (trade-imports-stub) no calls recorded, beside targets p50 0ms, p95 0ms, p99 0ms'

@@ -164,7 +164,8 @@ export const profileLine = (entry, runDate, intervalDays) => {
 }
 
 /**
- * States the latency a stub answered with, beside its targets.
+ * States the latency a stub answered with, beside its targets, and the busiest
+ * second it carried when the stub reports one.
  *
  * @param {object} entry - The integration's entry, read at the end of the run.
  * @returns {string} The line to log.
@@ -184,7 +185,12 @@ export const answeredLine = (entry) => {
     return `Stub latency answered: ${whereText(entry)} no calls recorded, beside targets ${targetsText(entry)}`
   }
 
-  return `Stub latency answered: ${whereText(entry)} p50 ${answered.p50Ms}ms, p95 ${answered.p95Ms}ms, p99 ${answered.p99Ms}ms over ${answered.count} calls, beside targets ${targetsText(entry)}`
+  const peak =
+    typeof answered.peakPerSecond === 'number'
+      ? `, peak ${answered.peakPerSecond} a second`
+      : ''
+
+  return `Stub latency answered: ${whereText(entry)} p50 ${answered.p50Ms}ms, p95 ${answered.p95Ms}ms, p99 ${answered.p99Ms}ms over ${answered.count} calls${peak}, beside targets ${targetsText(entry)}`
 }
 
 /**
