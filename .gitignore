@@ -7,3 +7,6 @@ npm-debug.log
 coverage
 .cache
 reports/
+.env
+.env.*
+!.env.example
