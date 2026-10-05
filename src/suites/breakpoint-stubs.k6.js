@@ -1,6 +1,7 @@
 import exec from 'k6/execution'
 
 import {
+  SIGN_IN_TARGET_SCENARIO,
   ceilingScenarios,
   resolveCeilingGroups,
   resolveCeilingModel,
@@ -48,10 +49,7 @@ const urls = {
 }
 
 const targetThresholds = groups.includes('defra-id-target')
-  ? signInTargetThresholds({
-      gating: ['defra-id-target-two-journeys'],
-      reporting: ['defra-id-target-with-iuu']
-    })
+  ? signInTargetThresholds([SIGN_IN_TARGET_SCENARIO])
   : {}
 
 export const options = {

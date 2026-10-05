@@ -5,9 +5,9 @@ import {
   SCENARIO_LENGTH_PROFILES,
   SHAPES,
   phaseSchedule,
-  scenarioSetFor,
   scenarioSetForShape
 } from '../config/design-target.js'
+import { SCENARIOS } from '../config/smoke.js'
 import { subMetricKey } from '../config/thresholds.js'
 import { resolveTrafficModel } from '../config/traffic.js'
 import {
@@ -282,13 +282,9 @@ describe('line writers', () => {
     )
   })
 
-  test.each([
-    ['two-journeys', 'two journeys'],
-    ['with-iuu', 'with IUU']
-  ])('states the front door for %s', (loadProfile, label) => {
+  test('states the front door', () => {
     expect(
       achievedFrontDoorLine({
-        loadProfile,
         phase: 'hold',
         seconds: 360,
         achieved: {
@@ -297,10 +293,10 @@ describe('line writers', () => {
           concurrentUsers: 52.3,
           dashboardReadShare: 0.25
         },
-        target: DESIGN_TARGETS.frontDoor[loadProfile]
+        target: DESIGN_TARGETS.frontDoor
       })
     ).toContain(
-      `Achieved front door (${label}) over the hold (6m): 190.1 sign-ins an hour against`
+      'Achieved front door over the hold (6m): 190.1 sign-ins an hour against'
     )
   })
 
@@ -402,7 +398,6 @@ describe('line writers', () => {
   test.each([
     [
       [{ scenario: 'a', kind: 'page', verdict: 'within' }],
-      true,
       'Relative thresholds: passed'
     ],
     [
@@ -410,22 +405,16 @@ describe('line writers', () => {
         { scenario: 'a', kind: 'page', verdict: 'over' },
         { scenario: 'b', kind: 'api', verdict: 'over' }
       ],
-      true,
       'Relative thresholds: FAILED: a page; b api'
-    ],
-    [
-      [{ scenario: 'a', kind: 'page', verdict: 'over' }],
-      false,
-      'Relative thresholds: reported, not gated (with-IUU profile)'
     ]
-  ])('states the relative outcome', (verdicts, gating, line) => {
-    expect(relativeOutcomeLine({ verdicts, gating })).toBe(line)
+  ])('states the relative outcome', (verdicts, line) => {
+    expect(relativeOutcomeLine({ verdicts })).toBe(line)
   })
 })
 
 describe('designTargetReport', () => {
   const model = resolveTrafficModel({}, SCENARIO_LENGTH_PROFILES.local)
-  const scenarioSet = scenarioSetFor('two-journeys')
+  const scenarioSet = SCENARIOS
   const schedule = phaseSchedule({
     shape: 'p99-burst',
     model,
@@ -445,11 +434,10 @@ describe('designTargetReport', () => {
       { thresholds: { 'rate>0.99': { ok: true } } }
     ]
   ])
-  const reportFor = (loadProfile) =>
+  const reportFor = () =>
     designTargetReport({
       metrics,
       shape: 'p99-burst',
-      loadProfile,
       scenarioLength: 'local',
       environment: 'local',
       stubProfile: 'zero-delay',
@@ -458,19 +446,12 @@ describe('designTargetReport', () => {
       model
     })
 
-  test('fails the relative rule for two journeys with one over', () => {
-    expect(reportFor('two-journeys').relativeFailed).toBe(true)
-  })
-
-  test('reports the same verdict without failing the with-IUU profile', () => {
-    const report = reportFor('with-iuu')
-
-    expect(report.relativeFailed).toBe(false)
-    expect(report.relative.some(({ verdict }) => verdict === 'over')).toBe(true)
+  test('fails the relative rule with one pair over', () => {
+    expect(reportFor().relativeFailed).toBe(true)
   })
 
   test('lists every threshold with its result', () => {
-    expect(reportFor('two-journeys').thresholds).toEqual([
+    expect(reportFor().thresholds).toEqual([
       {
         metric: 'checks{scenario:live-animals}',
         expression: 'rate>0.99',
@@ -480,9 +461,9 @@ describe('designTargetReport', () => {
   })
 
   test('writes text that ends with the threshold lines', () => {
-    const text = designTargetText(reportFor('two-journeys'), metrics)
+    const text = designTargetText(reportFor(), metrics)
 
-    expect(text).toContain('Design-target run: p99-burst, two-journeys profile')
+    expect(text).toContain('Design-target run: p99-burst')
     expect(text).toContain('Relative thresholds: FAILED: live-animals page')
     expect(
       text.endsWith(
@@ -492,7 +473,7 @@ describe('designTargetReport', () => {
   })
 
   test('writes a complete HTML page that escapes its values', () => {
-    const report = reportFor('two-journeys')
+    const report = reportFor()
     const html = designTargetHtml({
       ...report,
       relative: [
@@ -509,7 +490,7 @@ describe('designTargetReport', () => {
 
 describe('designTargetReport for a sustained peak', () => {
   const model = resolveTrafficModel({}, SCENARIO_LENGTH_PROFILES.local)
-  const scenarioSet = scenarioSetFor('two-journeys')
+  const scenarioSet = SCENARIOS
   const schedule = phaseSchedule({
     shape: SHAPES.SUSTAINED_PEAK,
     model,
@@ -532,7 +513,6 @@ describe('designTargetReport for a sustained peak', () => {
   const report = designTargetReport({
     metrics,
     shape: SHAPES.SUSTAINED_PEAK,
-    loadProfile: 'two-journeys',
     scenarioLength: 'local',
     environment: 'local',
     stubProfile: 'zero-delay',
@@ -577,7 +557,7 @@ describe('hourTarget', () => {
   })
 
   test('scales the front door target', () => {
-    expect(hourTarget(DESIGN_TARGETS.frontDoor['two-journeys'], 0.25)).toEqual({
+    expect(hourTarget(DESIGN_TARGETS.frontDoor, 0.25)).toEqual({
       signInsPerHour: 50,
       coreRps: 0.1,
       concurrentUsers: 12.75,
@@ -590,11 +570,11 @@ describe('average-load hours', () => {
   const model = resolveTrafficModel({
     TRAFFIC_MODEL: '{"averageLoad":{"hourDuration":"10m"}}'
   })
-  const scheduleFor = (loadProfile) =>
+  const scheduleFor = () =>
     phaseSchedule({
       shape: SHAPES.AVERAGE_LOAD,
       model,
-      scenarioNames: Object.keys(scenarioSetFor(loadProfile))
+      scenarioNames: Object.keys(SCENARIOS)
     })
   const metrics = Object.fromEntries([
     [
@@ -631,17 +611,16 @@ describe('average-load hours', () => {
       metric({ avg: 60, count: 300 })
     ]
   ])
-  const hoursFor = (loadProfile) =>
+  const hoursFor = () =>
     averageLoadHours({
       metrics,
-      schedule: scheduleFor(loadProfile),
+      schedule: scheduleFor(),
       model,
-      loadProfile,
-      scenarioSet: scenarioSetFor(loadProfile)
+      scenarioSet: SCENARIOS
     })
 
   test('works out one row per hour against that hour of the profile', () => {
-    const hours = hoursFor('two-journeys')
+    const hours = hoursFor()
 
     expect(hours).toHaveLength(24)
     expect(hours[11]).toMatchObject({
@@ -666,7 +645,7 @@ describe('average-load hours', () => {
   })
 
   test('gives an hour with no metrics zeros, never NaN', () => {
-    const { journeys, frontDoor } = hoursFor('two-journeys')[3]
+    const { journeys, frontDoor } = hoursFor()[3]
 
     expect(journeys['live-animals'].achieved).toEqual({
       notificationsPerHour: 0,
@@ -684,18 +663,11 @@ describe('average-load hours', () => {
   test('states an hour for both journeys and the front door', () => {
     expect(
       hourLine({
-        row: hoursFor('two-journeys')[11],
-        loadProfile: 'two-journeys'
+        row: hoursFor()[11]
       })
     ).toBe(
-      'Hour 11:00 (sustained window, 8% of a weekday, 10m): live-animals 12 notifications an hour against 11, frontend 0.12 RPS against 0.13, 5 concurrent users against 5.5; high-risk-plants 0 notifications an hour against 9, frontend 0 RPS against 0.13, 0 concurrent users against 5.5; front door (two journeys) 120 sign-ins an hour against 50, core pages 0.1 RPS against 0.1, 30 concurrent users against 12.8'
+      'Hour 11:00 (sustained window, 8% of a weekday, 10m): live-animals 12 notifications an hour against 11, frontend 0.12 RPS against 0.13, 5 concurrent users against 5.5; high-risk-plants 0 notifications an hour against 9, frontend 0 RPS against 0.13, 0 concurrent users against 5.5; front door 120 sign-ins an hour against 50, core pages 0.1 RPS against 0.1, 30 concurrent users against 12.8'
     )
-  })
-
-  test('names the with-IUU front door', () => {
-    expect(
-      hourLine({ row: hoursFor('with-iuu')[11], loadProfile: 'with-iuu' })
-    ).toContain('front door (with IUU) 120 sign-ins an hour against 192.5')
   })
 
   test('reads endpoint rows over the whole run when no phase is given', () => {
@@ -715,7 +687,7 @@ describe('average-load hours', () => {
 
 describe('designTargetReport for average load', () => {
   const model = resolveTrafficModel({}, SCENARIO_LENGTH_PROFILES.local)
-  const scenarioSet = scenarioSetFor('two-journeys')
+  const scenarioSet = SCENARIOS
   const schedule = phaseSchedule({
     shape: SHAPES.AVERAGE_LOAD,
     model,
@@ -734,7 +706,6 @@ describe('designTargetReport for average load', () => {
   const report = designTargetReport({
     metrics,
     shape: SHAPES.AVERAGE_LOAD,
-    loadProfile: 'two-journeys',
     scenarioLength: 'local',
     environment: 'local',
     stubProfile: 'zero-delay',
@@ -863,10 +834,6 @@ describe('achievedSpike', () => {
     [subMetricKey('page_requests', { frontend: 'ins', phase: 'spike' })]:
       metric({ count: 51 }),
     [subMetricKey('page_requests', {
-      scenario: 'iuu-front-door',
-      phase: 'spike'
-    })]: metric({ count: 100 }),
-    [subMetricKey('page_requests', {
       traffic_class: 'sign-in',
       phase: 'spike'
     })]: metric({ count: 3 })
@@ -875,8 +842,7 @@ describe('achievedSpike', () => {
   test('works out each frontend page rate over the spike and derives the backends', () => {
     const achieved = achievedSpike({
       metrics,
-      seconds: 10,
-      scenarioSet: scenarioSetFor('two-journeys')
+      seconds: 10
     })
 
     expect(achieved).toMatchObject({
@@ -885,7 +851,6 @@ describe('achievedSpike', () => {
       plants: 5,
       plantsBackend: 5,
       ins: 5.1,
-      iuu: 0,
       signIns: 3
     })
   })
@@ -893,29 +858,16 @@ describe('achievedSpike', () => {
   test('derives the session path as every frontend page plus a backend call a journey page', () => {
     const { sessionPath } = achievedSpike({
       metrics,
-      seconds: 10,
-      scenarioSet: scenarioSetFor('two-journeys')
+      seconds: 10
     })
 
     expect(sessionPath).toBeCloseTo(4.9 + 5 + 5.1 + 4.9 + 5, 6)
   })
 
-  test('adds the IUU pages to the backends with IUU', () => {
-    const achieved = achievedSpike({
-      metrics,
-      seconds: 10,
-      scenarioSet: scenarioSetFor('with-iuu')
-    })
-
-    expect(achieved.iuu).toBe(10)
-    expect(achieved.iuuBackend).toBe(10)
-  })
-
   test('is zero, never NaN, with no samples', () => {
     const achieved = achievedSpike({
       metrics: {},
-      seconds: 10,
-      scenarioSet: scenarioSetFor('two-journeys')
+      seconds: 10
     })
 
     expect(Object.values(achieved).every((value) => value === 0)).toBe(true)
@@ -940,7 +892,6 @@ describe('spike and endurance line writers', () => {
     expect(
       spikeLine({
         duration: '10s',
-        loadProfile: 'two-journeys',
         capacities,
         achieved: {
           animals: 4.9,
@@ -955,28 +906,6 @@ describe('spike and endurance line writers', () => {
     ).toBe(
       'Spike (10s): animals frontend 4.9 RPS against 5, backend 4.9 RPS against 5 (derived: 1 backend call a page); plants frontend 5 RPS against 5, backend 5 RPS against 5; INS front door 5.1 RPS against 5 including 3 sign-ins; session path 24.8 RPS against 25 (derived: every frontend page plus 1 backend call a journey page)'
     )
-  })
-
-  test('adds the IUU capacity to the INS part and 55 to the session path with IUU', () => {
-    const line = spikeLine({
-      duration: '10s',
-      loadProfile: 'with-iuu',
-      capacities: { ...capacities, iuu: 15, sessionPath: 55 },
-      achieved: {
-        animals: 5,
-        animalsBackend: 5,
-        plants: 5,
-        plantsBackend: 5,
-        ins: 19.8,
-        signIns: 9,
-        sessionPath: 54
-      }
-    })
-
-    expect(line).toContain(
-      'INS front door 19.8 RPS against 20 (5 core and 15 IUU) including 9 sign-ins'
-    )
-    expect(line).toContain('session path 54 RPS against 55')
   })
 
   test('states a recovery that is within', () => {
@@ -1024,30 +953,21 @@ describe('spike and endurance line writers', () => {
     )
   })
 
-  test('states whether a relative rule passed, failed or was only reported', () => {
+  test('states whether a relative rule passed or failed', () => {
     const over = { ...comparison, verdict: 'over' }
 
     expect(
       comparisonOutcomeLine({
         label: 'Recovery',
-        comparisons: [comparison],
-        gating: true
+        comparisons: [comparison]
       })
     ).toBe('Recovery: passed')
     expect(
       comparisonOutcomeLine({
         label: 'Drift',
-        comparisons: [comparison, over],
-        gating: true
+        comparisons: [comparison, over]
       })
     ).toBe('Drift: FAILED: live-animals page')
-    expect(
-      comparisonOutcomeLine({
-        label: 'Recovery',
-        comparisons: [over],
-        gating: false
-      })
-    ).toBe('Recovery: reported, not gated (with-IUU profile)')
   })
 
   test('states that the Defra ID stub did not cascade', () => {
@@ -1132,7 +1052,7 @@ describe('spike and endurance line writers', () => {
 
 describe('designTargetReport for spike and recovery', () => {
   const model = resolveTrafficModel({}, SCENARIO_LENGTH_PROFILES.local)
-  const scenarioSet = scenarioSetFor('two-journeys')
+  const scenarioSet = SCENARIOS
   const schedule = phaseSchedule({
     shape: SHAPES.SPIKE_RECOVERY,
     model,
@@ -1153,21 +1073,20 @@ describe('designTargetReport for spike and recovery', () => {
       thresholds: { 'rate>0.99': { ok: true } }
     }
   }
-  const reportFor = (loadProfile) =>
+  const reportFor = () =>
     designTargetReport({
       metrics,
       shape: SHAPES.SPIKE_RECOVERY,
-      loadProfile,
       scenarioLength: 'local',
       environment: 'local',
       stubProfile: 'zero-delay',
       schedule,
-      scenarioSet: scenarioSetFor(loadProfile),
+      scenarioSet: SCENARIOS,
       model
     })
 
   test('compares the baseline with the recovered window at 1.1 times', () => {
-    const entry = reportFor('two-journeys').relative.find(
+    const entry = reportFor().relative.find(
       ({ scenario, kind }) => scenario === 'live-animals' && kind === 'page'
     )
 
@@ -1175,13 +1094,12 @@ describe('designTargetReport for spike and recovery', () => {
     expect(entry).toMatchObject({ verdict: 'over', window: '1m' })
   })
 
-  test('fails the run when a recovered P95 is over, but only reports it with IUU', () => {
-    expect(reportFor('two-journeys').relativeFailed).toBe(true)
-    expect(reportFor('with-iuu').relativeFailed).toBe(false)
+  test('fails the run when a recovered P95 is over', () => {
+    expect(reportFor().relativeFailed).toBe(true)
   })
 
   test('reports the spike against the stated capacities', () => {
-    const { spike } = reportFor('two-journeys')
+    const { spike } = reportFor()
 
     expect(spike).toMatchObject({
       duration: '10s',
@@ -1192,7 +1110,7 @@ describe('designTargetReport for spike and recovery', () => {
   })
 
   test('writes text that states the profile, the spike, every recovery and the cascade', () => {
-    const report = reportFor('two-journeys')
+    const report = reportFor()
     const lines = designTargetText(report, metrics).trimEnd().split('\n')
 
     expect(lines[0]).toBe(report.run.line)
@@ -1209,7 +1127,7 @@ describe('designTargetReport for spike and recovery', () => {
   })
 
   test('writes HTML with the spike and recovery tables and escaped values', () => {
-    const report = reportFor('two-journeys')
+    const report = reportFor()
     const html = designTargetHtml({
       ...report,
       relative: [
@@ -1225,7 +1143,7 @@ describe('designTargetReport for spike and recovery', () => {
   })
 
   test('lists the pairs that are over as recovery lines', () => {
-    expect(failedComparisonLines(reportFor('two-journeys'))).toEqual([
+    expect(failedComparisonLines(reportFor())).toEqual([
       "Recovery P95 live-animals page: 700ms in the recovered 1m against the baseline's 600ms plus 10% (660ms): OVER"
     ])
   })
@@ -1234,13 +1152,12 @@ describe('designTargetReport for spike and recovery', () => {
 describe('designTargetReport for endurance', () => {
   const model = resolveTrafficModel({}, SCENARIO_LENGTH_PROFILES.local)
   const scenarioSet = scenarioSetForShape({
-    shape: SHAPES.ENDURANCE,
-    loadProfile: 'two-journeys'
+    shape: SHAPES.ENDURANCE
   })
   const schedule = phaseSchedule({
     shape: SHAPES.ENDURANCE,
     model,
-    scenarioNames: Object.keys(scenarioSetFor('two-journeys'))
+    scenarioNames: Object.keys(SCENARIOS)
   })
   const metrics = {
     ...pairMetrics({
@@ -1260,7 +1177,6 @@ describe('designTargetReport for endurance', () => {
   const report = designTargetReport({
     metrics,
     shape: SHAPES.ENDURANCE,
-    loadProfile: 'two-journeys',
     scenarioLength: 'local',
     environment: 'local',
     stubProfile: 'zero-delay',

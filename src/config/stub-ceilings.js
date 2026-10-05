@@ -22,13 +22,11 @@ const SECONDS_PER_HOUR = 3600
 // confluence:6604328622 NFR-VOL-CORE-01. `steadyStateSessions` is one hour of
 // sessions at twice the design target: the stub keeps a session for an hour.
 export const DESIGN_TARGET_FACTOR = 2
-export const SIGN_IN_TARGETS = Object.freeze({
-  twoJourneys: Object.freeze({
-    designPerHour: 200,
-    steadyStateSessions: 400
-  }),
-  withIuu: Object.freeze({ designPerHour: 770, steadyStateSessions: 1540 })
+export const SIGN_IN_TARGET = Object.freeze({
+  designPerHour: 200,
+  steadyStateSessions: 400
 })
+export const SIGN_IN_TARGET_SCENARIO = 'defra-id-target'
 
 // confluence:6604328622 section 4.2 and NFR-VOL-CORE-05.
 export const FRONT_DOOR_SPIKE_PER_SECOND = 5
@@ -333,8 +331,6 @@ const targetScenario = ({ target, model, startSeconds }) => {
   }
 }
 
-const { twoJourneys, withIuu } = SIGN_IN_TARGETS
-
 const sequence = (entries, model) =>
   entries.reduce(
     (state, build) => {
@@ -368,32 +364,22 @@ const ladderEntries = ({ integration, model }) =>
   }))
 
 const targetEntries = (model) => [
-  singleScenario('defra-id-warm-up-two-journeys', (startSeconds) =>
+  singleScenario('defra-id-warm-up-target', (startSeconds) =>
     warmUpScenario({
-      sessions: twoJourneys.steadyStateSessions,
+      sessions: SIGN_IN_TARGET.steadyStateSessions,
       model,
       startSeconds
     })
   ),
-  singleScenario('defra-id-target-two-journeys', (startSeconds) =>
-    targetScenario({ target: twoJourneys, model, startSeconds })
-  ),
-  singleScenario('defra-id-warm-up-with-iuu', (startSeconds) =>
-    warmUpScenario({
-      sessions: withIuu.steadyStateSessions - twoJourneys.steadyStateSessions,
-      model,
-      startSeconds
-    })
-  ),
-  singleScenario('defra-id-target-with-iuu', (startSeconds) =>
-    targetScenario({ target: withIuu, model, startSeconds })
+  singleScenario(SIGN_IN_TARGET_SCENARIO, (startSeconds) =>
+    targetScenario({ target: SIGN_IN_TARGET, model, startSeconds })
   )
 ]
 
 const defraIdLadderEntries = (model) => [
   singleScenario('defra-id-warm-up-ladder', (startSeconds) =>
     warmUpScenario({
-      sessions: withIuu.steadyStateSessions,
+      sessions: SIGN_IN_TARGET.steadyStateSessions,
       model,
       startSeconds
     })

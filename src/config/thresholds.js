@@ -289,21 +289,16 @@ const signInTargetGatingKeys = (scenario) => ({
 })
 
 /**
- * Builds the thresholds of the Defra ID sign-in targets.
+ * Builds the thresholds of the Defra ID sign-in target.
  *
- * A gating scenario must carry its sign-ins with failed requests under 1%,
- * checks over 99% and no dropped iteration. A reporting scenario states the
- * same figures and can never fail: with-IUU figures are reporting-only.
+ * A sign-in target must carry its sign-ins with failed requests under 1%,
+ * checks over 99% and no dropped iteration.
  *
- * @param {{ gating: string[], reporting: string[] }} scenarios - The scenario names of each kind.
+ * @param {string[]} scenarios - The scenario names.
  * @returns {Record<string, string[]>} k6 thresholds.
  */
-export const signInTargetThresholds = ({ gating, reporting }) =>
-  Object.assign(
-    {},
-    ...gating.map(signInTargetGatingKeys),
-    ...reporting.map(stepReportKeys)
-  )
+export const signInTargetThresholds = (scenarios) =>
+  Object.assign({}, ...scenarios.map(signInTargetGatingKeys))
 
 /**
  * Builds the reporting-only thresholds that make k6 print each stubbed
@@ -453,7 +448,7 @@ const mergedPerScenario = (scenarioSet, thresholdsFor) =>
     )
   )
 
-const GATING_THRESHOLDS = {
+const THRESHOLDS_BY_SHAPE = {
   [SHAPES.AVERAGE_LOAD]: (scenarioSet) =>
     mergedPerScenario(scenarioSet, wholeRunScenarioThresholds),
   [SHAPES.SUSTAINED_PEAK]: (scenarioSet) =>
@@ -469,9 +464,6 @@ const GATING_THRESHOLDS = {
     ...deadLetterThresholds()
   })
 }
-
-const gatingDesignTargetThresholds = (shape, scenarioSet) =>
-  (GATING_THRESHOLDS[shape] ?? burstThresholds)(scenarioSet)
 
 const burstThresholds = (scenarioSet) =>
   mergedPerScenario(scenarioSet, burstScenarioThresholds)
@@ -493,19 +485,15 @@ const burstThresholds = (scenarioSet) =>
  * because recovery is the rule. The endurance run judges what the average-load
  * run does over its whole length, plus no transport error in any scenario, at
  * least one re-authentication from each returning user and no dead-letter
- * growth. With `gating` false (the with-IUU profile) every limit can never fail.
+ * growth.
  *
  * @param {object} options - The run.
  * @param {string} options.shape - A value of `SHAPES`.
  * @param {Record<string, { endpoints: string[] }>} options.scenarioSet - Scenarios shaped like `SCENARIOS`.
- * @param {boolean} options.gating - False makes the whole set reporting-only.
  * @returns {Record<string, Array<string | { threshold: string, abortOnFail: boolean, delayAbortEval: string }>>} k6 thresholds.
  */
-export const designTargetThresholds = ({ shape, scenarioSet, gating }) => {
-  const thresholds = gatingDesignTargetThresholds(shape, scenarioSet)
-
-  return gating ? thresholds : asReportingOnly(thresholds)
-}
+export const designTargetThresholds = ({ shape, scenarioSet }) =>
+  (THRESHOLDS_BY_SHAPE[shape] ?? burstThresholds)(scenarioSet)
 
 const kindsOf = (endpoints) => [...new Set(endpoints.map(kindOf))]
 

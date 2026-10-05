@@ -13,7 +13,6 @@ import {
   gracefulStopFor,
   isChosen,
   iterationSeconds,
-  iuuThinkSecondsMean,
   resolveTrafficModel,
   scenarioPagesPerHour,
   scenarioRates,
@@ -57,9 +56,6 @@ describe('TRAFFIC_DEFAULTS', () => {
     ['backgroundVolume.maxDuration', '24h'],
     ['liveAnimals.documentKilobytes.min', 100],
     ['liveAnimals.documentKilobytes.max', 5000],
-    ['iuu.notificationsPerHour', 229],
-    ['iuu.sessionsPerNotification', 1.5],
-    ['iuu.sessionMinutes', 30],
     ['sustainedPeak.rampDuration', '3h'],
     ['sustainedPeak.holdDuration', '7h'],
     ['p99Burst.peakDuration', '30m'],
@@ -75,7 +71,6 @@ describe('TRAFFIC_DEFAULTS', () => {
     ['spikeRecovery.capacityRps.ins', 5],
     ['spikeRecovery.capacityRps.animals', 5],
     ['spikeRecovery.capacityRps.plants', 5],
-    ['spikeRecovery.capacityRps.iuu', 15],
     ['endurance.holdDuration', '8h'],
     ['endurance.comparisonWindow', '1h'],
     ['endurance.sessionExpiry', 'frontend'],
@@ -349,8 +344,8 @@ describe('resolveTrafficModel', () => {
       'Traffic model value "p99Burst.burstDuration" must be a duration such as 2m'
     ],
     [
-      '{"iuu":{"notificationsPerHour":228.6}}',
-      'Traffic model value "iuu.notificationsPerHour" must be a whole number'
+      '{"liveAnimals":{"notificationsPerHour":43.5}}',
+      'Traffic model value "liveAnimals.notificationsPerHour" must be a whole number'
     ]
   ])('rejects %s', (text, message) => {
     expect(() => resolveTrafficModel({ TRAFFIC_MODEL: text })).toThrow(message)
@@ -589,10 +584,7 @@ describe('scenarioRates', () => {
       'live-animals': 44,
       'high-risk-plants': 36,
       'ins-front-door': 80,
-      'ins-address-book': 20,
-      'iuu-journey-sessions': 344,
-      'iuu-front-door': 229,
-      'iuu-address-book': 57
+      'ins-address-book': 20
     })
   })
 
@@ -612,10 +604,7 @@ describe('scenarioPagesPerHour', () => {
       'live-animals': { animals: 1760, ins: 396 },
       'high-risk-plants': { plants: 1800, ins: 324 },
       'ins-front-door': { ins: 640 },
-      'ins-address-book': { ins: 240 },
-      'iuu-journey-sessions': { iuu: 2064 },
-      'iuu-front-door': { iuu: 1832 },
-      'iuu-address-book': { iuu: 684 }
+      'ins-address-book': { ins: 240 }
     })
   })
 })
@@ -627,7 +616,6 @@ describe('iterationSeconds', () => {
     expect(seconds['live-animals']).toBe(2 * 20 * SECONDS_PER_MINUTE)
     expect(seconds['high-risk-plants']).toBe(2 * 25 * SECONDS_PER_MINUTE)
     expect(seconds['ins-front-door']).toBe(5 * SECONDS_PER_MINUTE)
-    expect(seconds['iuu-journey-sessions']).toBe(1800)
   })
 })
 
@@ -654,12 +642,6 @@ describe('durationText', () => {
     [90, '90s']
   ])('writes %d seconds as %s', (seconds, text) => {
     expect(durationText(seconds)).toBe(text)
-  })
-})
-
-describe('iuuThinkSecondsMean', () => {
-  test('spreads the IUU session over its status checks, the sign-in having no wait', () => {
-    expect(iuuThinkSecondsMean(resolveTrafficModel({}))).toBe(360)
   })
 })
 
