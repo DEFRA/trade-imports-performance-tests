@@ -517,10 +517,13 @@ const averageLoadScenario = ({ base, model, rate, seconds }) => {
   const pace = (factor) => Math.round(rate * factor * HOURS_PER_DAY)
   const [firstFactor, ...laterFactors] = factors
 
+  const users = virtualUsersFor(rate * Math.max(...factors), seconds)
+
   return {
     ...base,
     timeUnit: AVERAGE_LOAD_TIME_UNIT,
-    ...virtualUsersFor(rate * Math.max(...factors), seconds),
+    ...users,
+    preAllocatedVUs: users.maxVUs,
     startRate: pace(firstFactor),
     stages: [
       { duration: `${hourSeconds}s`, target: pace(firstFactor) },
@@ -660,6 +663,7 @@ const spikeScenario = ({ base, schedule, rate, factor, seconds }) => {
 
 const enduranceScenario = ({ base, schedule, rate }) => ({
   ...base,
+  preAllocatedVUs: base.maxVUs,
   startRate: rate,
   stages: [{ duration: `${finalHourOf(schedule).endSeconds}s`, target: rate }]
 })

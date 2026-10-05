@@ -349,7 +349,7 @@ describe('designTargetScenarios', () => {
 
       expect(scenario).toMatchObject({
         startRate: 30,
-        preAllocatedVUs: 8,
+        preAllocatedVUs: 16,
         maxVUs: 16,
         gracefulStop: '4800s'
       })
@@ -713,6 +713,18 @@ describe('designTargetScenarios for endurance', () => {
       startRate: 80,
       stages: [{ duration: '31800s', target: 80 }]
     })
+  })
+
+  test('allocates every arrival scenario its most users up front, so none is dropped while k6 starts one', () => {
+    const arrivals = Object.values(scenariosFor(SHAPES.ENDURANCE)).filter(
+      ({ executor }) => executor === 'ramping-arrival-rate'
+    )
+
+    expect(arrivals).toHaveLength(4)
+
+    for (const scenario of arrivals) {
+      expect(scenario.preAllocatedVUs).toBe(scenario.maxVUs)
+    }
   })
 
   test('runs one returning user for each frontend as constant users', () => {
