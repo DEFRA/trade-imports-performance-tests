@@ -35,11 +35,13 @@
     "k6:inspect:spike-recovery": "docker compose run --rm k6-local inspect --include-system-env-vars --execution-requirements src/suites/spike-recovery.k6.js",
     "k6:inspect:endurance": "docker compose run --rm k6-local inspect --include-system-env-vars --execution-requirements src/suites/endurance.k6.js",
     "k6:image": "docker compose up --build --exit-code-from development development",
-    "k6:down": "docker compose --profile local --profile workspace --profile stub-ceiling --profile design-target --profile cdp down"
+    "k6:down": "docker compose --profile local --profile workspace --profile stub-ceiling --profile design-target --profile cdp down",
+    "security-audit": "audit-ci --config audit-ci.jsonc"
   },
   "author": "Defra DDTS",
   "license": "OGL-UK-3.0",
   "devDependencies": {
+    "audit-ci": "7.1.0",
     "eslint": "9.39.2",
     "neostandard": "0.13.0",
     "prettier": "3.8.2",
