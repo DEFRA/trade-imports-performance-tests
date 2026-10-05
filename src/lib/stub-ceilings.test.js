@@ -395,21 +395,15 @@ describe('ceilingsRecordedLine', () => {
 })
 
 describe('signInCeilingLine', () => {
-  test('says there is headroom for both targets', () => {
+  test('says there is headroom', () => {
     expect(signInCeilingLine(16, false)).toBe(
-      'Defra ID ceiling 16 sign-ins a second against 5.11 needed (two journeys) and 5.43 (with IUU): headroom for both'
+      'Defra ID ceiling 16 sign-ins a second against 5.11 needed: headroom'
     )
   })
 
-  test('says to change the session store when short of the two-journey need', () => {
+  test('says to change the session store when short of the need', () => {
     expect(signInCeilingLine(3, false)).toBe(
-      'Defra ID ceiling 3 sign-ins a second, short of the 5.11 needed (two journeys): change the session store (c-010)'
-    )
-  })
-
-  test('says when only the with-IUU figure is short', () => {
-    expect(signInCeilingLine(5.2, false)).toBe(
-      'Defra ID ceiling 5.2 sign-ins a second: headroom for two journeys, short of the 5.43 with IUU (reported, not gated)'
+      'Defra ID ceiling 3 sign-ins a second, short of the 5.11 needed: change the session store (c-010)'
     )
   })
 
@@ -424,20 +418,17 @@ describe('signInTargetLine', () => {
   test('states a target the stub carried', () => {
     expect(
       signInTargetLine({
-        label: 'two journeys',
         perHour: 400,
         verdict: { ...held, p95Ms: 9 }
       })
     ).toBe(
-      'Defra ID sign-in target (two journeys): carried 400 sign-ins an hour plus a 5 a second spike for 10 seconds, failed 0.00%, checks 100.00%, p95 9ms, dropped 0'
+      'Defra ID sign-in target: carried 400 sign-ins an hour plus a 5 a second spike for 10 seconds, failed 0.00%, checks 100.00%, p95 9ms, dropped 0'
     )
   })
 
   test('states a target the stub did not carry', () => {
-    expect(
-      signInTargetLine({ label: 'with IUU', perHour: 1540, verdict: broke })
-    ).toBe(
-      'Defra ID sign-in target (with IUU): did not carry (failed 4.10% of requests) 1540 sign-ins an hour plus a 5 a second spike for 10 seconds, failed 4.10%, checks 99.00%, p95 9ms, dropped 0'
+    expect(signInTargetLine({ perHour: 400, verdict: broke })).toBe(
+      'Defra ID sign-in target: did not carry (failed 4.10% of requests) 400 sign-ins an hour plus a 5 a second spike for 10 seconds, failed 4.10%, checks 99.00%, p95 9ms, dropped 0'
     )
   })
 })
@@ -493,8 +484,7 @@ describe('ceilingSummaryText', () => {
     const failingStep = 'http_req_failed{scenario:ceiling-defra-id-0016}'
     const defraIdText = ceilingSummaryText({
       metrics: {
-        ...stepMetrics('defra-id-target-two-journeys'),
-        ...stepMetrics('defra-id-target-with-iuu', { failed: 0.041 }),
+        ...stepMetrics('defra-id-target'),
         ...stepMetrics('ceiling-defra-id-0008'),
         ...stepMetrics('ceiling-defra-id-0016', { failed: 0.041 }),
         [failingStep]: {
@@ -516,18 +506,15 @@ describe('ceilingSummaryText', () => {
       measured: '2026-10-02'
     })
 
-    test('states each sign-in target with its verdict', () => {
+    test('states the sign-in target with its verdict', () => {
       expect(defraIdText).toContain(
-        'Defra ID sign-in target (two journeys): carried 400 sign-ins an hour'
-      )
-      expect(defraIdText).toContain(
-        'Defra ID sign-in target (with IUU): did not carry (failed 4.10% of requests) 1540 sign-ins an hour'
+        'Defra ID sign-in target: carried 400 sign-ins an hour'
       )
     })
 
     test('states the Defra ID ceiling', () => {
       expect(defraIdText).toContain(
-        'Defra ID ceiling 8 sign-ins a second against 5.11 needed (two journeys) and 5.43 (with IUU): headroom for both'
+        'Defra ID ceiling 8 sign-ins a second against 5.11 needed: headroom'
       )
     })
 

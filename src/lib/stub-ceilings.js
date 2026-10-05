@@ -3,7 +3,8 @@ import {
   FRONT_DOOR_SPIKE_PER_SECOND,
   HEADROOM_FACTOR,
   LATENCY_ALLOWANCE_MS,
-  SIGN_IN_TARGETS,
+  SIGN_IN_TARGET,
+  SIGN_IN_TARGET_SCENARIO,
   SPIKE_SECONDS,
   requiredSignInsPerSecond
 } from '../config/stub-ceilings.js'
@@ -294,33 +295,26 @@ export const ceilingsRecordedLine = ({
  * @returns {string} The line to log.
  */
 export const signInCeilingLine = (signInsPerSecond, atLeast) => {
-  const needed = requiredSignInsPerSecond(SIGN_IN_TARGETS.twoJourneys)
-  const neededWithIuu = requiredSignInsPerSecond(SIGN_IN_TARGETS.withIuu)
+  const needed = requiredSignInsPerSecond(SIGN_IN_TARGET)
   const ceilingText = `${atLeast ? 'at least ' : ''}${figureText(signInsPerSecond)} sign-ins a second`
   const neededText = figureText(needed)
-  const neededWithIuuText = figureText(neededWithIuu)
 
   if (signInsPerSecond < needed) {
-    return `Defra ID ceiling ${ceilingText}, short of the ${neededText} needed (two journeys): change the session store (c-010)`
+    return `Defra ID ceiling ${ceilingText}, short of the ${neededText} needed: change the session store (c-010)`
   }
 
-  if (signInsPerSecond < neededWithIuu) {
-    return `Defra ID ceiling ${ceilingText}: headroom for two journeys, short of the ${neededWithIuuText} with IUU (reported, not gated)`
-  }
-
-  return `Defra ID ceiling ${ceilingText} against ${neededText} needed (two journeys) and ${neededWithIuuText} (with IUU): headroom for both`
+  return `Defra ID ceiling ${ceilingText} against ${neededText} needed: headroom`
 }
 
 /**
  * States whether the Defra ID stub carried a sign-in target with the front-door spike on top.
  *
  * @param {object} options - The target.
- * @param {string} options.label - `two journeys` or `with IUU`.
  * @param {number} options.perHour - Sign-ins an hour carried.
  * @param {{ held: boolean, failedRate: number | null, checksRate: number | null, p95Ms: number | null, dropped: number, reason: string }} options.verdict - The target's verdict.
  * @returns {string} The line to log.
  */
-export const signInTargetLine = ({ label, perHour, verdict }) => {
+export const signInTargetLine = ({ perHour, verdict }) => {
   const { held, failedRate, checksRate, p95Ms, dropped, reason } = verdict
   const outcome = held ? 'carried' : `did not carry (${reason})`
   const figures =
@@ -328,7 +322,7 @@ export const signInTargetLine = ({ label, perHour, verdict }) => {
       ? 'no requests completed'
       : `failed ${percentText(failedRate)}, checks ${checksRate === null ? 'none' : percentText(checksRate)}, p95 ${Math.round(p95Ms)}ms, dropped ${dropped}`
 
-  return `Defra ID sign-in target (${label}): ${outcome} ${perHour} sign-ins an hour plus a ${FRONT_DOOR_SPIKE_PER_SECOND} a second spike for ${SPIKE_SECONDS} seconds, ${figures}`
+  return `Defra ID sign-in target: ${outcome} ${perHour} sign-ins an hour plus a ${FRONT_DOOR_SPIKE_PER_SECOND} a second spike for ${SPIKE_SECONDS} seconds, ${figures}`
 }
 
 const profileOf = (setupData, integration) =>
@@ -351,25 +345,16 @@ const ladderResults = ({ metrics, setupData, ladders }) =>
     return { integration, judged, ceiling: ceilingFrom(judged) }
   })
 
-const signInTargetLines = (metrics) =>
-  [
-    [
-      'defra-id-target-two-journeys',
-      'two journeys',
-      SIGN_IN_TARGETS.twoJourneys
-    ],
-    ['defra-id-target-with-iuu', 'with IUU', SIGN_IN_TARGETS.withIuu]
-  ].map(([scenario, label, target]) =>
-    signInTargetLine({
-      label,
-      perHour: target.steadyStateSessions,
-      verdict: stepVerdict({
-        metrics,
-        scenario,
-        latencyLimitMs: Number.POSITIVE_INFINITY
-      })
+const signInTargetLines = (metrics) => [
+  signInTargetLine({
+    perHour: SIGN_IN_TARGET.steadyStateSessions,
+    verdict: stepVerdict({
+      metrics,
+      scenario: SIGN_IN_TARGET_SCENARIO,
+      latencyLimitMs: Number.POSITIVE_INFINITY
     })
-  )
+  })
+]
 
 const ladderLines = ({ results, setupData, environment }) =>
   results.flatMap(({ integration, judged, ceiling }) => [

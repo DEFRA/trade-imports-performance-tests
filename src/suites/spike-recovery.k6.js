@@ -11,6 +11,3 @@ export const liveAnimals = run.liveAnimals
 export const highRiskPlants = run.highRiskPlants
 export const insFrontDoor = run.insFrontDoor
 export const insAddressBook = run.insAddressBook
-export const iuuJourneySession = run.iuuJourneySession
-export const iuuFrontDoor = run.iuuFrontDoor
-export const iuuAddressBook = run.iuuAddressBook

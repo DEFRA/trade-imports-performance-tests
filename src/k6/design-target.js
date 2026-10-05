@@ -3,7 +3,6 @@ import { Counter } from 'k6/metrics'
 
 import { DATASTORES, indexesBuiltLine } from '../config/background-volume.js'
 import {
-  LOAD_PROFILES,
   REPORTED_PHASES,
   RETURNING_SCENARIOS,
   SCENARIO_LENGTH_PROFILES,
@@ -16,11 +15,9 @@ import {
   localRunLine,
   phaseSchedule,
   requiredStubProfileFor,
-  resolveLoadProfile,
   resolveScenarioLength,
   runLine,
   scenarioSchedules,
-  scenarioSetFor,
   scenarioSetForShape,
   spikeProfileLine,
   watchesDeadLetters
@@ -30,6 +27,7 @@ import {
   IDENTITY,
   JOURNEYS,
   PERF_ADDRESS,
+  SCENARIOS,
   SETUP_TIMEOUT,
   notificationSplits,
   resolvePassword
@@ -37,7 +35,6 @@ import {
 import { resolveRecordedCeilings } from '../config/stub-ceilings.js'
 import { STUBBED_INTEGRATIONS } from '../config/stub-profiles.js'
 import {
-  asReportingOnly,
   backgroundVolumeReportThresholds,
   designTargetReportThresholds,
   designTargetThresholds,
@@ -73,8 +70,7 @@ import { readDeadLetterCount, reportDeadLetters } from './dead-letters.js'
 import {
   addressBookSession,
   dashboardOnlySession,
-  ensurePerfAddress,
-  iuuJourneySession
+  ensurePerfAddress
 } from './front-door.js'
 import { HIGH_RISK_PLANTS_STEPS } from './high-risk-plants.js'
 import { notificationJourney } from './journeys.js'
@@ -104,29 +100,26 @@ const SUMMARY_TREND_STATS = [
 const resolveRun = ({ shape, env }) => {
   const environment = resolveEnvironment(env)
   const scenarioLength = resolveScenarioLength(env, environment)
-  const loadProfile = resolveLoadProfile(env)
   const stubProfile = requiredStubProfileFor(env, environment)
   const model = resolveTrafficModel(
     env,
     SCENARIO_LENGTH_PROFILES[scenarioLength]
   )
-  const scenarioSet = scenarioSetForShape({ shape, loadProfile })
+  const scenarioSet = scenarioSetForShape({ shape })
   const schedule = phaseSchedule({
     shape,
     model,
-    scenarioNames: Object.keys(scenarioSetFor(loadProfile))
+    scenarioNames: Object.keys(SCENARIOS)
   })
 
   return {
     environment,
     scenarioLength,
-    loadProfile,
     stubProfile,
     model,
     scenarioSet,
     schedule,
-    schedules: scenarioSchedules({ shape, schedule, model, scenarioSet }),
-    gating: loadProfile === LOAD_PROFILES.TWO_JOURNEYS
+    schedules: scenarioSchedules({ shape, schedule, model, scenarioSet })
   }
 }
 
@@ -158,15 +151,9 @@ const thresholdsFor = ({ shape, run }) => ({
         scenarioSet: run.scenarioSet,
         phases: REPORTED_PHASES[shape]
       })),
-  ...designTargetThresholds({
-    shape,
-    scenarioSet: run.scenarioSet,
-    gating: run.gating
-  }),
+  ...designTargetThresholds({ shape, scenarioSet: run.scenarioSet }),
   ...(shape === SHAPES.ENDURANCE ? reauthenticationReportThresholds() : {}),
-  ...(run.gating
-    ? documentScanThresholds('live-animals')
-    : asReportingOnly(documentScanThresholds('live-animals'))),
+  ...documentScanThresholds('live-animals'),
   ...notificationSplitThresholds(notificationSplits(run.model)),
   ...backgroundVolumeReportThresholds(DATASTORES),
   ...stubProfileReportThresholds(STUBBED_INTEGRATIONS),
@@ -178,7 +165,7 @@ const thresholdsFor = ({ shape, run }) => ({
  * functions a suite file re-exports.
  *
  * The shape (sustained peak, P99 burst, average load, spike and recovery or
- * endurance), the run length and the load profile come from configuration, so
+ * endurance) and the run length come from configuration, so
  * a suite is the import and the re-exports only.
  * Run it at k6's init stage: it reads the environment and resolves the model.
  *
@@ -189,7 +176,7 @@ const thresholdsFor = ({ shape, run }) => ({
  */
 export const createDesignTargetRun = ({ shape, env }) => {
   const run = resolveRun({ shape, env })
-  const { environment, loadProfile, model, schedule, stubProfile } = run
+  const { environment, model, schedule, stubProfile } = run
   const ceilings = resolveRecordedCeilings(env, environment)
   const localhostAlias = resolveLocalhostAlias(env)
   const credentials = { crn: IDENTITY.crn, password: resolvePassword(env) }
@@ -204,7 +191,6 @@ export const createDesignTargetRun = ({ shape, env }) => {
   }
   const settings = {
     shape,
-    loadProfile,
     scenarioLength: run.scenarioLength,
     environment,
     stubProfile,
@@ -225,7 +211,6 @@ export const createDesignTargetRun = ({ shape, env }) => {
     tags: {
       environment,
       stub_profile: stubProfile ?? 'as-reported',
-      load_profile: loadProfile,
       scenario_length: run.scenarioLength,
       shape
     }
@@ -239,9 +224,7 @@ export const createDesignTargetRun = ({ shape, env }) => {
     }
 
     if (shape === SHAPES.SPIKE_RECOVERY) {
-      console.log(
-        spikeProfileLine({ model, loadProfile, scenarioSet: run.scenarioSet })
-      )
+      console.log(spikeProfileLine({ model, scenarioSet: run.scenarioSet }))
     }
 
     if (shape === SHAPES.ENDURANCE) {
@@ -429,15 +412,6 @@ export const createDesignTargetRun = ({ shape, env }) => {
       dashboardOnlySession(frontDoorOptions())
     ),
     insAddressBook: scheduled('ins-address-book', () =>
-      addressBookSession(frontDoorOptions())
-    ),
-    iuuJourneySession: scheduled('iuu-journey-sessions', () =>
-      iuuJourneySession(frontDoorOptions())
-    ),
-    iuuFrontDoor: scheduled('iuu-front-door', () =>
-      dashboardOnlySession(frontDoorOptions())
-    ),
-    iuuAddressBook: scheduled('iuu-address-book', () =>
       addressBookSession(frontDoorOptions())
     ),
     returningIns: returning('returning-ins'),

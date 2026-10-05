@@ -326,43 +326,21 @@ describe('stubCeilingStepThresholds', () => {
 })
 
 describe('signInTargetThresholds', () => {
-  const keys = signInTargetThresholds({
-    gating: ['defra-id-target-two-journeys'],
-    reporting: ['defra-id-target-with-iuu']
+  const keys = signInTargetThresholds(['defra-id-target'])
+
+  test('gates the target on failures, checks and dropped iterations', () => {
+    expect(keys['http_req_failed{scenario:defra-id-target}']).toEqual([
+      'rate<0.01'
+    ])
+    expect(keys['checks{scenario:defra-id-target}']).toEqual(['rate>0.99'])
+    expect(keys['dropped_iterations{scenario:defra-id-target}']).toEqual([
+      'count<1'
+    ])
   })
 
-  test('gates the two-journey target on failures, checks and dropped iterations', () => {
+  test('reports the p95 of the profiled requests', () => {
     expect(
-      keys['http_req_failed{scenario:defra-id-target-two-journeys}']
-    ).toEqual(['rate<0.01'])
-    expect(keys['checks{scenario:defra-id-target-two-journeys}']).toEqual([
-      'rate>0.99'
-    ])
-    expect(
-      keys['dropped_iterations{scenario:defra-id-target-two-journeys}']
-    ).toEqual(['count<1'])
-  })
-
-  test('only reports the with-IUU target', () => {
-    expect(keys['http_req_failed{scenario:defra-id-target-with-iuu}']).toEqual([
-      'rate>=0'
-    ])
-    expect(keys['checks{scenario:defra-id-target-with-iuu}']).toEqual([
-      'rate>=0'
-    ])
-    expect(
-      keys['dropped_iterations{scenario:defra-id-target-with-iuu}']
-    ).toEqual(['count>=0'])
-  })
-
-  test('reports the p95 of the profiled requests of both', () => {
-    expect(
-      keys[
-        'http_req_duration{scenario:defra-id-target-two-journeys,profiled:yes}'
-      ]
-    ).toEqual(['p(95)>=0'])
-    expect(
-      keys['http_req_duration{scenario:defra-id-target-with-iuu,profiled:yes}']
+      keys['http_req_duration{scenario:defra-id-target,profiled:yes}']
     ).toEqual(['p(95)>=0'])
   })
 })
@@ -468,8 +446,7 @@ describe('designTargetThresholds', () => {
   test('judges sustained-peak response times in the hold phase without aborting, and still aborts on failed requests', () => {
     const set = designTargetThresholds({
       shape: 'sustained-peak',
-      scenarioSet,
-      gating: true
+      scenarioSet
     })
     const key = `http_req_duration{scenario:${SCENARIO},endpoint:ins-dashboard,phase:hold}`
 
@@ -483,8 +460,7 @@ describe('designTargetThresholds', () => {
   test('judges sustained-peak failures, checks and dropped iterations over the whole scenario', () => {
     const set = designTargetThresholds({
       shape: 'sustained-peak',
-      scenarioSet,
-      gating: true
+      scenarioSet
     })
 
     expect(Object.keys(set)).toEqual(
@@ -499,8 +475,7 @@ describe('designTargetThresholds', () => {
   test('gates the burst run on 5xx in the burst minute, checks and dropped iterations', () => {
     const set = designTargetThresholds({
       shape: 'p99-burst',
-      scenarioSet,
-      gating: true
+      scenarioSet
     })
 
     expect(set[`server_errors{scenario:${SCENARIO},phase:burst}`]).toEqual([
@@ -513,8 +488,7 @@ describe('designTargetThresholds', () => {
   test('only reports the burst run peak-phase response times, and never aborts', () => {
     const set = designTargetThresholds({
       shape: 'p99-burst',
-      scenarioSet,
-      gating: true
+      scenarioSet
     })
     const key = `http_req_duration{scenario:${SCENARIO},endpoint:ins-dashboard,phase:peak}`
 
@@ -528,8 +502,7 @@ describe('designTargetThresholds', () => {
   test('judges average-load response times, failed requests and checks over the whole run, without aborting', () => {
     const set = designTargetThresholds({
       shape: 'average-load',
-      scenarioSet,
-      gating: true
+      scenarioSet
     })
     const key = `http_req_duration{scenario:${SCENARIO},endpoint:ins-dashboard}`
 
@@ -543,22 +516,6 @@ describe('designTargetThresholds', () => {
       expect(limits.every((limit) => typeof limit === 'string')).toBe(true)
     }
   })
-
-  test.each(['sustained-peak', 'p99-burst', 'average-load'])(
-    'can never fail %s when it is not gating',
-    (shape) => {
-      const set = designTargetThresholds({
-        shape,
-        scenarioSet,
-        gating: false
-      })
-
-      for (const limits of Object.values(set)) {
-        expect(limits).toHaveLength(1)
-        expect(limits[0].endsWith('>=0')).toBe(true)
-      }
-    }
-  )
 })
 
 describe('hourlyReportThresholds', () => {
@@ -657,8 +614,7 @@ describe('designTargetThresholds for spike and recovery', () => {
   const scenarioSet = { [SCENARIO]: { endpoints: ENDPOINTS } }
   const set = designTargetThresholds({
     shape: 'spike-recovery',
-    scenarioSet,
-    gating: true
+    scenarioSet
   })
 
   test('judges response times in the baseline phase, without aborting', () => {
@@ -697,19 +653,6 @@ describe('designTargetThresholds for spike and recovery', () => {
       )
     ).toEqual([])
   })
-
-  test('can never fail when it is not gating', () => {
-    const reporting = designTargetThresholds({
-      shape: 'spike-recovery',
-      scenarioSet,
-      gating: false
-    })
-
-    for (const limits of Object.values(reporting)) {
-      expect(limits).toHaveLength(1)
-      expect(limits[0].endsWith('>=0')).toBe(true)
-    }
-  })
 })
 
 describe('designTargetThresholds for endurance', () => {
@@ -720,8 +663,7 @@ describe('designTargetThresholds for endurance', () => {
   }
   const set = designTargetThresholds({
     shape: 'endurance',
-    scenarioSet,
-    gating: true
+    scenarioSet
   })
 
   test('fails the run on a transport error in any scenario', () => {
@@ -752,19 +694,6 @@ describe('designTargetThresholds for endurance', () => {
       'value<1'
     ])
     expect(Object.keys(set).some((key) => key.includes('phase:'))).toBe(false)
-  })
-
-  test('can never fail when it is not gating', () => {
-    const reporting = designTargetThresholds({
-      shape: 'endurance',
-      scenarioSet,
-      gating: false
-    })
-
-    for (const limits of Object.values(reporting)) {
-      expect(limits).toHaveLength(1)
-      expect(limits[0].endsWith('>=0')).toBe(true)
-    }
   })
 })
 

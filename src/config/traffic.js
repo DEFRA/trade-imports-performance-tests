@@ -22,10 +22,6 @@ const INTERIM_ADDRESS_BOOK_ENTRIES = 500
 const BACKGROUND_VIRTUAL_USERS = 10
 const BACKGROUND_MAX_DURATION = '24h'
 
-// Peak hour 114.3 notifications (volumetrics section 8.2) times A3's factor of 2, rounded up.
-const IUU_NOTIFICATIONS_PER_HOUR = 229
-const IUU2_SESSION_MINUTES = 30
-const IUU3_SESSIONS_PER_NOTIFICATION = A2_SESSIONS_PER_NOTIFICATION
 // DR-EUDP-005 'Scenario shapes' row 1: ramp over 3 hours, hold over the 7-hour 09:00 to 16:00 window.
 const T1_RAMP_DURATION = '3h'
 const T1_HOLD_DURATION = '7h'
@@ -51,9 +47,8 @@ const SPIKE_DURATION = '10s'
 const SPIKE_RECOVERY_DURATION = '60s'
 // Interim: the window judged once the minute c-004 allows has passed.
 const SPIKE_RECOVERED_DURATION = '2m'
-// Volumetrics section 4.2 Spike capacities rows 1 and 2: proposals pending open item 2.
+// Volumetrics section 4.2 Spike capacities row 1: a proposal pending open item 2.
 const FRONTEND_SPIKE_CAPACITY_RPS = 5
-const IUU_SPIKE_CAPACITY_RPS = 15
 // DR-EUDP-005 'Scenario shapes' row 4: eight hours at the design-target peak.
 const ENDURANCE_HOLD_DURATION = '8h'
 // c-004 default: the final hour's P95 against the first hour's.
@@ -144,11 +139,6 @@ export const TRAFFIC_DEFAULTS = freezeDeep({
     addressBookSessionsPerNotification:
       INTERIM_ADDRESS_BOOK_SESSIONS_PER_NOTIFICATION
   },
-  iuu: {
-    notificationsPerHour: IUU_NOTIFICATIONS_PER_HOUR,
-    sessionsPerNotification: IUU3_SESSIONS_PER_NOTIFICATION,
-    sessionMinutes: IUU2_SESSION_MINUTES
-  },
   sustainedPeak: {
     rampDuration: T1_RAMP_DURATION,
     holdDuration: T1_HOLD_DURATION
@@ -172,8 +162,7 @@ export const TRAFFIC_DEFAULTS = freezeDeep({
     capacityRps: {
       ins: FRONTEND_SPIKE_CAPACITY_RPS,
       animals: FRONTEND_SPIKE_CAPACITY_RPS,
-      plants: FRONTEND_SPIKE_CAPACITY_RPS,
-      iuu: IUU_SPIKE_CAPACITY_RPS
+      plants: FRONTEND_SPIKE_CAPACITY_RPS
     }
   },
   endurance: {
@@ -568,18 +557,6 @@ export const frontDoorThinkSecondsMean = (frontDoor) =>
   (frontDoor.dashboardOnlySessionMinutes * SECONDS_PER_MINUTE) /
   frontDoor.pagesPerDashboardOnlySession
 
-/**
- * The mean wait between two front-door pages of a synthetic IUU journey
- * session, which holds its sign-in and status checks across the IUU session
- * length. The sign-in has no wait.
- *
- * @param {{ iuu: { sessionMinutes: number }, frontDoor: { corePagesPerJourneySession: number } }} model - A resolved traffic model.
- * @returns {number} Seconds.
- */
-export const iuuThinkSecondsMean = (model) =>
-  (model.iuu.sessionMinutes * SECONDS_PER_MINUTE) /
-  (model.frontDoor.corePagesPerJourneySession - SIGN_IN_PAGES_WITHOUT_WAIT)
-
 const DURATION_UNIT_SECONDS = {
   s: 1,
   m: SECONDS_PER_MINUTE,
@@ -664,9 +641,6 @@ const rateFromJourneys = (perNotification, { liveAnimals, highRiskPlants }) =>
   perNotification *
   (liveAnimals.notificationsPerHour + highRiskPlants.notificationsPerHour)
 
-const rateFromIuu = (perNotification, { iuu }) =>
-  Math.max(1, Math.round(perNotification * iuu.notificationsPerHour))
-
 /**
  * The arrival rate of each scenario, in iterations an hour.
  *
@@ -693,15 +667,6 @@ export const scenarioRates = (model) => ({
         model
       )
     )
-  ),
-  'iuu-journey-sessions': rateFromIuu(model.iuu.sessionsPerNotification, model),
-  'iuu-front-door': rateFromIuu(
-    model.frontDoor.dashboardOnlySessionsPerNotification,
-    model
-  ),
-  'iuu-address-book': rateFromIuu(
-    model.frontDoor.addressBookSessionsPerNotification,
-    model
   )
 })
 
@@ -715,8 +680,7 @@ const journeyPagesPerHour = ({ rate, journeyModel, frontend, model }) => ({
 
 /**
  * The page requests an hour each scenario puts on each frontend at its steady
- * rate. The IUU scenarios' pages are counted as `iuu`, though they land on the
- * INS host, because they count against IUU's own capacity (c-007).
+ * rate.
  *
  * @param {object} model - A resolved traffic model.
  * @returns {Record<string, Record<string, number>>} Pages an hour by scenario name, then by frontend.
@@ -724,7 +688,6 @@ const journeyPagesPerHour = ({ rate, journeyModel, frontend, model }) => ({
 export const scenarioPagesPerHour = (model) => {
   const rates = scenarioRates(model)
   const { frontDoor } = model
-  const iuuSessionPages = frontDoor.corePagesPerJourneySession
 
   return {
     'live-animals': journeyPagesPerHour({
@@ -744,15 +707,6 @@ export const scenarioPagesPerHour = (model) => {
     },
     'ins-address-book': {
       ins: rates['ins-address-book'] * ADDRESS_BOOK_SESSION_PAGES
-    },
-    'iuu-journey-sessions': {
-      iuu: rates['iuu-journey-sessions'] * iuuSessionPages
-    },
-    'iuu-front-door': {
-      iuu: rates['iuu-front-door'] * frontDoor.pagesPerDashboardOnlySession
-    },
-    'iuu-address-book': {
-      iuu: rates['iuu-address-book'] * ADDRESS_BOOK_SESSION_PAGES
     }
   }
 }
@@ -775,11 +729,6 @@ export const iterationSeconds = (model) => ({
   'ins-front-door':
     model.frontDoor.dashboardOnlySessionMinutes * SECONDS_PER_MINUTE,
   'ins-address-book':
-    ADDRESS_BOOK_SESSION_PAGES * frontDoorThinkSecondsMean(model.frontDoor),
-  'iuu-journey-sessions': model.iuu.sessionMinutes * SECONDS_PER_MINUTE,
-  'iuu-front-door':
-    model.frontDoor.dashboardOnlySessionMinutes * SECONDS_PER_MINUTE,
-  'iuu-address-book':
     ADDRESS_BOOK_SESSION_PAGES * frontDoorThinkSecondsMean(model.frontDoor)
 })
 

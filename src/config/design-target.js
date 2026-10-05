@@ -139,11 +139,6 @@ export const PHASES = Object.freeze({
   TAIL: 'tail'
 })
 
-export const LOAD_PROFILES = Object.freeze({
-  TWO_JOURNEYS: 'two-journeys',
-  WITH_IUU: 'with-iuu'
-})
-
 export const SCENARIO_LENGTHS = Object.freeze({
   FULL: 'full',
   NIGHTLY: 'nightly',
@@ -176,7 +171,6 @@ export const SCENARIO_LENGTH_PROFILES = freezeDeep({
     p99Burst: { peakDuration: '4m' },
     liveAnimals: { sessionMinutes: 2 },
     highRiskPlants: { sessionMinutes: 2 },
-    iuu: { sessionMinutes: 2 },
     frontDoor: { dashboardOnlySessionMinutes: 0.5 },
     spikeRecovery: { baselineDuration: '2m', recoveredDuration: '1m' },
     endurance: {
@@ -226,27 +220,6 @@ export const resolveScenarioLength = (env, environment) => {
 }
 
 /**
- * Reads which figures the run drives: the two journeys, or those plus IUU.
- *
- * @param {Record<string, string | undefined>} env - k6's `__ENV`, or any map of environment variables.
- * @returns {string} `two-journeys` or `with-iuu`.
- * @throws {Error} For any other value.
- */
-export const resolveLoadProfile = (env) => {
-  const value = env.LOAD_PROFILE?.trim()
-
-  if (!value) {
-    return LOAD_PROFILES.TWO_JOURNEYS
-  }
-
-  if (!Object.values(LOAD_PROFILES).includes(value)) {
-    throw new Error('LOAD_PROFILE must be two-journeys or with-iuu, or unset.')
-  }
-
-  return value
-}
-
-/**
  * Tells whether a run is only a script check: a run in `local`.
  *
  * @param {string} environment - The environment the run is in.
@@ -281,33 +254,6 @@ export const requiredStubProfileFor = (env, environment) => {
   return SLA_PROFILE
 }
 
-// c-007's default: generated as INS front-door traffic, since no IUU journey exists here.
-export const IUU_SCENARIOS = Object.freeze({
-  'iuu-journey-sessions': Object.freeze({
-    exec: 'iuuJourneySession',
-    endpoints: Object.freeze(['sign-in', 'ins-dashboard'])
-  }),
-  'iuu-front-door': Object.freeze({
-    exec: 'iuuFrontDoor',
-    endpoints: Object.freeze(['sign-in', 'ins-dashboard'])
-  }),
-  'iuu-address-book': Object.freeze({
-    exec: 'iuuAddressBook',
-    endpoints: SCENARIOS['ins-address-book'].endpoints
-  })
-})
-
-/**
- * The scenarios a load profile runs.
- *
- * @param {string} loadProfile - A value of `LOAD_PROFILES`.
- * @returns {Record<string, { exec: string, endpoints: string[] }>} The four smoke scenarios, plus the three IUU ones with IUU.
- */
-export const scenarioSetFor = (loadProfile) =>
-  loadProfile === LOAD_PROFILES.WITH_IUU
-    ? { ...SCENARIOS, ...IUU_SCENARIOS }
-    : { ...SCENARIOS }
-
 const returningEntry = ({ exec, frontend, path }) =>
   Object.freeze({
     exec,
@@ -336,16 +282,15 @@ export const RETURNING_SCENARIOS = Object.freeze({
 })
 
 /**
- * The scenarios a shape runs: the load profile's, plus the returning users for
- * the endurance run.
+ * The scenarios a shape runs: the four smoke scenarios, plus the returning
+ * users for the endurance run.
  *
  * @param {object} options - The run.
  * @param {string} options.shape - A value of `SHAPES`.
- * @param {string} options.loadProfile - A value of `LOAD_PROFILES`.
  * @returns {Record<string, { exec: string, endpoints: ReadonlyArray<string> }>} The scenarios.
  */
-export const scenarioSetForShape = ({ shape, loadProfile }) => ({
-  ...scenarioSetFor(loadProfile),
+export const scenarioSetForShape = ({ shape }) => ({
+  ...SCENARIOS,
   ...(shape === SHAPES.ENDURANCE ? RETURNING_SCENARIOS : {})
 })
 
@@ -356,10 +301,7 @@ export const JOURNEY_OF = Object.freeze({
   'ins-address-book': 'ins-front-door',
   'returning-ins': 'ins-front-door',
   'returning-animals': 'live-animals',
-  'returning-plants': 'high-risk-plants',
-  'iuu-journey-sessions': 'iuu-synthetic',
-  'iuu-front-door': 'iuu-synthetic',
-  'iuu-address-book': 'iuu-synthetic'
+  'returning-plants': 'high-risk-plants'
 })
 
 export const FRONTEND_OF_SCENARIO = Object.freeze({
@@ -575,10 +517,13 @@ const averageLoadScenario = ({ base, model, rate, seconds }) => {
   const pace = (factor) => Math.round(rate * factor * HOURS_PER_DAY)
   const [firstFactor, ...laterFactors] = factors
 
+  const users = virtualUsersFor(rate * Math.max(...factors), seconds)
+
   return {
     ...base,
     timeUnit: AVERAGE_LOAD_TIME_UNIT,
-    ...virtualUsersFor(rate * Math.max(...factors), seconds),
+    ...users,
+    preAllocatedVUs: users.maxVUs,
     startRate: pace(firstFactor),
     stages: [
       { duration: `${hourSeconds}s`, target: pace(firstFactor) },
@@ -598,7 +543,6 @@ const FRONT_DOOR_SCENARIOS = Object.freeze([
   'ins-front-door',
   'ins-address-book'
 ])
-const IUU_SCENARIO_NAMES = Object.freeze(Object.keys(IUU_SCENARIOS))
 
 const sumOf = (values) => values.reduce((total, value) => total + value, 0)
 
@@ -624,10 +568,6 @@ const frontDoorFactor = ({ pages, capacityRps, journeyFactors }) => {
   )
 }
 
-const iuuFactor = ({ pages, capacityRps }) =>
-  (capacityRps.iuu * SECONDS_PER_HOUR) /
-  sumOf(IUU_SCENARIO_NAMES.map((scenario) => pages[scenario].iuu))
-
 /**
  * Works out how much faster each scenario's users move during the spike so
  * each component takes its stated capacity.
@@ -636,8 +576,7 @@ const iuuFactor = ({ pages, capacityRps }) =>
  * pace factor cannot hit 5 RPS on animals, plants and INS at once. Each
  * journey's factor takes its own frontend to capacity; the two front-door
  * scenarios share the factor that takes INS to capacity once the journeys' own
- * INS pages are counted, never below 1; each IUU scenario's factor takes IUU
- * to capacity.
+ * INS pages are counted, never below 1.
  *
  * @param {object} options - The run.
  * @param {object} options.model - A resolved traffic model.
@@ -654,11 +593,9 @@ export const spikeFactors = ({ model, scenarioSet }) => {
     ])
   )
   const front = frontDoorFactor({ pages, capacityRps, journeyFactors })
-  const iuu = iuuFactor({ pages, capacityRps })
   const all = {
     ...journeyFactors,
-    ...Object.fromEntries(FRONT_DOOR_SCENARIOS.map((name) => [name, front])),
-    ...Object.fromEntries(IUU_SCENARIO_NAMES.map((name) => [name, iuu]))
+    ...Object.fromEntries(FRONT_DOOR_SCENARIOS.map((name) => [name, front]))
   }
 
   return Object.fromEntries(
@@ -704,7 +641,7 @@ export const scenarioSchedules = ({ shape, schedule, model, scenarioSet }) => {
   )
 }
 
-const spikeScenario = ({ base, schedule, rate, factor }) => {
+const spikeScenario = ({ base, schedule, rate, factor, seconds }) => {
   const [, , spike, recovery, recovered] = schedule
   const spikeSeconds = spike.endSeconds - spike.startSeconds
   const spikeRate = Math.round(rate * factor)
@@ -712,6 +649,7 @@ const spikeScenario = ({ base, schedule, rate, factor }) => {
 
   return {
     ...base,
+    ...virtualUsersFor(spikeRate, seconds),
     startRate: rate,
     stages: [
       { duration: `${spike.startSeconds}s`, target: rate },
@@ -725,6 +663,7 @@ const spikeScenario = ({ base, schedule, rate, factor }) => {
 
 const enduranceScenario = ({ base, schedule, rate }) => ({
   ...base,
+  preAllocatedVUs: base.maxVUs,
   startRate: rate,
   stages: [{ duration: `${finalHourOf(schedule).endSeconds}s`, target: rate }]
 })
@@ -778,7 +717,7 @@ const scenarioFor = ({
   }
 
   if (shape === SHAPES.SPIKE_RECOVERY) {
-    return spikeScenario({ base, schedule, rate, factor })
+    return spikeScenario({ base, schedule, rate, factor, seconds })
   }
 
   if (shape === SHAPES.ENDURANCE) {
@@ -845,8 +784,6 @@ export const designTargetScenarios = ({
   )
 }
 
-const WITH_IUU_SOURCE = 'NFR-VOL-CORE-01 to CORE-04 with IUU'
-
 /** The volumetrics figures each run states its achieved rates against. */
 export const DESIGN_TARGETS = freezeDeep({
   'live-animals': {
@@ -866,20 +803,11 @@ export const DESIGN_TARGETS = freezeDeep({
     source: 'NFR-VOL-PP-01 to PP-04'
   },
   frontDoor: {
-    [LOAD_PROFILES.TWO_JOURNEYS]: {
-      signInsPerHour: 200,
-      coreRps: 0.4,
-      concurrentUsers: 51,
-      burstRps: 0.6,
-      source: 'NFR-VOL-CORE-01 to CORE-04'
-    },
-    [LOAD_PROFILES.WITH_IUU]: {
-      signInsPerHour: 770,
-      coreRps: 1.5,
-      concurrentUsers: 241,
-      burstRps: 2.2,
-      source: WITH_IUU_SOURCE
-    }
+    signInsPerHour: 200,
+    coreRps: 0.4,
+    concurrentUsers: 51,
+    burstRps: 0.6,
+    source: 'NFR-VOL-CORE-01 to CORE-04'
   },
   dashboardReadShare: 0.25,
   backendCallsPerPage: 1
@@ -909,7 +837,7 @@ const frontendExpiryText = ({ sessionExpiry, sessionLifetime }) =>
 export const sessionExpiryText = (endurance) =>
   `${frontendExpiryText(endurance)}${endurance.sessionExpiry === 'client' ? ", standing in for the frontends' expiry" : ''}`
 
-const lengthText = ({ shape, model, loadProfile }) => {
+const lengthText = ({ shape, model }) => {
   if (shape === SHAPES.SUSTAINED_PEAK) {
     return `ramp ${model.sustainedPeak.rampDuration}, hold ${model.sustainedPeak.holdDuration}`
   }
@@ -920,10 +848,7 @@ const lengthText = ({ shape, model, loadProfile }) => {
     return `${HOURS_PER_DAY} weekday hours of ${hourDuration} each, ${durationText(HOURS_PER_DAY * durationSeconds(hourDuration))} in all`
   }
 
-  const warmUp = longestIterationSeconds(
-    model,
-    Object.keys(scenarioSetFor(loadProfile))
-  )
+  const warmUp = longestIterationSeconds(model, Object.keys(SCENARIOS))
 
   if (shape === SHAPES.SPIKE_RECOVERY) {
     const {
@@ -950,7 +875,6 @@ const lengthText = ({ shape, model, loadProfile }) => {
  *
  * @param {object} options - The run.
  * @param {string} options.shape - A value of `SHAPES`.
- * @param {string} options.loadProfile - A value of `LOAD_PROFILES`.
  * @param {string} options.scenarioLength - A value of `SCENARIO_LENGTHS`.
  * @param {string} options.environment - The environment the run is in.
  * @param {string | undefined} options.stubProfile - The stub profile the run requires, if any.
@@ -959,13 +883,12 @@ const lengthText = ({ shape, model, loadProfile }) => {
  */
 export const runLine = ({
   shape,
-  loadProfile,
   scenarioLength,
   environment,
   stubProfile,
   model
 }) =>
-  `Design-target run: ${shape}, ${loadProfile} profile, ${scenarioLength} length (${lengthText({ shape, model, loadProfile })}), in ${environment}, requiring stub profile ${stubProfile ?? 'none'}`
+  `Design-target run: ${shape}, ${scenarioLength} length (${lengthText({ shape, model })}), in ${environment}, requiring stub profile ${stubProfile ?? 'none'}`
 
 /**
  * Tells whether a shape reads the gateway's dead-letter queue, the Service Bus
@@ -982,28 +905,18 @@ export const watchesDeadLetters = (shape) =>
  *
  * The session path has no service of its own here, so its figure is derived the
  * way the backends are: every frontend's page capacity plus one backend call a
- * journey page (and an IUU page).
+ * journey page.
  *
  * @param {object} options - The run.
  * @param {object} options.model - A resolved traffic model.
- * @param {string} options.loadProfile - A value of `LOAD_PROFILES`.
- * @returns {{ ins: number, animals: number, plants: number, sessionPath: number, iuu?: number }} Capacities in RPS. `iuu` is there with IUU only.
+ * @returns {{ ins: number, animals: number, plants: number, sessionPath: number }} Capacities in RPS.
  */
-export const spikeCapacities = ({ model, loadProfile }) => {
-  const { ins, animals, plants, iuu } = model.spikeRecovery.capacityRps
-  const withIuu = loadProfile === LOAD_PROFILES.WITH_IUU
-  const frontends = ins + animals + plants + (withIuu ? iuu : 0)
-  const backends =
-    (animals + plants + (withIuu ? iuu : 0)) *
-    DESIGN_TARGETS.backendCallsPerPage
+export const spikeCapacities = ({ model }) => {
+  const { ins, animals, plants } = model.spikeRecovery.capacityRps
+  const frontends = ins + animals + plants
+  const backends = (animals + plants) * DESIGN_TARGETS.backendCallsPerPage
 
-  return {
-    ins,
-    animals,
-    plants,
-    sessionPath: frontends + backends,
-    ...(withIuu ? { iuu } : {})
-  }
+  return { ins, animals, plants, sessionPath: frontends + backends }
 }
 
 /**
@@ -1040,21 +953,16 @@ const paceText = (factor) => `pace x${Number(factor.toFixed(FACTOR_DECIMALS))}`
  *
  * @param {object} options - The run.
  * @param {object} options.model - A resolved traffic model.
- * @param {string} options.loadProfile - A value of `LOAD_PROFILES`.
  * @param {Record<string, unknown>} options.scenarioSet - The scenarios that run.
  * @returns {string} The line.
  */
-export const spikeProfileLine = ({ model, loadProfile, scenarioSet }) => {
+export const spikeProfileLine = ({ model, scenarioSet }) => {
   const factors = spikeFactors({ model, scenarioSet })
-  const capacities = spikeCapacities({ model, loadProfile })
+  const capacities = spikeCapacities({ model })
   const { spikeDuration, recoveryDuration, recoveredDuration } =
     model.spikeRecovery
-  const iuu =
-    capacities.iuu === undefined
-      ? ''
-      : `, IUU ${capacities.iuu} RPS (${paceText(factors['iuu-journey-sessions'])})`
 
-  return `Spike: ${spikeDuration} at the stated capacities: animals ${capacities.animals} RPS (${paceText(factors['live-animals'])}), plants ${capacities.plants} RPS (${paceText(factors['high-risk-plants'])}), INS front door ${capacities.ins} RPS including sign-in (${paceText(factors['ins-front-door'])})${iuu}, session path ${capacities.sessionPath} RPS (derived); recovery judged over the ${recoveredDuration} after the ${recoveryDuration} allowed`
+  return `Spike: ${spikeDuration} at the stated capacities: animals ${capacities.animals} RPS (${paceText(factors['live-animals'])}), plants ${capacities.plants} RPS (${paceText(factors['high-risk-plants'])}), INS front door ${capacities.ins} RPS including sign-in (${paceText(factors['ins-front-door'])}), session path ${capacities.sessionPath} RPS (derived); recovery judged over the ${recoveredDuration} after the ${recoveryDuration} allowed`
 }
 
 const usersText = (count) =>
