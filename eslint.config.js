@@ -8,7 +8,7 @@ export default [
     noStyle: true
   }),
   {
-    files: ['src/**/*.k6.js'],
+    files: ['src/**/*.k6.js', 'src/k6/service-http.js'],
     languageOptions: {
       globals: {
         __ENV: 'readonly',

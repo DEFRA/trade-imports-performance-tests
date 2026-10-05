@@ -1,8 +1,8 @@
 import { sleep } from 'k6'
-import http from 'k6/http'
 
 import { READINESS } from '../config/smoke.js'
 import { createBrowserSession } from './browser-session.js'
+import { serviceHttp } from './service-http.js'
 
 const HTTP_OK = 200
 const MS_PER_SECOND = 1000
@@ -14,10 +14,10 @@ export const READINESS_TAGS = { phase: 'readiness', name: 'readiness' }
 export const ignoreStaleRedirects = { add: () => {} }
 
 const readBackend = (url) =>
-  http.get(url, { tags: READINESS_TAGS }).status === HTTP_OK
+  serviceHttp.get(url, { tags: READINESS_TAGS }).status === HTTP_OK
 
 const referenceDataHasCountries = (url) => {
-  const response = http.get(`${url}/countries`, { tags: READINESS_TAGS })
+  const response = serviceHttp.get(`${url}/countries`, { tags: READINESS_TAGS })
 
   return (
     response.status === HTTP_OK &&

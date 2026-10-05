@@ -22,6 +22,7 @@ import {
   backgroundVolumeReportThresholds,
   documentScanThresholds,
   notificationSplitThresholds,
+  runEnvironmentReportThresholds,
   smokeThresholds,
   stubHeadroomReportThresholds,
   stubProfileReportThresholds
@@ -31,6 +32,7 @@ import {
   standInCaveat
 } from '../config/test-data.js'
 import {
+  backendRouteLine,
   resolveEnvironment,
   resolveLocalhostAlias,
   resolveServiceUrl
@@ -49,6 +51,7 @@ import { HIGH_RISK_PLANTS_STEPS } from '../k6/high-risk-plants.js'
 import { notificationJourney } from '../k6/journeys.js'
 import { LIVE_ANIMALS_STEPS } from '../k6/live-animals.js'
 import { waitForReadiness } from '../k6/readiness.js'
+import { recordRunEnvironment } from '../k6/run-environment.js'
 import { reportStubHeadroom } from '../k6/stub-ceilings.js'
 import {
   clearStubAnswered,
@@ -91,7 +94,8 @@ export const options = {
     ...notificationSplitThresholds(notificationSplits(model)),
     ...backgroundVolumeReportThresholds(DATASTORES),
     ...stubProfileReportThresholds(STUBBED_INTEGRATIONS),
-    ...stubHeadroomReportThresholds(STUBBED_INTEGRATIONS)
+    ...stubHeadroomReportThresholds(STUBBED_INTEGRATIONS),
+    ...runEnvironmentReportThresholds(environment)
   },
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'],
   setupTimeout: SETUP_TIMEOUT,
@@ -102,6 +106,8 @@ export function setup() {
   console.log(
     `Smoke run in ${environment}, requiring stub profile ${requiredStubProfile ?? 'none'}`
   )
+  console.log(backendRouteLine(__ENV))
+  recordRunEnvironment(environment)
   console.log(`Traffic model: ${JSON.stringify(model)}`)
   console.log(mixTargetLine(model))
   console.log(documentScanAllowanceLine())

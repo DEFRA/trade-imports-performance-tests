@@ -165,6 +165,18 @@ export const backgroundVolumeReportThresholds = (datastores) =>
     ])
   )
 
+/**
+ * Report-only thresholds that put the environment a run targets in the
+ * end-of-test summary. These can never fail: they exist so k6 prints the
+ * metric.
+ *
+ * @param {string} environment - The environment the run targets, for example `dev`.
+ * @returns {Record<string, string[]>} k6 thresholds.
+ */
+export const runEnvironmentReportThresholds = (environment) => ({
+  [`run_environment{environment:${environment}}`]: ['value>=0']
+})
+
 const stubProfileKeys = ({ integration, stub }) => {
   const latencyKeys = (source) =>
     QUANTILES.map(

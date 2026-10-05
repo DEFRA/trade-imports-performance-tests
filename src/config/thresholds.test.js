@@ -14,6 +14,7 @@ import {
   hourlyReportThresholds,
   notificationSplitThresholds,
   reauthenticationReportThresholds,
+  runEnvironmentReportThresholds,
   scenarioThresholds,
   signInTargetThresholds,
   smokeThresholds,
@@ -206,6 +207,14 @@ describe('backgroundVolumeReportThresholds', () => {
     for (const limits of Object.values(report)) {
       expect(limits).toEqual(['value>=0'])
     }
+  })
+})
+
+describe('runEnvironmentReportThresholds', () => {
+  test('is one reporting-only threshold naming the environment', () => {
+    expect(runEnvironmentReportThresholds('dev')).toEqual({
+      'run_environment{environment:dev}': ['value>=0']
+    })
   })
 })
 

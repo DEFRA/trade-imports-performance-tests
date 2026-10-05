@@ -28,6 +28,7 @@ import {
 } from './pages.js'
 import { markPhase } from './phase.js'
 import { recordServerError, recordTransportError } from './server-errors.js'
+import { serviceHttp } from './service-http.js'
 
 const HTTP_OK = 200
 const JSON_HEADERS = { 'content-type': 'application/json' }
@@ -68,13 +69,13 @@ const replayCapturedSave = ({ journey, backendUrl, id }) => {
   const notificationUrl = `${backendUrl}/notifications/${id}`
 
   const fulfilments = recorded(
-    http.get(
+    serviceHttp.get(
       `${notificationUrl}/fulfilments`,
       backendParams(`${prefix}-backend-fulfilments`)
     )
   )
   const list = recorded(
-    http.get(
+    serviceHttp.get(
       `${backendUrl}/notifications?referenceNumber=${id}`,
       backendParams(`${prefix}-backend-list`)
     )
@@ -103,7 +104,7 @@ const replayCapturedSave = ({ journey, backendUrl, id }) => {
   }
 
   const replace = recorded(
-    http.put(
+    serviceHttp.put(
       notificationUrl,
       JSON.stringify(body),
       backendParams(`${prefix}-backend-replace`, JSON_HEADERS)

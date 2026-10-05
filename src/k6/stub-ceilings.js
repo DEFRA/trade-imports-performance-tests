@@ -16,6 +16,7 @@ import {
 } from '../lib/stub-ceilings.js'
 import { effectiveProfile } from '../lib/stub-profiles.js'
 import { encodeForm } from '../lib/forms.js'
+import { serviceHttp } from './service-http.js'
 
 const HTTP_OK = 200
 const HTTP_REDIRECT = 302
@@ -142,7 +143,7 @@ export const reportStubHeadroom = ({
  * @param {string} options.timeout - The request timeout, such as `10s`.
  */
 export const tradeTokenCall = ({ urls, timeout }) => {
-  const response = http.post(
+  const response = serviceHttp.post(
     `${urls.tradeImportsStub}/tenant/oauth2/v2.0/token`,
     { grant_type: 'client_credentials' },
     {
@@ -174,7 +175,7 @@ export const mdmCall = ({ urls, timeout, iteration }) => {
   const isCountries = iteration % 2 === 0
   const endpoint = isCountries ? 'stub-mdm-countries' : 'stub-mdm-ports'
   const path = isCountries ? '/mdm/geo/countries' : '/mdm/trade/bcp/poes'
-  const response = http.get(`${urls.tradeImportsStub}${path}`, {
+  const response = serviceHttp.get(`${urls.tradeImportsStub}${path}`, {
     timeout,
     headers: { [MDM_KEY_HEADER]: MDM_KEY },
     tags: { endpoint, name: endpoint, profiled: 'yes' }

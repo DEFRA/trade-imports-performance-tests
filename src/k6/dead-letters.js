@@ -1,8 +1,8 @@
-import http from 'k6/http'
 import { Gauge } from 'k6/metrics'
 
 import { deadLetterGrowth, deadLetterLine } from '../lib/dead-letters.js'
 import { READINESS_TAGS } from './readiness.js'
+import { serviceHttp } from './service-http.js'
 
 const HTTP_OK = 200
 const SERVICE_BUS = 'service-bus'
@@ -21,9 +21,12 @@ const deadLettersGauge = new Gauge('downstream_dead_letters')
  */
 export const readDeadLetterCount = ({ urls }) => {
   try {
-    const response = http.get(`${urls.gateway}/dlq/notifications?limit=1`, {
-      tags: READINESS_TAGS
-    })
+    const response = serviceHttp.get(
+      `${urls.gateway}/dlq/notifications?limit=1`,
+      {
+        tags: READINESS_TAGS
+      }
+    )
 
     return response.status === HTTP_OK
       ? (response.json('approximate_count') ?? null)

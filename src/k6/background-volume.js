@@ -1,5 +1,4 @@
 import { check } from 'k6'
-import http from 'k6/http'
 import { Gauge } from 'k6/metrics'
 
 import { targetsFrom } from '../config/background-volume.js'
@@ -12,6 +11,7 @@ import {
 } from '../lib/background-volume.js'
 import { createBrowserSession } from './browser-session.js'
 import { READINESS_TAGS, ignoreStaleRedirects } from './readiness.js'
+import { serviceHttp } from './service-http.js'
 
 const HTTP_OK = 200
 const ADDRESS_BOOK = '/address-book'
@@ -23,7 +23,7 @@ const unreadable = (datastore) =>
   new Error(`Could not read the background volume of ${datastore}`)
 
 const totalOf = (url, datastore) => {
-  const response = http.get(url, { tags: READINESS_TAGS })
+  const response = serviceHttp.get(url, { tags: READINESS_TAGS })
 
   if (response.status !== HTTP_OK) {
     throw unreadable(datastore)
