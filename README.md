@@ -7,6 +7,7 @@ CDP builds this repo into a Docker image. The CDP Portal runs the image, and the
 - [Layout](#layout)
 - [Run locally](#run-locally)
 - [Run in CDP](#run-in-cdp)
+- [Run from a laptop against CDP](#run-from-a-laptop-against-cdp)
 - [Smoke run on pull requests](#smoke-run-on-pull-requests)
 - [Background volume](#background-volume)
 - [Stub latency profiles](#stub-latency-profiles)
@@ -104,25 +105,27 @@ Merging to `main` publishes the image. Run it from the CDP Portal.
 
 The image reads these environment variables:
 
-| Variable                 | Set by          | Purpose                                                                                                                                                                                                                        |
-| ------------------------ | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ENVIRONMENT`            | CDP Portal      | The environment to test, for example `perf-test`. Suites build service URLs from it. `prod` is refused                                                                                                                         |
-| `RESULTS_OUTPUT_S3_PATH` | CDP Portal      | Where the report goes. The run fails if it is not set                                                                                                                                                                          |
-| `S3_ENDPOINT`            | image           | Defaults to AWS S3 in `eu-west-2`. Compose points it at LocalStack                                                                                                                                                             |
-| `TEST_SUITE`             | you, optionally | The suite to run, as a file name in `src/suites/` without `.k6.js`. Defaults to `smoke` in `dev` and `test`, and to `health-check` everywhere else                                                                             |
-| `<SERVICE_NAME>_URL`     | you, optionally | Overrides a service's URL, for example `TRADE_IMPORTS_INS_FRONTEND_URL`                                                                                                                                                        |
-| `LOCALHOST_ALIAS`        | Compose         | The host a container uses for the machine's `localhost`, for example `host.docker.internal`                                                                                                                                    |
-| `AUTH_PASSWORD`          | you, optionally | The Defra ID stub's password. Defaults to `Password123`. In CDP, set it as a test-suite secret in the Portal when the stub in that environment uses another password                                                           |
-| `TRAFFIC_MODEL`          | you, optionally | JSON laid over the traffic model defaults and the smoke profile — see Traffic model                                                                                                                                            |
-| `STUB_PROFILE`           | you, optionally | The profile a run requires every stub-hosted integration to run, `zero-delay` or `sla`. Compose defaults it to `zero-delay`. Unset requires none and reports what runs. The stub-ceiling suite requires `sla` when it is unset |
-| `STUB_CEILING_GROUPS`    | you, optionally | The groups the stub-ceiling suite runs, a comma list of `trade-token`, `mdm`, `defra-id-target` and `defra-id`. Unset runs all of them                                                                                         |
-| `STUB_CEILING_MODEL`     | you, optionally | JSON laid over the stub-ceiling suite's ladders and step settings — see Stub ceilings and headroom                                                                                                                             |
-| `STUB_CEILINGS`          | you, optionally | JSON laid over the ceilings recorded for the run's environment, by integration then profile — see Stub ceilings and headroom                                                                                                   |
-| `LOAD_PROFILE`           | you, optionally | `two-journeys` or `with-iuu`, for the design-target suites. Unset is `two-journeys` — see Design-target runs                                                                                                                   |
-| `SCENARIO_LENGTH`        | you, optionally | `full`, `nightly` or `local`, for the design-target suites. Unset follows the environment — see Design-target runs                                                                                                             |
-| `REPORTS_DIR`            | image           | Where the run writes its files. The image sets it to `/opt/perftest/reports`                                                                                                                                                   |
+| Variable                 | Set by             | Purpose                                                                                                                                                                                                                                                                                               |
+| ------------------------ | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ENVIRONMENT`            | CDP Portal         | The environment to test, for example `perf-test`. Suites build service URLs from it. `prod` is refused                                                                                                                                                                                                |
+| `RESULTS_OUTPUT_S3_PATH` | CDP Portal         | Where the report goes. The run fails if it is not set                                                                                                                                                                                                                                                 |
+| `S3_ENDPOINT`            | image              | Defaults to AWS S3 in `eu-west-2`. Compose points it at LocalStack                                                                                                                                                                                                                                    |
+| `TEST_SUITE`             | you, optionally    | The suite to run, as a file name in `src/suites/` without `.k6.js`. Defaults to `smoke` in `dev` and `test`, and to `health-check` everywhere else                                                                                                                                                    |
+| `<SERVICE_NAME>_URL`     | you, optionally    | Overrides a service's URL, for example `TRADE_IMPORTS_INS_FRONTEND_URL`                                                                                                                                                                                                                               |
+| `CDP_LOCAL`              | you, from a laptop | `true` sends backend calls through CDP's protected gateway — see [Run from a laptop against CDP](#run-from-a-laptop-against-cdp)                                                                                                                                                                      |
+| `DEVELOPER_API_KEY`      | you, from a laptop | The CDP developer API key, needed when `CDP_LOCAL` is `true` — see [Run from a laptop against CDP](#run-from-a-laptop-against-cdp)                                                                                                                                                                    |
+| `LOCALHOST_ALIAS`        | Compose            | The host a container uses for the machine's `localhost`, for example `host.docker.internal`                                                                                                                                                                                                           |
+| `AUTH_PASSWORD`          | you, optionally    | The Defra ID stub's password. Defaults to `Password123`. In CDP, set it as a test-suite secret in the Portal when the stub in that environment uses another password                                                                                                                                  |
+| `TRAFFIC_MODEL`          | you, optionally    | JSON laid over the traffic model defaults and the smoke profile — see Traffic model                                                                                                                                                                                                                   |
+| `STUB_PROFILE`           | you, optionally    | The profile a run requires every stub-hosted integration to run, `zero-delay` or `sla`. Compose defaults it to `zero-delay`, except for `k6-cdp` (the laptop-to-CDP runner), which leaves it unset. Unset requires none and reports what runs. The stub-ceiling suite requires `sla` when it is unset |
+| `STUB_CEILING_GROUPS`    | you, optionally    | The groups the stub-ceiling suite runs, a comma list of `trade-token`, `mdm`, `defra-id-target` and `defra-id`. Unset runs all of them                                                                                                                                                                |
+| `STUB_CEILING_MODEL`     | you, optionally    | JSON laid over the stub-ceiling suite's ladders and step settings — see Stub ceilings and headroom                                                                                                                                                                                                    |
+| `STUB_CEILINGS`          | you, optionally    | JSON laid over the ceilings recorded for the run's environment, by integration then profile — see Stub ceilings and headroom                                                                                                                                                                          |
+| `LOAD_PROFILE`           | you, optionally    | `two-journeys` or `with-iuu`, for the design-target suites. Unset is `two-journeys` — see Design-target runs                                                                                                                                                                                          |
+| `SCENARIO_LENGTH`        | you, optionally    | `full`, `nightly` or `local`, for the design-target suites. Unset follows the environment — see Design-target runs                                                                                                                                                                                    |
+| `REPORTS_DIR`            | image              | Where the run writes its files. The image sets it to `/opt/perftest/reports`                                                                                                                                                                                                                          |
 
-Without an override, a service's URL is `https://<service-name>.<ENVIRONMENT>.cdp-int.defra.cloud`. When `ENVIRONMENT` is `local`, it is the workspace Docker stack's host port for the service, on `localhost` or on `LOCALHOST_ALIAS` when that is set.
+Without an override, a service's URL is `https://<service-name>.<ENVIRONMENT>.cdp-int.defra.cloud`. When `ENVIRONMENT` is `local`, it is the workspace Docker stack's host port for the service, on `localhost` or on `LOCALHOST_ALIAS` when that is set. With `CDP_LOCAL=true`, a backend service's URL is `https://ephemeral-protected.api.<ENVIRONMENT>.cdp-int.defra.cloud/<service-name>` instead.
 
 The image writes these files and copies them to `RESULTS_OUTPUT_S3_PATH`:
 
@@ -148,6 +151,37 @@ The same smoke suite runs in CDP `dev` and `test`, chosen by `ENVIRONMENT` alone
 - The report (`index.html` and `summary.json`) is published with every run, even when a threshold fails.
 
 To run it after each deploy to `dev`, set an automatic test run in the CDP Portal, on the `trade-imports-performance-tests` test suite page, for environment `dev`. Trigger it on deployments of `trade-imports-ins-frontend`, `trade-imports-animals-frontend`, `trade-imports-plants-frontend`, `trade-imports-animals-backend`, `trade-imports-plants-backend` and `trade-imports-reference-data`. This is Portal configuration, not code.
+
+To run the smoke suite from a laptop instead, see [Run from a laptop against CDP](#run-from-a-laptop-against-cdp).
+
+## Run from a laptop against CDP
+
+From a laptop, the backend services' CDP addresses do not resolve. With `CDP_LOCAL=true`, the suite sends backend calls to `https://ephemeral-protected.api.<env>.cdp-int.defra.cloud/<service>` with `DEVELOPER_API_KEY` as the `x-api-key` header. This is the same switch `trade-imports-ins-tests` uses. The frontends and the Defra ID stub stay on their direct addresses. Without `CDP_LOCAL`, the suite uses the direct `https://<service>.<env>.cdp-int.defra.cloud` addresses.
+
+Put these variables in a `.env` file in the repo root. `ENVIRONMENT` can be set there too and defaults to `dev`. Git ignores `.env`; never commit it.
+
+| Variable            | Value                                                                                      |
+| ------------------- | ------------------------------------------------------------------------------------------ |
+| `ENVIRONMENT`       | `dev`, or `test` with that environment's key. `prod` is refused, whatever `CDP_LOCAL` says |
+| `CDP_LOCAL`         | `true` from a laptop                                                                       |
+| `DEVELOPER_API_KEY` | The CDP developer API key for that environment. Each environment has its own               |
+
+Run it, then take the Compose project down:
+
+```bash
+npm run k6:cdp
+npm run k6:down
+```
+
+Any other variable (`TRAFFIC_MODEL`, `STUB_PROFILE`, `AUTH_PASSWORD`) can be set in `.env` or in the shell. A shell variable wins over `.env`.
+
+- Unless `STUB_PROFILE` is set, a laptop run requires no stub profile and only reports the profiles that run.
+
+- Without `DEVELOPER_API_KEY`, the run stops at once with `DEVELOPER_API_KEY is not set`, naming the variable.
+- The key goes only to gateway addresses. It is never printed, logged or written to `./reports`. Do not run `docker compose config` or `k6 inspect --include-system-env-vars` against `k6-cdp`: both print the environment.
+- The run writes the same report files as the image to `./reports` and uploads nothing.
+- The log includes `Backend calls: through CDP's protected gateway …`, and the summary names the environment in `run_environment{environment:dev}`.
+- Runs against `dev` create `PERF-` notifications there.
 
 ## Smoke run on pull requests
 

@@ -6,3 +6,5 @@ Dockerfile
 coverage
 reports/
 **/*.test.js
+.env
+.env.*

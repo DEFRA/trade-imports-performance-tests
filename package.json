@@ -25,6 +25,7 @@
     "test:docker-compose:spike-recovery": "docker compose run --rm k6-design-target src/suites/spike-recovery.k6.js",
     "test:docker-compose:endurance": "docker compose run --rm k6-design-target src/suites/endurance.k6.js",
     "k6:local": "docker compose run --rm k6-local",
+    "k6:cdp": "docker compose run --rm k6-cdp",
     "k6:inspect": "docker compose run --rm k6-local inspect --include-system-env-vars --execution-requirements src/suites/smoke.k6.js",
     "k6:inspect:background-volume": "docker compose run --rm k6-local inspect --include-system-env-vars --execution-requirements src/suites/background-volume.k6.js",
     "k6:inspect:stub-ceilings": "docker compose run --rm k6-local inspect --include-system-env-vars --execution-requirements src/suites/breakpoint-stubs.k6.js",
@@ -34,7 +35,7 @@
     "k6:inspect:spike-recovery": "docker compose run --rm k6-local inspect --include-system-env-vars --execution-requirements src/suites/spike-recovery.k6.js",
     "k6:inspect:endurance": "docker compose run --rm k6-local inspect --include-system-env-vars --execution-requirements src/suites/endurance.k6.js",
     "k6:image": "docker compose up --build --exit-code-from development development",
-    "k6:down": "docker compose --profile local --profile workspace --profile stub-ceiling --profile design-target down"
+    "k6:down": "docker compose --profile local --profile workspace --profile stub-ceiling --profile design-target --profile cdp down"
   },
   "author": "Defra DDTS",
   "license": "OGL-UK-3.0",

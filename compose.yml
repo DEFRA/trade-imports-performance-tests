@@ -76,6 +76,28 @@ services:
       SCENARIO_LENGTH: '${SCENARIO_LENGTH:-}'
       REPORTS_DIR: /opt/perftest/reports
 
+  k6-cdp:
+    image: grafana/k6:2.3.0
+    profiles:
+      - cdp
+    user: root
+    working_dir: /opt/perftest
+    entrypoint: ['sh', 'scripts/run-suite.sh']
+    command: ['src/suites/smoke.k6.js']
+    volumes:
+      - ./src:/opt/perftest/src:ro
+      - ./scripts:/opt/perftest/scripts:ro
+      - ./reports:/opt/perftest/reports
+    environment:
+      ENVIRONMENT: '${ENVIRONMENT:-dev}'
+      CDP_LOCAL: '${CDP_LOCAL:-}'
+      DEVELOPER_API_KEY: '${DEVELOPER_API_KEY:-}'
+      AUTH_PASSWORD: '${AUTH_PASSWORD:-Password123}'
+      TRAFFIC_MODEL: '${TRAFFIC_MODEL:-}'
+      STUB_PROFILE: '${STUB_PROFILE:-}'
+      STUB_CEILINGS: '${STUB_CEILINGS:-}'
+      REPORTS_DIR: /opt/perftest/reports
+
   defra-id-stub-ceiling:
     image: defradigital/trade-imports-defra-id-stub:${TRADE_IMPORTS_DEFRA_ID_STUB:-latest}
     profiles:

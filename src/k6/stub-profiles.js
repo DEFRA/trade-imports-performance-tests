@@ -1,4 +1,3 @@
-import http from 'k6/http'
 import { Gauge } from 'k6/metrics'
 
 import {
@@ -22,6 +21,7 @@ import {
   profileMismatchMessage
 } from '../lib/stub-profiles.js'
 import { READINESS_TAGS } from './readiness.js'
+import { serviceHttp } from './service-http.js'
 
 const HTTP_OK = 200
 const HTTP_NOT_FOUND = 404
@@ -32,7 +32,7 @@ const stubLatencyGauge = new Gauge('stub_latency')
 const stubLatencyAnsweredCountGauge = new Gauge('stub_latency_answered_count')
 
 const readStub = ({ stub, url }) => {
-  const response = http.get(`${url}/latency-profiles`, {
+  const response = serviceHttp.get(`${url}/latency-profiles`, {
     tags: READINESS_TAGS
   })
 
@@ -82,7 +82,7 @@ export const readStubProfiles = ({ urls }) => {
  */
 export const clearStubAnswered = ({ urls }) => {
   for (const [stub, urlKey] of Object.entries(STUB_SERVICES)) {
-    const response = http.del(
+    const response = serviceHttp.del(
       `${urls[urlKey]}/latency-profiles/answered`,
       null,
       { tags: READINESS_TAGS }
