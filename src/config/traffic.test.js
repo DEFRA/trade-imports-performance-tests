@@ -788,3 +788,65 @@ describe('arrivalScenarios', () => {
     expect(total).toBeLessThanOrEqual(MAX_SMOKE_VUS)
   })
 })
+
+describe('resilience model', () => {
+  test.each([
+    ['resilience.baselineDuration', '5m'],
+    ['resilience.faultDuration', '2m'],
+    ['resilience.clearedDuration', '2m'],
+    ['resilience.recoveryStep', '30s'],
+    ['resilience.slowDelayMs', 5000],
+    ['resilience.hangMs', 120_000],
+    ['resilience.errorStatus', 503],
+    ['resilience.retryAfterSeconds', 5],
+    ['resilience.slowRate', 1],
+    ['resilience.hangRate', 1],
+    ['resilience.resetRate', 1],
+    ['resilience.throttleRate', 0.5],
+    ['resilience.errorRate', 0.5]
+  ])('defaults %s to %s', (path, expected) => {
+    expect(pathOf(TRAFFIC_DEFAULTS, path)).toBe(expected)
+  })
+
+  test('accepts a compressed resilience run', () => {
+    const model = resolveTrafficModel({
+      TRAFFIC_MODEL:
+        '{"resilience":{"baselineDuration":"1m","faultDuration":"20s","clearedDuration":"30s","recoveryStep":"10s"}}'
+    })
+
+    expect(model.resilience.recoveryStep).toBe('10s')
+  })
+
+  test.each([
+    [
+      '{"resilience":{"recoveryStep":"1s"}}',
+      "TRAFFIC_MODEL resilience.recoveryStep must be at least 2s, got '1s'"
+    ],
+    [
+      '{"resilience":{"clearedDuration":"50s"}}',
+      "TRAFFIC_MODEL resilience.clearedDuration must be a whole number of resilience.recoveryStep, got '50s' and '30s'"
+    ],
+    [
+      '{"resilience":{"faultDuration":"1s"}}',
+      "TRAFFIC_MODEL resilience.faultDuration must be at least 2s, got '1s'"
+    ],
+    [
+      '{"resilience":{"errorStatus":404}}',
+      'TRAFFIC_MODEL resilience.errorStatus must be from 500 to 599, got 404'
+    ],
+    [
+      '{"resilience":{"errorRate":1.5}}',
+      'Traffic model value "resilience.errorRate" must be between 0 and 1'
+    ],
+    [
+      '{"resilience":{"slowDelayMs":2.5}}',
+      'Traffic model value "resilience.slowDelayMs" must be a whole number'
+    ],
+    [
+      '{"resilience":{"recoveryStep":"soon"}}',
+      'Traffic model value "resilience.recoveryStep" must be a duration such as 2m'
+    ]
+  ])('rejects %s', (text, message) => {
+    expect(() => resolveTrafficModel({ TRAFFIC_MODEL: text })).toThrow(message)
+  })
+})

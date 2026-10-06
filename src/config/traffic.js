@@ -76,6 +76,27 @@ const SESSION_PATH_SPIKE_RPS = 25
 const REFERENCE_DATA_READ_INTERVAL = '10s'
 // trade-imports-reference-data cache.mdm.ttl-minutes default (CACHE_MDM_TTL_MINUTES).
 const MDM_CACHE_MINUTES = 60
+// DR-EUDP-005 'Scenario shapes' row 3: the spike run's five minutes at peak, reused as the resilience run's healthy baseline.
+const RESILIENCE_BASELINE_DURATION = '5m'
+// Interim: long enough for a caller's timeout, retries and breaker to show, short enough that 18 faults fit one run.
+const RESILIENCE_FAULT_DURATION = '2m'
+// Interim: four recovery steps of the spike run's 60 seconds c-004 allows, doubled so a slow recovery is seen.
+const RESILIENCE_CLEARED_DURATION = '2m'
+// Interim: half of c-004's 60 second recovery allowance, so recovery time is reported to 30 seconds.
+const RESILIENCE_RECOVERY_STEP = '30s'
+// Interim: five times the interim p99 target of 1,000 ms.
+const RESILIENCE_SLOW_DELAY_MS = 5000
+// Interim: twice k6's 60 second request timeout, so an unbounded wait cannot hide inside k6's own timeout.
+const RESILIENCE_HANG_MS = 120_000
+const RESILIENCE_ERROR_STATUS = 503
+const RESILIENCE_RETRY_AFTER_SECONDS = 5
+// Interim: slow, hang and reset hit every request, so the whole window is faulted.
+const RESILIENCE_ALWAYS_RATE = 1
+// Interim: "errors at a chosen rate": half the requests are throttled or fail.
+const RESILIENCE_SOMETIMES_RATE = 0.5
+// The status range of a 5xx error.
+const MIN_ERROR_STATUS = 500
+const MAX_ERROR_STATUS = 599
 
 export const ADDRESS_BOOK_SESSION_PAGES = 12
 export const SECONDS_PER_MINUTE = 60
@@ -198,6 +219,21 @@ export const TRAFFIC_DEFAULTS = freezeDeep({
     referenceDataReadInterval: REFERENCE_DATA_READ_INTERVAL,
     referenceDataCacheMinutes: MDM_CACHE_MINUTES
   },
+  resilience: {
+    baselineDuration: RESILIENCE_BASELINE_DURATION,
+    faultDuration: RESILIENCE_FAULT_DURATION,
+    clearedDuration: RESILIENCE_CLEARED_DURATION,
+    recoveryStep: RESILIENCE_RECOVERY_STEP,
+    slowDelayMs: RESILIENCE_SLOW_DELAY_MS,
+    hangMs: RESILIENCE_HANG_MS,
+    errorStatus: RESILIENCE_ERROR_STATUS,
+    retryAfterSeconds: RESILIENCE_RETRY_AFTER_SECONDS,
+    slowRate: RESILIENCE_ALWAYS_RATE,
+    hangRate: RESILIENCE_ALWAYS_RATE,
+    resetRate: RESILIENCE_ALWAYS_RATE,
+    throttleRate: RESILIENCE_SOMETIMES_RATE,
+    errorRate: RESILIENCE_SOMETIMES_RATE
+  },
   mix: { dashboardReadShareTarget: D7_DASHBOARD_READ_SHARE },
   backgroundVolume: {
     liveAnimalsNotifications: GBN_AG_ANNUAL_NOTIFICATIONS,
@@ -271,7 +307,11 @@ const WHOLE_NUMBER_KEYS = new Set([
   'maxCreatedPerRun',
   'virtualUsers',
   'returningUsersPerFrontend',
-  'referenceDataCacheMinutes'
+  'referenceDataCacheMinutes',
+  'slowDelayMs',
+  'hangMs',
+  'errorStatus',
+  'retryAfterSeconds'
 ])
 const DURATION_KEYS = new Set([
   'duration',
@@ -291,14 +331,22 @@ const DURATION_KEYS = new Set([
   'aloneDuration',
   'combinedDuration',
   'settleDuration',
-  'referenceDataReadInterval'
+  'referenceDataReadInterval',
+  'faultDuration',
+  'clearedDuration',
+  'recoveryStep'
 ])
 const CHOICE_KEYS = { sessionExpiry: SESSION_EXPIRIES }
 const SHARE_KEYS = new Set([
   'amendShare',
   'cancelAmendShare',
   'dashboardReadShareTarget',
-  'worstCaseSearchShare'
+  'worstCaseSearchShare',
+  'slowRate',
+  'hangRate',
+  'resetRate',
+  'throttleRate',
+  'errorRate'
 ])
 const COUNT_DISTRIBUTION_MINIMUMS = {
   documentsPerNotification: 0,
@@ -553,6 +601,37 @@ const failIfWindowsOverlap = ({ holdDuration, comparisonWindow }) => {
   }
 }
 
+const failIfResilienceInvalid = ({
+  faultDuration,
+  clearedDuration,
+  recoveryStep,
+  errorStatus
+}) => {
+  if (durationSeconds(faultDuration) < MIN_BURST_SECONDS) {
+    throw new Error(
+      `TRAFFIC_MODEL resilience.faultDuration must be at least ${MIN_BURST_SECONDS}s, got '${faultDuration}'`
+    )
+  }
+
+  if (durationSeconds(recoveryStep) < MIN_BURST_SECONDS) {
+    throw new Error(
+      `TRAFFIC_MODEL resilience.recoveryStep must be at least ${MIN_BURST_SECONDS}s, got '${recoveryStep}'`
+    )
+  }
+
+  if (durationSeconds(clearedDuration) % durationSeconds(recoveryStep) !== 0) {
+    throw new Error(
+      `TRAFFIC_MODEL resilience.clearedDuration must be a whole number of resilience.recoveryStep, got '${clearedDuration}' and '${recoveryStep}'`
+    )
+  }
+
+  if (errorStatus < MIN_ERROR_STATUS || errorStatus > MAX_ERROR_STATUS) {
+    throw new Error(
+      `TRAFFIC_MODEL resilience.errorStatus must be from ${MIN_ERROR_STATUS} to ${MAX_ERROR_STATUS}, got ${errorStatus}`
+    )
+  }
+}
+
 /**
  * Works out the traffic model a run applies.
  *
@@ -578,6 +657,7 @@ export const resolveTrafficModel = (env, profile = {}) => {
     comparisonWindow: model.endurance.comparisonWindow
   })
   failIfCombinedPhaseTooShort(model.combined)
+  failIfResilienceInvalid(model.resilience)
 
   return freezeDeep(model)
 }

@@ -26,6 +26,7 @@
     "test:docker-compose:endurance": "docker compose run --rm k6-design-target src/suites/endurance.k6.js",
     "test:docker-compose:peak-day": "docker compose run --rm k6-design-target src/suites/peak-day.k6.js",
     "test:docker-compose:combined": "docker compose run --rm k6-design-target src/suites/combined.k6.js",
+    "test:docker-compose:resilience": "docker compose run --rm k6-design-target src/suites/resilience.k6.js",
     "k6:local": "docker compose run --rm k6-local",
     "k6:cdp": "docker compose run --rm k6-cdp",
     "k6:inspect": "docker compose run --rm k6-local inspect --include-system-env-vars --execution-requirements src/suites/smoke.k6.js",
@@ -38,6 +39,7 @@
     "k6:inspect:endurance": "docker compose run --rm k6-local inspect --include-system-env-vars --execution-requirements src/suites/endurance.k6.js",
     "k6:inspect:peak-day": "docker compose run --rm k6-local inspect --include-system-env-vars --execution-requirements src/suites/peak-day.k6.js",
     "k6:inspect:combined": "docker compose run --rm k6-local inspect --include-system-env-vars --execution-requirements src/suites/combined.k6.js",
+    "k6:inspect:resilience": "docker compose run --rm k6-local inspect --include-system-env-vars --execution-requirements src/suites/resilience.k6.js",
     "k6:image": "docker compose up --build --exit-code-from development development",
     "k6:down": "docker compose --profile local --profile workspace --profile stub-ceiling --profile design-target --profile cdp down"
   },

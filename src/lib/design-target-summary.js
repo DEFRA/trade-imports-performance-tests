@@ -176,7 +176,15 @@ export const achievedBurst = ({ metrics, seconds }) =>
     ])
   )
 
-const durationOf = (metrics, tags, stat) =>
+/**
+ * Reads one statistic of a sub-metric of `http_req_duration`.
+ *
+ * @param {Record<string, object>} metrics - k6's summary metrics.
+ * @param {Record<string, string>} tags - The tags that select the sub-metric.
+ * @param {string} stat - `count`, `max`, `p(95)` or any other trend statistic.
+ * @returns {number | undefined} The value, or undefined when k6 has none.
+ */
+export const durationOf = (metrics, tags, stat) =>
   valueOf(metrics, subMetricKey('http_req_duration', tags), stat)
 
 /**
@@ -247,7 +255,13 @@ export const p95Comparison = ({
   }
 }
 
-const kindsIn = (endpoints) =>
+/**
+ * The request kinds a scenario's endpoints make, in the order reports list them.
+ *
+ * @param {string[]} endpoints - Endpoint names from the catalogue.
+ * @returns {string[]} `page`, `api` and `upload`, those that apply.
+ */
+export const kindsIn = (endpoints) =>
   KINDS.filter((kind) => endpoints.some((name) => kindOf(name) === kind))
 
 /**
@@ -1666,10 +1680,24 @@ const HTML_ESCAPES = {
   "'": '&#39;'
 }
 
-const escapeHtml = (value) =>
+/**
+ * Escapes a value for HTML text.
+ *
+ * @param {unknown} value - Any value.
+ * @returns {string} The value as text with `&`, `<`, `>` and quotes escaped.
+ */
+export const escapeHtml = (value) =>
   String(value).replace(/[&<>"']/g, (character) => HTML_ESCAPES[character])
 
-const table = (heading, columns, rows) =>
+/**
+ * Writes a heading and a table of rows as HTML, every cell escaped.
+ *
+ * @param {string} heading - The table's heading.
+ * @param {string[]} columns - The column names.
+ * @param {Array<Array<unknown>>} rows - The rows of cells.
+ * @returns {string} The HTML.
+ */
+export const table = (heading, columns, rows) =>
   `<h2>${escapeHtml(heading)}</h2>\n<table style="border-collapse:collapse">\n<tr>${columns
     .map(
       (column) =>
