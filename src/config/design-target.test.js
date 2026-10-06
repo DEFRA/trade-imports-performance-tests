@@ -10,8 +10,12 @@ import {
   combinedProfileLine,
   combinedVirtualUsers,
   confirmsArrivals,
+  clearedPhase,
   designTargetScenarios,
+  faultControlScenario,
+  faultPhase,
   referenceDataWatchScenario,
+  resiliencePhases,
   sessionSpikeCapacities,
   watchesReferenceData,
   hourLabel,
@@ -43,7 +47,8 @@ import { SCENARIOS } from './smoke.js'
 import {
   durationSeconds,
   iterationSeconds,
-  resolveTrafficModel
+  resolveTrafficModel,
+  scenarioRates
 } from './traffic.js'
 
 const modelFor = (length) =>
@@ -1243,5 +1248,164 @@ describe('the combined run', () => {
       expect(confirmsArrivals(shape)).toBe(false)
       expect(watchesReferenceData(shape)).toBe(false)
     })
+  })
+})
+
+describe('resilience shape', () => {
+  const FAULTS = [{ id: 'mdm-error' }, { id: 'defra-id-slow' }]
+  const resilienceSchedule = (length, faults = FAULTS) =>
+    phaseSchedule({
+      shape: SHAPES.RESILIENCE,
+      model: modelFor(length),
+      scenarioNames: Object.keys(SCENARIOS),
+      faults
+    })
+  const entryOf = (schedule, phase) =>
+    schedule.find((entry) => entry.phase === phase)
+
+  test('names the fault and cleared phases', () => {
+    expect(faultPhase('mdm-error')).toBe('fault-mdm-error')
+    expect(clearedPhase('mdm-error', 3)).toBe('cleared-mdm-error-3')
+  })
+
+  test('lays out warm-up, baseline, then each fault and its recovery steps, at full length', () => {
+    const schedule = resilienceSchedule('full')
+
+    expect(entryOf(schedule, 'warm-up')).toMatchObject({
+      startSeconds: 0,
+      endSeconds: 3000
+    })
+    expect(entryOf(schedule, 'baseline')).toMatchObject({
+      startSeconds: 3000,
+      endSeconds: 3300
+    })
+    expect(entryOf(schedule, 'fault-mdm-error')).toMatchObject({
+      startSeconds: 3300,
+      endSeconds: 3420
+    })
+    expect(entryOf(schedule, 'cleared-mdm-error-1')).toMatchObject({
+      startSeconds: 3420,
+      endSeconds: 3450
+    })
+    expect(entryOf(schedule, 'cleared-mdm-error-4')).toMatchObject({
+      startSeconds: 3510,
+      endSeconds: 3540
+    })
+    expect(entryOf(schedule, 'fault-defra-id-slow')).toMatchObject({
+      startSeconds: 3540,
+      endSeconds: 3660
+    })
+    expect(entryOf(schedule, 'cleared-defra-id-slow-4')).toMatchObject({
+      startSeconds: 3750,
+      endSeconds: 3780
+    })
+    expect(entryOf(schedule, 'tail')).toMatchObject({
+      startSeconds: 3780,
+      endSeconds: null
+    })
+  })
+
+  test('shortens the windows at local length', () => {
+    const schedule = resilienceSchedule('local', [{ id: 'mdm-error' }])
+
+    expect(entryOf(schedule, 'baseline')).toMatchObject({
+      endSeconds: entryOf(schedule, 'warm-up').endSeconds + 120
+    })
+    expect(
+      schedule.filter(({ phase }) => phase.startsWith('cleared-'))
+    ).toHaveLength(4)
+    expect(entryOf(schedule, 'cleared-mdm-error-1')).toMatchObject({
+      endSeconds: entryOf(schedule, 'cleared-mdm-error-1').startSeconds + 15
+    })
+  })
+
+  test('reports every phase but the warm-up and the tail', () => {
+    expect(resiliencePhases(resilienceSchedule('full'))).toEqual([
+      'baseline',
+      'fault-mdm-error',
+      'cleared-mdm-error-1',
+      'cleared-mdm-error-2',
+      'cleared-mdm-error-3',
+      'cleared-mdm-error-4',
+      'fault-defra-id-slow',
+      'cleared-defra-id-slow-1',
+      'cleared-defra-id-slow-2',
+      'cleared-defra-id-slow-3',
+      'cleared-defra-id-slow-4'
+    ])
+  })
+
+  test('holds each scenario at its design rate from the start to the tail', () => {
+    const schedule = resilienceSchedule('full')
+    const model = modelFor('full')
+    const rates = scenarioRates(model)
+    const scenarios = designTargetScenarios({
+      shape: SHAPES.RESILIENCE,
+      model,
+      scenarioSet: scenarioSetForShape({ shape: SHAPES.RESILIENCE }),
+      schedule
+    })
+
+    expect(Object.keys(scenarios)).toEqual(Object.keys(SCENARIOS))
+
+    for (const [name, scenario] of Object.entries(scenarios)) {
+      expect(scenario.executor).toBe('ramping-arrival-rate')
+      expect(scenario.startRate).toBe(rates[name])
+      expect(scenario.stages).toEqual([
+        { duration: '3780s', target: rates[name] }
+      ])
+    }
+  })
+
+  test('runs the reference-data watch to the start of the tail and the fault controller five seconds past it', () => {
+    const schedule = resilienceSchedule('full')
+    const model = modelFor('full')
+
+    expect(referenceDataWatchScenario({ model, schedule })).toMatchObject({
+      executor: 'constant-arrival-rate',
+      duration: '3780s',
+      exec: 'referenceDataWatch'
+    })
+    expect(faultControlScenario({ schedule })).toEqual({
+      executor: 'constant-arrival-rate',
+      rate: 1,
+      timeUnit: '1s',
+      duration: '3785s',
+      preAllocatedVUs: 1,
+      maxVUs: 1,
+      exec: 'faultControl',
+      tags: { watch: 'fault-control' }
+    })
+  })
+
+  test('leaves the combined run reference-data watch at the end of the last phase', () => {
+    const schedule = scheduleFor(SHAPES.COMBINED, 'full')
+    const model = modelFor('full')
+
+    expect(referenceDataWatchScenario({ model, schedule }).duration).toBe(
+      `${schedule.find(({ phase }) => phase === 'plants-alone').endSeconds}s`
+    )
+  })
+
+  test('states the run line', () => {
+    expect(
+      runLine({
+        shape: SHAPES.RESILIENCE,
+        scenarioLength: 'full',
+        environment: 'perf-test',
+        stubProfile: 'sla',
+        model: modelFor('full'),
+        faults: FAULTS
+      })
+    ).toBe(
+      'Design-target run: resilience, full length (warm-up 50m, baseline 5m, then for each of 2 faults 2m injected and 2m cleared in 30s steps), in perf-test, requiring stub profile sla'
+    )
+  })
+
+  test('watches dead letters and reads reference data', () => {
+    expect(watchesDeadLetters(SHAPES.RESILIENCE)).toBe(true)
+    expect(watchesReferenceData(SHAPES.RESILIENCE)).toBe(true)
+    expect(confirmsArrivals(SHAPES.RESILIENCE)).toBe(false)
+    expect(watchesEventing(SHAPES.RESILIENCE)).toBe(false)
   })
 })

@@ -6,6 +6,9 @@ const GATEWAY_HOST_PREFIX = 'ephemeral-protected.api'
 const API_KEY_HEADER = 'x-api-key'
 const CDP_LOCAL_ON = 'true'
 
+// The workspace stack's toxiproxy API, published to the host by docker/stack/infrastructure.compose.yml.
+const LOCAL_TOXIPROXY_PORT = 8474
+
 const GATEWAY_SERVICES = Object.freeze([
   'trade-imports-animals-backend',
   'trade-imports-plants-backend',
@@ -67,6 +70,26 @@ export function resolveEnvironment(env) {
  */
 export function resolveLocalhostAlias(env) {
   return env.LOCALHOST_ALIAS?.trim() || DEFAULT_LOCALHOST
+}
+
+/**
+ * Works out the base URL of the toxiproxy that stands in front of the Service
+ * Bus emulator, where a resilience run injects its Service Bus faults.
+ *
+ * @param {Record<string, string | undefined>} env - k6's `__ENV`, or any map of environment variables.
+ * @param {string} environment - The environment the run is in.
+ * @returns {string | null} `TOXIPROXY_URL` without a trailing slash when set; in `local` the workspace stack's toxiproxy on the localhost alias; otherwise null, for there is none to reach.
+ */
+export function resolveToxiproxyUrl(env, environment) {
+  const override = env.TOXIPROXY_URL?.trim().replace(/\/+$/, '')
+
+  if (override) {
+    return override
+  }
+
+  return environment === LOCAL_ENVIRONMENT
+    ? `http://${resolveLocalhostAlias(env)}:${LOCAL_TOXIPROXY_PORT}`
+    : null
 }
 
 /**

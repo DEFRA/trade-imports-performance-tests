@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'vitest'
 
 import { DATASTORES } from './background-volume.js'
-import { HOUR_PHASES } from './design-target.js'
+import { HOUR_PHASES, SHAPES, scenarioSetForShape } from './design-target.js'
 import { SCHEMA_VERSIONS } from './eventing.js'
+import { STUB_HOSTED_INTEGRATIONS } from './resilience.js'
 import { STUBBED_INTEGRATIONS } from './stub-profiles.js'
 import {
   INTERIM_TARGETS,
@@ -19,6 +20,7 @@ import {
   notificationSplitThresholds,
   peakDayThresholds,
   reauthenticationReportThresholds,
+  resilienceReportThresholds,
   runEnvironmentReportThresholds,
   scenarioThresholds,
   serviceBusThresholds,
@@ -982,6 +984,135 @@ describe('the combined run', () => {
       ]
     ])('reports %s and can never fail', (key, limits) => {
       expect(report[key]).toEqual(limits)
+    })
+  })
+})
+
+describe('resilience thresholds', () => {
+  const scenarioSet = scenarioSetForShape({ shape: SHAPES.RESILIENCE })
+  const faults = [
+    { id: 'mdm-error', integration: 'mdm' },
+    { id: 'azure-service-bus-reset', integration: 'azure-service-bus' }
+  ]
+  const phases = ['baseline', 'fault-mdm-error', 'cleared-mdm-error-1']
+
+  test('gates only the baseline phase of the four scenarios', () => {
+    const gating = designTargetThresholds({
+      shape: SHAPES.RESILIENCE,
+      scenarioSet
+    })
+
+    expect(Object.keys(gating).length).toBeGreaterThan(0)
+
+    for (const key of Object.keys(gating)) {
+      expect(key).toContain('phase:baseline')
+      expect(key).not.toContain('fault-')
+      expect(key).not.toContain('cleared-')
+    }
+
+    expect(
+      Object.keys(gating).filter((key) => key.startsWith('http_req_failed'))
+    ).toHaveLength(Object.keys(scenarioSet).length)
+  })
+
+  test('limits baseline failures to under 1% and never aborts', () => {
+    const gating = designTargetThresholds({
+      shape: SHAPES.RESILIENCE,
+      scenarioSet
+    })
+    const failed =
+      gating['http_req_failed{scenario:live-animals,phase:baseline}']
+
+    expect(failed).toEqual(['rate<0.01'])
+
+    for (const limits of Object.values(gating)) {
+      for (const limit of limits) {
+        expect(typeof limit).toBe('string')
+      }
+    }
+  })
+
+  test('puts every report key in reporting-only form', () => {
+    const report = resilienceReportThresholds({ scenarioSet, phases, faults })
+
+    expect(
+      report['stub_requests{integration:mdm,phase:fault-mdm-error}']
+    ).toEqual(['count>=0'])
+    expect(
+      report['stub_faults_injected{integration:defra-id,phase:baseline}']
+    ).toEqual(['count>=0'])
+    expect(report['fault_injection_applied{fault:mdm-error}']).toEqual([
+      'value>=0'
+    ])
+    expect(
+      report[
+        'resilience_backlog_drained_seconds{fault:azure-service-bus-reset}'
+      ]
+    ).toEqual(['value>=0'])
+    expect(
+      report['resilience_backlog_drained_seconds{fault:mdm-error}']
+    ).toBeUndefined()
+
+    for (const limits of Object.values(report)) {
+      expect(limits.every((limit) => /(>=0)$/.test(limit))).toBe(true)
+    }
+  })
+
+  test("reports each synchronous fault's own transport errors and each Service Bus fault's unread backlog", () => {
+    const report = resilienceReportThresholds({
+      scenarioSet,
+      phases,
+      faults: [...faults, { id: 'defra-id-slow', integration: 'defra-id' }]
+    })
+
+    expect(
+      report[
+        'transport_errors{scenario:reference-data-watch,phase:fault-mdm-error}'
+      ]
+    ).toEqual(['count>=0'])
+    expect(
+      report['transport_errors{endpoint:sign-in,phase:fault-defra-id-slow}']
+    ).toEqual(['count>=0'])
+    expect(
+      report['resilience_backlog_unread{fault:azure-service-bus-reset}']
+    ).toEqual(['value>=0'])
+    expect(report['resilience_backlog_unread{fault:mdm-error}']).toBeUndefined()
+  })
+
+  test('reports the stub counters of every stub-hosted integration in every phase', () => {
+    const report = resilienceReportThresholds({ scenarioSet, phases, faults })
+
+    for (const integration of STUB_HOSTED_INTEGRATIONS) {
+      for (const phase of phases) {
+        expect(
+          report[`stub_requests{integration:${integration},phase:${phase}}`]
+        ).toEqual(['count>=0'])
+      }
+    }
+  })
+
+  test('reports the caller evidence in every phase', () => {
+    const report = resilienceReportThresholds({ scenarioSet, phases, faults })
+
+    for (const phase of phases) {
+      expect(
+        report[
+          `http_req_duration{scenario:reference-data-watch,kind:api,phase:${phase}}`
+        ]
+      ).toBeDefined()
+      expect(
+        report[`http_req_failed{endpoint:sign-in,phase:${phase}}`]
+      ).toBeDefined()
+      expect(report[`transport_errors{phase:${phase}}`]).toEqual(['count>=0'])
+    }
+  })
+
+  test('names the interim verdict limits', () => {
+    expect(INTERIM_TARGETS.resilience).toEqual({
+      maxWaitMs: 30_000,
+      maxRetryAmplification: 4,
+      p95FactorOverBaseline: 1.1,
+      minSamples: 10
     })
   })
 })

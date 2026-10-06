@@ -29,7 +29,8 @@ export const SHAPES = Object.freeze({
   AVERAGE_LOAD: 'average-load',
   SPIKE_RECOVERY: 'spike-recovery',
   ENDURANCE: 'endurance',
-  COMBINED: 'combined'
+  COMBINED: 'combined',
+  RESILIENCE: 'resilience'
 })
 
 // k6 rates are whole numbers: counted per day, a quiet hour's rate stays within a few per cent of its target, where per hour it would round to 1.
@@ -156,6 +157,23 @@ export const PHASES = Object.freeze({
   TAIL: 'tail'
 })
 
+/**
+ * The phase a resilience run injects one fault in.
+ *
+ * @param {string} id - The fault's id, such as `mdm-error`.
+ * @returns {string} For example `fault-mdm-error`.
+ */
+export const faultPhase = (id) => `fault-${id}`
+
+/**
+ * The phase of one recovery step after a fault clears.
+ *
+ * @param {string} id - The fault's id, such as `mdm-error`.
+ * @param {number} step - The step, counted from 1.
+ * @returns {string} For example `cleared-mdm-error-1`.
+ */
+export const clearedPhase = (id, step) => `cleared-${id}-${step}`
+
 /** The phase each journey runs alone in the combined run. */
 export const ALONE_PHASES = Object.freeze({
   'live-animals': PHASES.ANIMALS_ALONE,
@@ -200,7 +218,9 @@ export const SCENARIO_LENGTHS = Object.freeze({
  * windows, and its returning users clear their cookies after 3m, standing in
  * for the frontends' 4-hour session expiry that a compressed run cannot reach;
  * `nightly` leaves both as the DR's figures. The combined run's alone, combined
- * and settle windows shorten to 3m, 3m and 1m at `local`.
+ * and settle windows shorten to 3m, 3m and 1m at `local`. The resilience run's
+ * baseline, fault and cleared windows shorten to 2m, 1m and 1m, in 15s recovery
+ * steps, at `local`.
  */
 export const SCENARIO_LENGTH_PROFILES = freezeDeep({
   full: {},
@@ -227,6 +247,12 @@ export const SCENARIO_LENGTH_PROFILES = freezeDeep({
       aloneDuration: '3m',
       combinedDuration: '3m',
       settleDuration: '1m'
+    },
+    resilience: {
+      baselineDuration: '2m',
+      faultDuration: '1m',
+      clearedDuration: '1m',
+      recoveryStep: '15s'
     }
   }
 })
@@ -584,16 +610,41 @@ const combinedPhaseLengths = (model) => {
 const combinedSchedule = (model) =>
   withTail(timedPhases(0, combinedPhaseLengths(model)))
 
+const faultPhaseLengths = (
+  { id },
+  { faultDuration, recoveryStep, clearedDuration }
+) => {
+  const steps = durationSeconds(clearedDuration) / durationSeconds(recoveryStep)
+
+  return [
+    [faultPhase(id), durationSeconds(faultDuration)],
+    ...Array.from({ length: steps }, (_, index) => [
+      clearedPhase(id, index + 1),
+      durationSeconds(recoveryStep)
+    ])
+  ]
+}
+
+const resilienceSchedule = (model, scenarioNames, faults) =>
+  withTail(
+    timedPhases(0, [
+      [PHASES.WARM_UP, longestIterationSeconds(model, scenarioNames)],
+      [PHASES.BASELINE, durationSeconds(model.resilience.baselineDuration)],
+      ...faults.flatMap((fault) => faultPhaseLengths(fault, model.resilience))
+    ])
+  )
+
 const SCHEDULES = {
   [SHAPES.SUSTAINED_PEAK]: sustainedPeakSchedule,
   [SHAPES.AVERAGE_LOAD]: averageLoadSchedule,
   [SHAPES.SPIKE_RECOVERY]: spikeRecoverySchedule,
   [SHAPES.ENDURANCE]: enduranceSchedule,
-  [SHAPES.COMBINED]: combinedSchedule
+  [SHAPES.COMBINED]: combinedSchedule,
+  [SHAPES.RESILIENCE]: resilienceSchedule
 }
 
-const scheduleFor = ({ shape, model, scenarioNames }) =>
-  (SCHEDULES[shape] ?? burstSchedule)(model, scenarioNames)
+const scheduleFor = ({ shape, model, scenarioNames, faults }) =>
+  (SCHEDULES[shape] ?? burstSchedule)(model, scenarioNames, faults)
 
 /**
  * Lays out the phases of a run on its clock, from the start of the scenarios.
@@ -607,16 +658,33 @@ const scheduleFor = ({ shape, model, scenarioNames }) =>
  * warm-up, first hour, middle and final hour. The combined run warms live
  * animals and the front door up, measures live animals alone, adds high-risk
  * plants, holds both, bursts, spikes each journey and then all three frontends
- * in turn, drains live animals and measures high-risk plants alone.
+ * in turn, drains live animals and measures high-risk plants alone. The
+ * resilience run is warm-up and baseline, then for each fault a fault window
+ * and its cleared steps, then the tail.
  *
  * @param {object} options - The run.
  * @param {string} options.shape - A value of `SHAPES`.
  * @param {object} options.model - A resolved traffic model.
  * @param {string[]} options.scenarioNames - The scenarios that run.
+ * @param {ReadonlyArray<{ id: string }>} [options.faults] - The faults a resilience run injects, in order; the other shapes ignore it.
  * @returns {ReadonlyArray<{ phase: string, startSeconds: number, endSeconds: number | null, paceFactor: number }>} The ordered phases. The last has no end.
  */
-export const phaseSchedule = ({ shape, model, scenarioNames }) =>
-  freezeDeep(scheduleFor({ shape, model, scenarioNames }))
+export const phaseSchedule = ({ shape, model, scenarioNames, faults = [] }) =>
+  freezeDeep(scheduleFor({ shape, model, scenarioNames, faults }))
+
+/**
+ * The phases a resilience run reports: every phase but the warm-up and the tail.
+ *
+ * @param {ReadonlyArray<{ phase: string }>} schedule - A resilience phase schedule.
+ * @returns {string[]} The phase names, in order.
+ */
+export const resiliencePhases = (schedule) =>
+  schedule
+    .map(({ phase }) => phase)
+    .filter((phase) => phase !== PHASES.WARM_UP && phase !== PHASES.TAIL)
+
+const tailStartOf = (schedule) =>
+  schedule.find(({ phase }) => phase === PHASES.TAIL).startSeconds
 
 const averageLoadScenario = ({ base, model, rate, seconds }) => {
   const factors = averageLoadFactors(model)
@@ -921,6 +989,13 @@ const combinedScenario = ({ base, name, scenarioSchedule, rate, seconds }) => {
   }
 }
 
+const resilienceScenario = ({ base, schedule, rate }) => ({
+  ...base,
+  preAllocatedVUs: base.maxVUs,
+  startRate: rate,
+  stages: [{ duration: `${tailStartOf(schedule)}s`, target: rate }]
+})
+
 const enduranceScenario = ({ base, schedule, rate }) => ({
   ...base,
   preAllocatedVUs: base.maxVUs,
@@ -982,6 +1057,10 @@ const scenarioFor = ({
 
   if (shape === SHAPES.ENDURANCE) {
     return enduranceScenario({ base, schedule, rate })
+  }
+
+  if (shape === SHAPES.RESILIENCE) {
+    return resilienceScenario({ base, schedule, rate })
   }
 
   if (shape === SHAPES.COMBINED) {
@@ -1132,7 +1211,7 @@ const combinedLengthText = (model) => {
   return `animals warm-up ${durationText(lengths[PHASES.WARM_UP])}, alone ${aloneDuration}, plants warm-up ${durationText(lengths[PHASES.PLANTS_WARM_UP])}, combined ${combinedDuration}, burst ${burstDuration} at ${burstFactor}x, spikes ${spikeDuration} with ${recoveryDuration} after, settle ${settleDuration}, animals drain ${durationText(lengths[PHASES.ANIMALS_DRAIN])}, plants alone ${aloneDuration}`
 }
 
-const lengthText = ({ shape, model }) => {
+const lengthText = ({ shape, model, faults }) => {
   if (shape === SHAPES.SUSTAINED_PEAK) {
     return `ramp ${model.sustainedPeak.rampDuration}, hold ${model.sustainedPeak.holdDuration}`
   }
@@ -1148,6 +1227,13 @@ const lengthText = ({ shape, model }) => {
   }
 
   const warmUp = longestIterationSeconds(model, Object.keys(SCENARIOS))
+
+  if (shape === SHAPES.RESILIENCE) {
+    const { baselineDuration, faultDuration, clearedDuration, recoveryStep } =
+      model.resilience
+
+    return `warm-up ${durationText(warmUp)}, baseline ${baselineDuration}, then for each of ${faults.length} faults ${faultDuration} injected and ${clearedDuration} cleared in ${recoveryStep} steps`
+  }
 
   if (shape === SHAPES.SPIKE_RECOVERY) {
     const {
@@ -1178,6 +1264,7 @@ const lengthText = ({ shape, model }) => {
  * @param {string} options.environment - The environment the run is in.
  * @param {string | undefined} options.stubProfile - The stub profile the run requires, if any.
  * @param {object} options.model - A resolved traffic model.
+ * @param {ReadonlyArray<{ id: string }>} [options.faults] - The faults a resilience run injects.
  * @returns {string} The line.
  */
 export const runLine = ({
@@ -1185,21 +1272,23 @@ export const runLine = ({
   scenarioLength,
   environment,
   stubProfile,
-  model
+  model,
+  faults = []
 }) =>
-  `Design-target run: ${shape}, ${scenarioLength} length (${lengthText({ shape, model })}), in ${environment}, requiring stub profile ${stubProfile ?? 'none'}`
+  `Design-target run: ${shape}, ${scenarioLength} length (${lengthText({ shape, model, faults })}), in ${environment}, requiring stub profile ${stubProfile ?? 'none'}`
 
 /**
  * Tells whether a shape reads the gateway's dead-letter queue, the Service Bus
  * stand-in's sign of a cascade, before and after the run.
  *
  * @param {string} shape - A value of `SHAPES`.
- * @returns {boolean} True for the spike, endurance and combined shapes.
+ * @returns {boolean} True for the spike, endurance, combined and resilience shapes.
  */
 export const watchesDeadLetters = (shape) =>
   shape === SHAPES.SPIKE_RECOVERY ||
   shape === SHAPES.ENDURANCE ||
-  shape === SHAPES.COMBINED
+  shape === SHAPES.COMBINED ||
+  shape === SHAPES.RESILIENCE
 
 /**
  * Tells whether a shape proves, for each notification a publishing journey
@@ -1220,9 +1309,10 @@ export const confirmsArrivals = (shape) => shape === SHAPES.COMBINED
  * warm answers.
  *
  * @param {string} shape - A value of `SHAPES`.
- * @returns {boolean} True for the combined shape.
+ * @returns {boolean} True for the combined and resilience shapes.
  */
-export const watchesReferenceData = (shape) => shape === SHAPES.COMBINED
+export const watchesReferenceData = (shape) =>
+  shape === SHAPES.COMBINED || shape === SHAPES.RESILIENCE
 
 /** The name of the scenario that watches reference-data. */
 export const REFERENCE_DATA_WATCH_SCENARIO = 'reference-data-watch'
@@ -1230,22 +1320,48 @@ export const REFERENCE_DATA_WATCH_SCENARIO = 'reference-data-watch'
 /**
  * Builds the scenario that reads reference-data on a fixed interval: one
  * virtual user, so one owner of the watch's state, from the start of the run
- * to the end of the last phase before the tail.
+ * to the start of the tail.
  *
  * @param {object} options - The watch.
  * @param {object} options.model - A resolved traffic model.
- * @param {ReadonlyArray<{ phase: string, endSeconds: number | null }>} options.schedule - The combined run's phase schedule.
+ * @param {ReadonlyArray<{ phase: string, startSeconds: number }>} options.schedule - The run's phase schedule.
  * @returns {object} A k6 scenario.
  */
 export const referenceDataWatchScenario = ({ model, schedule }) => ({
   executor: 'constant-arrival-rate',
   rate: 1,
   timeUnit: model.combined.referenceDataReadInterval,
-  duration: `${schedule.find(({ phase }) => phase === PHASES.PLANTS_ALONE).endSeconds}s`,
+  duration: `${tailStartOf(schedule)}s`,
   preAllocatedVUs: 1,
   maxVUs: 1,
   exec: 'referenceDataWatch',
   tags: { watch: 'reference-data' }
+})
+
+/** The name of the scenario that switches the resilience run's faults on and off. */
+export const FAULT_CONTROL_SCENARIO = 'fault-control'
+
+// The fault controller runs a few seconds past the tail's start so it takes the last phase's readings.
+const FAULT_CONTROL_TAIL_SECONDS = 5
+
+/**
+ * Builds the scenario that switches faults on and off at the phase boundaries,
+ * once a second: one virtual user, so one owner of the controller's state, and
+ * an overrun drops a tick instead of splitting that state.
+ *
+ * @param {object} options - The controller.
+ * @param {ReadonlyArray<{ phase: string, startSeconds: number }>} options.schedule - The resilience run's phase schedule.
+ * @returns {object} A k6 scenario.
+ */
+export const faultControlScenario = ({ schedule }) => ({
+  executor: 'constant-arrival-rate',
+  rate: 1,
+  timeUnit: '1s',
+  duration: `${tailStartOf(schedule) + FAULT_CONTROL_TAIL_SECONDS}s`,
+  preAllocatedVUs: 1,
+  maxVUs: 1,
+  exec: 'faultControl',
+  tags: { watch: 'fault-control' }
 })
 
 const EVENTING_WATCH_PHASES = Object.freeze({

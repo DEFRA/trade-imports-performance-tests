@@ -4,12 +4,14 @@ import {
   REFERENCE_DATA_WATCH_SCENARIO,
   RETURNING_SCENARIOS,
   SHAPES,
+  faultPhase,
   journeyScenariosIn
 } from './design-target.js'
 import { kindOf } from './endpoints.js'
 import { SCHEMA_VERSIONS, publishesEvents } from './eventing.js'
 import { CACHE_CLASSES, REFERENCE_DATA_READS } from './reference-data.js'
 import { RE_AUTHENTICATION_TAG, TRAFFIC_CLASSES } from './request-mix.js'
+import { CALLER_EVIDENCE, STUB_HOSTED_INTEGRATIONS } from './resilience.js'
 import { JOURNEYS } from './smoke.js'
 import { HEADROOM_MEASURES } from './stub-ceilings.js'
 import { FLAGS, PROFILES, QUANTILES } from './stub-profiles.js'
@@ -42,6 +44,16 @@ export const INTERIM_TARGETS = Object.freeze({
   // c-004's default: the endurance run passes when the final hour's P95 is no more than 1.2 times the first hour's.
   endurance: Object.freeze({
     p95FactorOverFirstHour: 1.2,
+    minSamples: 10
+  }),
+  // Interim until NFR-DEP-03 gives a figure: a caller waited a bounded time when its slowest request in a fault window
+  // answered within maxWaitMs, 30 seconds, half of k6's 60 second request timeout.
+  // maxRetryAmplification is one try and three retries, the bound the gateway's SQS redrive already uses (maxReceiveCount 3).
+  // p95FactorOverBaseline is c-004's recovery rule, as the spike run's. minSamples is interim: a P95 of a handful of requests says nothing.
+  resilience: Object.freeze({
+    maxWaitMs: 30_000,
+    maxRetryAmplification: 4,
+    p95FactorOverBaseline: 1.1,
     minSamples: 10
   })
 })
@@ -355,7 +367,14 @@ const NEVER_FAILING_LIMITS = Object.freeze({
   read_model_reads: ['count>=0'],
   reference_data_duration: ['p(95)>=0'],
   reference_data_failed_reads: ['count>=0'],
-  reference_data_first_read: ['value>=0']
+  reference_data_first_read: ['value>=0'],
+  stub_requests: ['count>=0'],
+  stub_faults_injected: ['count>=0'],
+  fault_injection_applied: ['value>=0'],
+  resilience_dead_letters: ['value>=0'],
+  resilience_backlog_drained_seconds: ['value>=0'],
+  resilience_backlog_unread: ['value>=0'],
+  service_bus_forwarded_in_phase: ['value>=0']
 })
 
 const metricNameOf = (key) => key.split('{')[0]
@@ -539,6 +558,24 @@ const spikeScenarioThresholds = (scenario, endpoints) => ({
   ...endOfRunHealthThresholds(scenario)
 })
 
+// A resilience run gates only its healthy baseline: the system must be healthy before anything is injected.
+// Everything in a fault or cleared window is reporting-only, because a fault is meant to cause failures.
+const resilienceScenarioThresholds = (scenario, endpoints) => ({
+  ...Object.fromEntries(
+    endpoints.map((endpoint) => [
+      subMetricKey('http_req_duration', {
+        scenario,
+        endpoint,
+        phase: PHASES.BASELINE
+      }),
+      durationLimits(kindOf(endpoint))
+    ])
+  ),
+  [subMetricKey('http_req_failed', { scenario, phase: PHASES.BASELINE })]: [
+    `rate<${INTERIM_TARGETS.maxFailureRate}`
+  ]
+})
+
 const deadLetterThresholds = () => ({
   [subMetricKey('downstream_dead_letters', { downstream: 'service-bus' })]: [
     'value<1'
@@ -646,7 +683,9 @@ const THRESHOLDS_BY_SHAPE = {
     ...eventArrivalThresholds(scenarioSet),
     ...deadLetterThresholds(),
     ...referenceDataThresholds()
-  })
+  }),
+  [SHAPES.RESILIENCE]: (scenarioSet) =>
+    mergedPerScenario(scenarioSet, resilienceScenarioThresholds)
 }
 
 const burstThresholds = (scenarioSet) =>
@@ -674,6 +713,9 @@ const burstThresholds = (scenarioSet) =>
  * journey's response times and failures while the other spikes and the minute
  * after; the arrival of every live-animals event at the read model; no
  * dead-letter growth; and warm reference-data reads at the interim API limits.
+ * The resilience run judges only its baseline phase, each scenario's response
+ * times and failed requests, at the end and never aborting; every fault and
+ * cleared window is reported, and the run's own verdicts judge them.
  *
  * @param {object} options - The run.
  * @param {string} options.shape - A value of `SHAPES`.
@@ -812,6 +854,77 @@ export const combinedReportThresholds = ({ scenarioSet, phases }) =>
           subMetricKey('reference_data_first_read', { endpoint }),
           subMetricKey('reference_data_failed_reads', { endpoint })
         ])
+      ].map((key) => [key, null])
+    )
+  )
+
+const SERVICE_BUS_INTEGRATION = 'azure-service-bus'
+
+const resiliencePhaseKeys = ({ scenarioSet, phase }) => [
+  ...[...Object.keys(scenarioSet), REFERENCE_DATA_WATCH_SCENARIO].map(
+    (scenario) => subMetricKey('http_req_failed', { scenario, phase })
+  ),
+  subMetricKey('http_req_duration', {
+    scenario: REFERENCE_DATA_WATCH_SCENARIO,
+    kind: 'api',
+    phase
+  }),
+  subMetricKey('http_req_duration', { endpoint: 'sign-in', phase }),
+  subMetricKey('http_req_failed', { endpoint: 'sign-in', phase }),
+  subMetricKey('http_req_duration', {
+    endpoint: 'reference-data-countries-uncached',
+    phase
+  }),
+  subMetricKey('transport_errors', { phase }),
+  ...STUB_HOSTED_INTEGRATIONS.flatMap((integration) => [
+    subMetricKey('stub_requests', { integration, phase }),
+    subMetricKey('stub_faults_injected', { integration, phase })
+  ])
+]
+
+const resilienceFaultKeys = ({ id, integration }) => [
+  subMetricKey('fault_injection_applied', { fault: id }),
+  subMetricKey('resilience_dead_letters', { fault: id }),
+  subMetricKey('service_bus_forwarded_in_phase', { fault: id }),
+  ...(integration === SERVICE_BUS_INTEGRATION
+    ? [
+        subMetricKey('resilience_backlog_drained_seconds', { fault: id }),
+        subMetricKey('resilience_backlog_unread', { fault: id })
+      ]
+    : [
+        subMetricKey('transport_errors', {
+          ...CALLER_EVIDENCE[integration].failedTags,
+          phase: faultPhase(id)
+        })
+      ])
+]
+
+/**
+ * Builds the reporting-only thresholds that put a resilience run's figures in
+ * the summary data `handleSummary` reads: each phase's failed requests,
+ * the reference-data watch's response times, the sign-in hops and the forced
+ * miss reads, the transport errors, the requests and injections each stub
+ * counted, and each fault's injection, dead letters, forwarded messages and
+ * backlog drain.
+ *
+ * These can never fail. k6 keeps a sub-metric's figures only when a threshold
+ * names it. Put them before the gating thresholds, so a key that gates keeps
+ * its limit.
+ *
+ * @param {object} options - The run.
+ * @param {Record<string, { endpoints: string[] }>} options.scenarioSet - Scenarios shaped like `SCENARIOS`.
+ * @param {string[]} options.phases - The phases the run reports.
+ * @param {ReadonlyArray<{ id: string, integration: string }>} options.faults - The faults the run injects.
+ * @returns {Record<string, string[]>} k6 thresholds.
+ */
+export const resilienceReportThresholds = ({ scenarioSet, phases, faults }) =>
+  asReportingOnly(
+    Object.fromEntries(
+      [
+        ...phases.flatMap((phase) =>
+          resiliencePhaseKeys({ scenarioSet, phase })
+        ),
+        ...faults.flatMap(resilienceFaultKeys)
       ].map((key) => [key, null])
     )
   )
