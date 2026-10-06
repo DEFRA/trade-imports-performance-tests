@@ -11,6 +11,8 @@ import {
   designTargetScenarios,
   enduranceProfileLine,
   enduranceRunSeconds,
+  eventingWatchScenario,
+  eventingWindow,
   isScriptCheck,
   localRunLine,
   phaseSchedule,
@@ -20,7 +22,8 @@ import {
   scenarioSchedules,
   scenarioSetForShape,
   spikeProfileLine,
-  watchesDeadLetters
+  watchesDeadLetters,
+  watchesEventing
 } from '../config/design-target.js'
 import { mixTargetLine } from '../config/request-mix.js'
 import {
@@ -39,6 +42,7 @@ import {
   designTargetReportThresholds,
   designTargetThresholds,
   documentScanThresholds,
+  eventingReportThresholds,
   hourlyReportThresholds,
   notificationSplitThresholds,
   reauthenticationReportThresholds,
@@ -67,6 +71,7 @@ import {
   requireBackgroundVolume
 } from './background-volume.js'
 import { readDeadLetterCount, reportDeadLetters } from './dead-letters.js'
+import { reportEventingWatchSetup, watchEventing } from './eventing.js'
 import {
   addressBookSession,
   dashboardOnlySession,
@@ -154,6 +159,7 @@ const thresholdsFor = ({ shape, run }) => ({
   ...designTargetThresholds({ shape, scenarioSet: run.scenarioSet }),
   ...(shape === SHAPES.ENDURANCE ? reauthenticationReportThresholds() : {}),
   ...documentScanThresholds('live-animals'),
+  ...eventingReportThresholds(),
   ...notificationSplitThresholds(notificationSplits(run.model)),
   ...backgroundVolumeReportThresholds(DATASTORES),
   ...stubProfileReportThresholds(STUBBED_INTEGRATIONS),
@@ -198,12 +204,17 @@ export const createDesignTargetRun = ({ shape, env }) => {
   }
 
   const options = {
-    scenarios: designTargetScenarios({
-      shape,
-      model,
-      scenarioSet: run.scenarioSet,
-      schedule
-    }),
+    scenarios: {
+      ...designTargetScenarios({
+        shape,
+        model,
+        scenarioSet: run.scenarioSet,
+        schedule
+      }),
+      ...(watchesEventing(shape)
+        ? { 'eventing-watch': eventingWatchScenario({ schedule }) }
+        : {})
+    },
     thresholds: thresholdsFor({ shape, run }),
     summaryTrendStats: SUMMARY_TREND_STATS,
     setupTimeout: SETUP_TIMEOUT,
@@ -248,6 +259,10 @@ export const createDesignTargetRun = ({ shape, env }) => {
 
     if (isScriptCheck(environment)) {
       console.log(localRunLine({ stubProfile }))
+    }
+
+    if (watchesEventing(shape)) {
+      reportEventingWatchSetup({ window: eventingWindow({ shape, schedule }) })
     }
   }
 
@@ -414,6 +429,11 @@ export const createDesignTargetRun = ({ shape, env }) => {
     insAddressBook: scheduled('ins-address-book', () =>
       addressBookSession(frontDoorOptions())
     ),
+    eventingWatch: () =>
+      watchEventing({
+        urls,
+        window: eventingWindow({ shape, schedule })
+      }),
     returningIns: returning('returning-ins'),
     returningAnimals: returning('returning-animals'),
     returningPlants: returning('returning-plants')

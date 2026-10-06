@@ -10,6 +10,8 @@ import {
   averageLoadProfileLine,
   enduranceProfileLine,
   enduranceRunSeconds,
+  eventingWatchSeconds,
+  eventingWindow,
   expectedReauthentications,
   hourLabel,
   journeyScenariosIn,
@@ -28,6 +30,7 @@ import {
   durationSeconds,
   durationText
 } from '../config/traffic.js'
+import { drainLine, eventingWatchSummary, smoothingLine } from './eventing.js'
 import { thresholdLines, thresholdResults } from './summary-text.js'
 
 const PERCENT = 100
@@ -871,6 +874,20 @@ const achievedOver = ({ metrics, phase, seconds, scenarioSet }) => ({
   }
 })
 
+const eventingReport = ({ metrics, shape, schedule }) => {
+  const { phase, startSeconds, endSeconds } = eventingWindow({
+    shape,
+    schedule
+  })
+
+  return {
+    phase,
+    windowSeconds: endSeconds - startSeconds,
+    watchSeconds: eventingWatchSeconds({ schedule }) - endSeconds,
+    ...eventingWatchSummary(metrics, phase)
+  }
+}
+
 const peakReport = (options) => {
   const { metrics, shape, schedule, scenarioSet, model } = options
   const [steady] = REPORTED_PHASES[shape]
@@ -904,7 +921,8 @@ const peakReport = (options) => {
               seconds: burstSeconds(schedule)
             }),
             targets: burstTargets()
-          }
+          },
+          eventing: eventingReport({ metrics, shape, schedule })
         }
       : {}),
     relative: verdicts,
@@ -957,6 +975,7 @@ const spikeReport = (options) => {
     },
     relative: comparisons,
     cascade: { signInFailureRates: signInFailureRates(metrics) },
+    eventing: eventingReport({ metrics, shape, schedule }),
     endpoints: endpointRows({ metrics, scenarioSet, phase: baseline }),
     thresholds: thresholdResults(metrics),
     relativeFailed: anyOver(comparisons)
@@ -1064,6 +1083,22 @@ const burstLines = ({ burst, relative }) =>
         relativeOutcomeLine({ verdicts: relative })
       ]
 
+const eventingLines = ({ eventing }) =>
+  eventing === undefined
+    ? []
+    : [
+        smoothingLine({
+          phase: eventing.phase,
+          windowSeconds: eventing.windowSeconds,
+          eventing
+        }),
+        drainLine({
+          phase: eventing.phase,
+          watchSeconds: eventing.watchSeconds,
+          eventing
+        })
+      ]
+
 const averageLoadText = (report, metrics) =>
   `${[
     report.run.line,
@@ -1087,6 +1122,7 @@ const peakText = (report, metrics) =>
       share: report.achieved.frontDoor.achieved.dashboardReadShare
     }),
     ...burstLines(report),
+    ...eventingLines(report),
     ...report.endpoints.map(endpointLine),
     ...thresholdLines(metrics)
   ].join('\n')}\n`
@@ -1116,6 +1152,7 @@ const spikeText = (report, metrics) =>
       comparisons: report.relative
     }),
     signInCascadeLine(metrics),
+    ...eventingLines(report),
     ...report.endpoints.map(endpointLine),
     ...thresholdLines(metrics)
   ].join('\n')}\n`
@@ -1256,6 +1293,25 @@ const ACHIEVED_COLUMNS = [
   'Target'
 ]
 
+const drainCell = ({ drainSeconds, watchSeconds }) =>
+  drainSeconds === null ? `did not drain within ${watchSeconds}s` : drainSeconds
+
+const eventingTable = ({ eventing }) =>
+  table(
+    'Eventing',
+    ['Measure', 'Value'],
+    [
+      [
+        `Notifications submitted in the ${eventing.phase}`,
+        eventing.submittedInWindow
+      ],
+      [`Backlog depth before the ${eventing.phase}`, eventing.preBurstDepth],
+      ['Peak backlog depth', eventing.peakDepth],
+      ['Peak events forwarded in one second', eventing.peakPerSecond],
+      ['Drain time in seconds', drainCell(eventing)]
+    ]
+  )
+
 const peakTables = (report) => [
   table(
     achievedHeading(report.run.steadyPhase),
@@ -1263,7 +1319,8 @@ const peakTables = (report) => [
     achievedRows(report)
   ),
   burstTable(report),
-  relativeTable(report)
+  relativeTable(report),
+  ...(report.eventing === undefined ? [] : [eventingTable(report)])
 ]
 
 const hourRow = (row) => [
@@ -1370,7 +1427,8 @@ const spikeTables = (report) => [
     beforeLabel: 'Baseline',
     afterLabel: 'Recovered',
     comparisons: report.relative
-  })
+  }),
+  eventingTable(report)
 ]
 
 const enduranceTables = (report) => [

@@ -54,6 +54,9 @@ describe('TRAFFIC_DEFAULTS', () => {
     ['backgroundVolume.maxCreatedPerRun', 42000],
     ['backgroundVolume.virtualUsers', 10],
     ['backgroundVolume.maxDuration', '24h'],
+    ['peakDay.liveAnimalsNotifications', 546],
+    ['peakDay.highRiskPlantsNotifications', 442],
+    ['peakDay.duration', '12h'],
     ['liveAnimals.documentKilobytes.min', 100],
     ['liveAnimals.documentKilobytes.max', 5000],
     ['sustainedPeak.rampDuration', '3h'],
@@ -191,6 +194,27 @@ describe('BACKGROUND_VOLUME_PROFILE', () => {
     expect(() =>
       resolveTrafficModel({ TRAFFIC_MODEL: text }, BACKGROUND_VOLUME_PROFILE)
     ).toThrow(message)
+  })
+})
+
+describe('peakDay overrides', () => {
+  test('a TRAFFIC_MODEL override replaces the notification count', () => {
+    const model = resolveTrafficModel({
+      TRAFFIC_MODEL: '{"peakDay":{"liveAnimalsNotifications":6}}'
+    })
+
+    expect(model.peakDay.liveAnimalsNotifications).toBe(6)
+    expect(model.peakDay.highRiskPlantsNotifications).toBe(442)
+  })
+
+  test('refuses a notification count that is not a whole number', () => {
+    expect(() =>
+      resolveTrafficModel({
+        TRAFFIC_MODEL: '{"peakDay":{"liveAnimalsNotifications":5.5}}'
+      })
+    ).toThrow(
+      'Traffic model value "peakDay.liveAnimalsNotifications" must be a whole number'
+    )
   })
 })
 

@@ -2,55 +2,53 @@ import exec from 'k6/execution'
 import { Counter } from 'k6/metrics'
 
 import { DATASTORES, indexesBuiltLine } from '../config/background-volume.js'
-import { mixTargetLine } from '../config/request-mix.js'
+import {
+  resolveScenarioLength,
+  requiredStubProfileFor,
+  isScriptCheck
+} from '../config/design-target.js'
+import {
+  PEAK_DAY_LENGTH_PROFILES,
+  PEAK_DAY_SCENARIOS,
+  peakDayLine,
+  peakDayScenarios
+} from '../config/peak-day.js'
 import {
   IDENTITY,
   JOURNEYS,
   PERF_ADDRESS,
-  SCENARIOS,
   SETUP_TIMEOUT,
-  resolvePassword,
-  notificationSplits,
-  smokeScenarios
+  resolvePassword
 } from '../config/smoke.js'
 import { resolveRecordedCeilings } from '../config/stub-ceilings.js'
-import {
-  STUBBED_INTEGRATIONS,
-  resolveRequiredStubProfile
-} from '../config/stub-profiles.js'
-import {
-  backgroundVolumeReportThresholds,
-  documentScanThresholds,
-  eventArrivalThresholds,
-  eventingReportThresholds,
-  notificationSplitThresholds,
-  runEnvironmentReportThresholds,
-  serviceBusThresholds,
-  smokeThresholds,
-  stubHeadroomReportThresholds,
-  stubProfileReportThresholds
-} from '../config/thresholds.js'
-import {
-  documentScanAllowanceLine,
-  standInCaveat
-} from '../config/test-data.js'
+import { STUBBED_INTEGRATIONS } from '../config/stub-profiles.js'
 import {
   backendRouteLine,
   resolveEnvironment,
   resolveLocalhostAlias,
   resolveServiceUrl
 } from '../config/target.js'
-import { SMOKE_PROFILE, resolveTrafficModel } from '../config/traffic.js'
 import {
-  addressBookSession,
-  dashboardOnlySession,
-  ensurePerfAddress
-} from '../k6/front-door.js'
+  documentScanAllowanceLine,
+  standInCaveat
+} from '../config/test-data.js'
+import {
+  backgroundVolumeReportThresholds,
+  eventingReportThresholds,
+  peakDayThresholds,
+  runEnvironmentReportThresholds,
+  stubHeadroomReportThresholds,
+  stubProfileReportThresholds
+} from '../config/thresholds.js'
+import { resolveTrafficModel } from '../config/traffic.js'
+import { peakDayReport, peakDayText } from '../lib/eventing.js'
 import {
   measureBackgroundVolume,
-  reportBackgroundVolume
+  reportBackgroundVolume,
+  requireBackgroundVolume
 } from '../k6/background-volume.js'
 import { readEventingStart, reportEventCounts } from '../k6/eventing.js'
+import { ensurePerfAddress } from '../k6/front-door.js'
 import { HIGH_RISK_PLANTS_STEPS } from '../k6/high-risk-plants.js'
 import { notificationJourney } from '../k6/journeys.js'
 import { LIVE_ANIMALS_STEPS } from '../k6/live-animals.js'
@@ -65,14 +63,18 @@ import {
 } from '../k6/stub-profiles.js'
 
 const environment = resolveEnvironment(__ENV)
+const scenarioLength = resolveScenarioLength(__ENV, environment)
+const stubProfile = requiredStubProfileFor(__ENV, environment)
+const model = resolveTrafficModel(
+  __ENV,
+  PEAK_DAY_LENGTH_PROFILES[scenarioLength]
+)
 const ceilings = resolveRecordedCeilings(__ENV, environment)
-const requiredStubProfile = resolveRequiredStubProfile(__ENV)
 const localhostAlias = resolveLocalhostAlias(__ENV)
 const credentials = {
   crn: IDENTITY.crn,
   password: resolvePassword(__ENV)
 }
-const model = resolveTrafficModel(__ENV, SMOKE_PROFILE)
 const staleRedirects = new Counter('stale_concurrency_redirects')
 
 const animals = JOURNEYS['live-animals']
@@ -91,35 +93,31 @@ const urls = {
   gateway: resolveServiceUrl(__ENV, 'trade-imports-dynamics-gateway')
 }
 
+const settings = { model, scenarioLength, environment, stubProfile }
+
 export const options = {
-  scenarios: smokeScenarios(model),
+  scenarios: peakDayScenarios(model),
   thresholds: {
-    ...smokeThresholds(SCENARIOS),
+    ...peakDayThresholds(PEAK_DAY_SCENARIOS),
     ...eventingReportThresholds(),
-    ...eventArrivalThresholds(SCENARIOS),
-    ...serviceBusThresholds(environment),
-    ...documentScanThresholds('live-animals'),
-    ...notificationSplitThresholds(notificationSplits(model)),
     ...backgroundVolumeReportThresholds(DATASTORES),
     ...stubProfileReportThresholds(STUBBED_INTEGRATIONS),
     ...stubHeadroomReportThresholds(STUBBED_INTEGRATIONS),
     ...runEnvironmentReportThresholds(environment)
   },
-  summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'],
   setupTimeout: SETUP_TIMEOUT,
   teardownTimeout: SETUP_TIMEOUT,
-  tags: { environment, stub_profile: requiredStubProfile ?? 'as-reported' }
+  tags: {
+    environment,
+    stub_profile: stubProfile ?? 'as-reported',
+    scenario_length: scenarioLength,
+    shape: 'peak-day'
+  }
 }
 
 export function setup() {
-  console.log(
-    `Smoke run in ${environment}, requiring stub profile ${requiredStubProfile ?? 'none'}`
-  )
+  console.log(peakDayLine(settings))
   console.log(backendRouteLine(__ENV))
-  recordRunEnvironment(environment)
-  console.log(`Traffic model: ${JSON.stringify(model)}`)
-  console.log(mixTargetLine(model))
-  console.log(documentScanAllowanceLine())
 
   const caveat = standInCaveat(environment)
 
@@ -127,12 +125,15 @@ export function setup() {
     console.log(caveat)
   }
 
+  console.log(documentScanAllowanceLine())
+  console.log(`Traffic model: ${JSON.stringify(model)}`)
+  recordRunEnvironment(environment)
   waitForReadiness({ urls, localhostAlias, credentials })
 
   const stubProfiles = readStubProfiles({ urls })
 
   reportStubProfiles(stubProfiles, 'start', new Date())
-  requireStubProfiles(stubProfiles, requiredStubProfile)
+  requireStubProfiles(stubProfiles, stubProfile)
   clearStubAnswered({ urls })
 
   const stubLoadSince = Date.now()
@@ -144,11 +145,18 @@ export function setup() {
     credentials,
     address: PERF_ADDRESS
   })
-  reportBackgroundVolume(
-    measureBackgroundVolume({ urls, localhostAlias, credentials }),
-    model.backgroundVolume,
-    'start'
-  )
+
+  const volume = measureBackgroundVolume({
+    urls,
+    localhostAlias,
+    credentials
+  })
+
+  reportBackgroundVolume(volume, model.backgroundVolume, 'start')
+
+  if (!isScriptCheck(environment)) {
+    requireBackgroundVolume(volume, model.backgroundVolume)
+  }
 
   return {
     addressName: PERF_ADDRESS.name,
@@ -172,24 +180,6 @@ export function teardown(data) {
   } finally {
     reportEventCounts({ urls, start: data.eventingStart })
   }
-}
-
-const frontDoorOptions = () => ({
-  urls,
-  model,
-  credentials,
-  localhostAlias,
-  staleRedirects,
-  vu: exec.vu.idInTest,
-  iteration: exec.scenario.iterationInTest
-})
-
-export function insFrontDoor() {
-  dashboardOnlySession(frontDoorOptions())
-}
-
-export function insAddressBook() {
-  addressBookSession(frontDoorOptions())
 }
 
 const journeyOptions = ({ journey, steps, frontend, backend, data }) => ({
@@ -230,4 +220,25 @@ export function highRiskPlants(data) {
       data
     })
   )
+}
+
+export function handleSummary(data) {
+  const report = peakDayReport({
+    metrics: data.metrics,
+    run: {
+      line: peakDayLine(settings),
+      environment,
+      stubProfile: stubProfile ?? 'as-reported',
+      scenarioLength
+    },
+    scenarios: Object.keys(PEAK_DAY_SCENARIOS)
+  })
+  const files = { stdout: peakDayText({ report, metrics: data.metrics }) }
+  const directory = __ENV.REPORTS_DIR
+
+  if (directory) {
+    files[`${directory}/peak-day.json`] = JSON.stringify(report, null, 2)
+  }
+
+  return files
 }

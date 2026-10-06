@@ -1273,3 +1273,117 @@ describe('failedComparisonLines for a burst', () => {
     ).toEqual([relativeLine(verdict)])
   })
 })
+
+describe('eventing in the burst and spike reports', () => {
+  const model = resolveTrafficModel({}, SCENARIO_LENGTH_PROFILES.local)
+  const gauge = (value) => metric({ value })
+  const drainedMetrics = (phase) => ({
+    eventing_backlog_pre_burst_depth: gauge(2),
+    eventing_backlog_peak_depth: gauge(9),
+    service_bus_peak_per_second: gauge(3),
+    eventing_backlog_drain_seconds: gauge(14),
+    eventing_backlog_drained: metric({ rate: 1 }),
+    [subMetricKey('notifications_submitted', { phase })]: metric({ count: 12 })
+  })
+  const undrainedMetrics = (phase) => ({
+    ...drainedMetrics(phase),
+    eventing_backlog_drain_seconds: gauge(0),
+    eventing_backlog_drained: metric({ rate: 0 })
+  })
+  const reportFor = (shape, metrics) =>
+    designTargetReport({
+      metrics,
+      shape,
+      scenarioLength: 'local',
+      environment: 'local',
+      stubProfile: 'zero-delay',
+      schedule: phaseSchedule({
+        shape,
+        model,
+        scenarioNames: Object.keys(SCENARIOS)
+      }),
+      scenarioSet: SCENARIOS,
+      model
+    })
+
+  test('the burst report holds the eventing figures and states smoothing and drain', () => {
+    const metrics = drainedMetrics('burst')
+    const report = reportFor(SHAPES.P99_BURST, metrics)
+    const lines = designTargetText(report, metrics).trimEnd().split('\n')
+
+    expect(report.eventing).toEqual({
+      phase: 'burst',
+      windowSeconds: 60,
+      watchSeconds: 180,
+      preBurstDepth: 2,
+      peakDepth: 9,
+      peakPerSecond: 3,
+      drainSeconds: 14,
+      submittedInWindow: 12
+    })
+    expect(lines).toContain(
+      'Smoothing over the burst (1m): 12 notifications submitted; the Service Bus stand-in received at most 3 events in any one second, and the SQS backlog peaked at 9 messages'
+    )
+    expect(lines).toContain(
+      'SQS backlog after the burst: drained to its pre-burst depth of 2 in 14 seconds'
+    )
+  })
+
+  test('the burst text says the backlog did not drain within the watch', () => {
+    const metrics = undrainedMetrics('burst')
+    const report = reportFor(SHAPES.P99_BURST, metrics)
+
+    expect(report.eventing.drainSeconds).toBeNull()
+    expect(designTargetText(report, metrics)).toContain(
+      'SQS backlog after the burst: did not drain within 180s (pre-burst depth 2, peak 9)'
+    )
+  })
+
+  test('the burst HTML has an Eventing table with the drain time', () => {
+    const html = designTargetHtml(
+      reportFor(SHAPES.P99_BURST, drainedMetrics('burst'))
+    )
+
+    expect(html).toContain('<h2>Eventing</h2>')
+    expect(html).toContain('Drain time in seconds')
+    expect(html).toContain('>14<')
+  })
+
+  test('the burst HTML says the backlog did not drain', () => {
+    const html = designTargetHtml(
+      reportFor(SHAPES.P99_BURST, undrainedMetrics('burst'))
+    )
+
+    expect(html).toContain('did not drain within 180s')
+  })
+
+  test('the spike report states smoothing and drain over the spike window', () => {
+    const metrics = drainedMetrics('spike')
+    const report = reportFor(SHAPES.SPIKE_RECOVERY, metrics)
+    const lines = designTargetText(report, metrics).trimEnd().split('\n')
+
+    expect(report.eventing).toMatchObject({
+      phase: 'spike',
+      windowSeconds: 10,
+      submittedInWindow: 12
+    })
+    expect(
+      lines.some((line) => line.startsWith('Smoothing over the spike (10s): '))
+    ).toBe(true)
+    expect(lines).toContain(
+      'SQS backlog after the spike: drained to its pre-spike depth of 2 in 14 seconds'
+    )
+  })
+
+  test('the spike watch runs until 180s after the tail begins, so its drain watch counts from the spike end', () => {
+    const report = reportFor(SHAPES.SPIKE_RECOVERY, undrainedMetrics('spike'))
+
+    expect(report.eventing.watchSeconds).toBe(300)
+  })
+
+  test('a sustained peak report has no eventing figures', () => {
+    const report = reportFor(SHAPES.SUSTAINED_PEAK, {})
+
+    expect(report.eventing).toBeUndefined()
+  })
+})
