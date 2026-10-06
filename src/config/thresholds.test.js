@@ -9,6 +9,7 @@ import {
   asReportingOnly,
   backgroundVolumeReportThresholds,
   backgroundVolumeThresholds,
+  combinedReportThresholds,
   designTargetReportThresholds,
   designTargetThresholds,
   documentScanThresholds,
@@ -857,5 +858,130 @@ describe('peakDayThresholds', () => {
     expect(
       Object.keys(set).filter((key) => key.startsWith('event_arrivals'))
     ).toEqual(['event_arrivals{scenario:live-animals}'])
+  })
+})
+
+describe('the combined run', () => {
+  const scenarioSet = {
+    'live-animals': {
+      endpoints: ['animals-dashboard', 'animals-backend-list']
+    },
+    'high-risk-plants': {
+      endpoints: ['plants-dashboard', 'plants-backend-list']
+    }
+  }
+  const set = designTargetThresholds({ shape: 'combined', scenarioSet })
+  const isRaisedPhaseDuration = (key) =>
+    key.startsWith('http_req_duration') &&
+    (key.includes('phase:session-spike') || key.includes('phase:burst'))
+
+  describe('designTargetThresholds', () => {
+    test('judges each scenario in the combined phase with the plain limits', () => {
+      expect(
+        set[
+          'http_req_duration{scenario:live-animals,endpoint:animals-dashboard,phase:combined}'
+        ]
+      ).toEqual(['p(95)<2000', 'p(99)<5000'])
+    })
+
+    test('judges whole-run health at the end without aborting', () => {
+      expect(set['http_req_failed{scenario:live-animals}']).toEqual([
+        'rate<0.01'
+      ])
+    })
+
+    test.each([
+      ['high-risk-plants', 'plants-dashboard', 'animals-spike'],
+      ['high-risk-plants', 'plants-dashboard', 'animals-spike-recovery'],
+      ['live-animals', 'animals-dashboard', 'plants-spike'],
+      ['live-animals', 'animals-dashboard', 'plants-spike-recovery']
+    ])(
+      'holds %s %s to the page limits during %s',
+      (scenario, endpoint, phase) => {
+        expect(
+          set[
+            `http_req_duration{scenario:${scenario},endpoint:${endpoint},phase:${phase}}`
+          ]
+        ).toEqual(['p(95)<2000', 'p(99)<5000'])
+      }
+    )
+
+    test('holds the other journey under 1% failed while a journey spikes', () => {
+      expect(
+        set['http_req_failed{scenario:live-animals,phase:plants-spike}']
+      ).toEqual(['rate<0.01'])
+      expect(
+        set[
+          'http_req_failed{scenario:high-risk-plants,phase:animals-spike-recovery}'
+        ]
+      ).toEqual(['rate<0.01'])
+    })
+
+    test('requires every live-animals event to reach the read model', () => {
+      expect(set['event_arrivals{scenario:live-animals}']).toEqual(['rate==1'])
+      expect(set['event_arrivals{scenario:high-risk-plants}']).toBeUndefined()
+    })
+
+    test('fails on dead-letter growth', () => {
+      expect(set['downstream_dead_letters{downstream:service-bus}']).toEqual([
+        'value<1'
+      ])
+    })
+
+    test('holds warm reference-data reads to the interim API limits, but not the forced miss', () => {
+      expect(
+        set[
+          'reference_data_duration{endpoint:reference-data-countries-sps,cache:warm}'
+        ]
+      ).toEqual(['p(95)<200', 'p(99)<1200'])
+      expect(
+        set[
+          'reference_data_duration{endpoint:reference-data-countries-uncached,cache:warm}'
+        ]
+      ).toBeUndefined()
+    })
+
+    test('never judges response times in the burst or the session spike', () => {
+      expect(Object.keys(set).filter(isRaisedPhaseDuration)).toEqual([])
+    })
+
+    test('judges the reference-data watch on its checks and failed requests at the end of the run, and on any failed read', () => {
+      expect(set['checks{scenario:reference-data-watch}']).toEqual([
+        'rate>0.99'
+      ])
+      expect(set['http_req_failed{scenario:reference-data-watch}']).toEqual([
+        'rate<0.01'
+      ])
+      expect(set.reference_data_failed_reads).toEqual(['count<1'])
+    })
+  })
+
+  describe('combinedReportThresholds', () => {
+    const report = combinedReportThresholds({
+      scenarioSet,
+      phases: ['combined', 'plants-alone']
+    })
+
+    test.each([
+      ['read_model_reads{phase:combined}', ['count>=0']],
+      [
+        'http_req_failed{scenario:high-risk-plants,phase:plants-alone}',
+        ['rate>=0']
+      ],
+      [
+        'reference_data_duration{endpoint:reference-data-countries,cache:cold}',
+        ['p(95)>=0']
+      ],
+      [
+        'reference_data_first_read{endpoint:reference-data-ports-of-entry}',
+        ['value>=0']
+      ],
+      [
+        'reference_data_failed_reads{endpoint:reference-data-countries}',
+        ['count>=0']
+      ]
+    ])('reports %s and can never fail', (key, limits) => {
+      expect(report[key]).toEqual(limits)
+    })
   })
 })

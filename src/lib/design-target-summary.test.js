@@ -17,9 +17,21 @@ import {
   achievedFrontDoorLine,
   achievedJourney,
   achievedJourneyLine,
+  achievedSharedComponents,
   achievedSpike,
+  aloneCombinedComparisons,
+  aloneCombinedLine,
+  arrivalLagLine,
   averageLoadHours,
   comparisonOutcomeLine,
+  isolationLine,
+  isolationRows,
+  readModelLine,
+  readModelReadsLine,
+  referenceDataCacheLine,
+  referenceDataLine,
+  referenceDataRows,
+  sessionPathLine,
   designTargetHtml,
   designTargetReport,
   designTargetText,
@@ -1385,5 +1397,539 @@ describe('eventing in the burst and spike reports', () => {
     const report = reportFor(SHAPES.SUSTAINED_PEAK, {})
 
     expect(report.eventing).toBeUndefined()
+  })
+})
+
+describe('the combined run', () => {
+  const fullModel = resolveTrafficModel({})
+  const fullSchedule = phaseSchedule({
+    shape: SHAPES.COMBINED,
+    model: fullModel,
+    scenarioNames: Object.keys(SCENARIOS)
+  })
+  const pages = (frontend, phase, count) => [
+    subMetricKey('page_requests', { frontend, phase }),
+    metric({ count })
+  ]
+  const sharedMetrics = Object.fromEntries([
+    pages('animals', 'combined', 1000),
+    pages('plants', 'combined', 1000),
+    pages('ins', 'combined', 574),
+    pages('animals', 'burst', 60),
+    pages('plants', 'burst', 40),
+    pages('ins', 'burst', 29),
+    pages('animals', 'session-spike', 100),
+    pages('plants', 'session-spike', 100),
+    pages('ins', 'session-spike', 46),
+    [
+      subMetricKey('read_model_reads', { phase: 'combined' }),
+      metric({ count: 594 })
+    ],
+    [
+      subMetricKey('read_model_reads', { phase: 'burst' }),
+      metric({ count: 29 })
+    ]
+  ])
+  const shared = achievedSharedComponents({
+    metrics: sharedMetrics,
+    schedule: fullSchedule,
+    model: fullModel
+  })
+
+  describe('achievedSharedComponents', () => {
+    test('works out the session path and read model rates over each phase', () => {
+      expect(shared.combined.sessionPathRps).toBeCloseTo(1.43, 2)
+      expect(shared['session-spike'].sessionPathRps).toBeCloseTo(24.6, 6)
+      expect(shared.combined.readModelRps).toBeCloseTo(0.33, 2)
+      expect(shared.burst.readModelRps).toBeCloseTo(0.4833, 3)
+    })
+
+    test('gives zeros, never NaN, with no metrics', () => {
+      const empty = achievedSharedComponents({
+        metrics: {},
+        schedule: fullSchedule,
+        model: fullModel
+      })
+
+      Object.values(empty).forEach((row) => {
+        expect(row.sessionPathRps).toBe(0)
+        expect(row.readModelRps).toBe(0)
+      })
+    })
+  })
+
+  describe('line writers', () => {
+    test('states the session path against 1.35, 2 and 25', () => {
+      expect(sessionPathLine({ shared })).toBe(
+        "Session path (each frontend's own session store, one resolution a page request): 1.43 RPS over the combined (30m) against 1.35 sustained (NFR-DEP-05); 2.15 RPS in the burst (60s) against 2 (NFR-VOL-CORE-06); 24.6 RPS in the session spike (10s) against 25 (§9.4); no backend resolves a session today (c-008), so the frontends carry §9.4's backend share"
+      )
+    })
+
+    test('states the read model reads against 0.17 and 0.25', () => {
+      expect(readModelReadsLine({ shared })).toBe(
+        'Dashboard read model (one read an INS dashboard view): 0.33 reads a second over the combined (30m) against 0.17 (§9.4 SYN-21); 0.48 in the burst (60s) against 0.25'
+      )
+    })
+
+    test('states the read model size and why it is one journey', () => {
+      expect(
+        readModelLine({
+          volume: {
+            'dashboard-read-model': 12,
+            'live-animals': 9,
+            'high-risk-plants': 12
+          }
+        })
+      ).toBe(
+        "Read model at start: 12 notifications; it holds live animals' only, because high-risk plants publishes no events today (pbe-022); the journeys' backends hold 9 live-animals and 12 high-risk-plants notifications"
+      )
+    })
+
+    test('states the consumer lag from the arrival times', () => {
+      expect(
+        arrivalLagLine({
+          'event_arrival_seconds{scenario:live-animals}': metric({
+            count: 10,
+            'p(95)': 3.2,
+            max: 7.9
+          })
+        })
+      ).toBe(
+        'Read model consumer: live-animals events arrived P95 3.2s, max 7.9s after the outbox read (event_arrival_seconds)'
+      )
+    })
+
+    test('says so when no arrival was measured', () => {
+      expect(arrivalLagLine({})).toBe(
+        'Read model consumer: no live-animals arrival was measured'
+      )
+    })
+
+    test('states a journey alone and combined', () => {
+      expect(
+        aloneCombinedLine({
+          scenario: 'live-animals',
+          kind: 'page',
+          aloneP95Ms: 610,
+          combinedP95Ms: 640,
+          aloneCount: 412,
+          combinedCount: 380,
+          aloneFailedRate: 0,
+          combinedFailedRate: 0,
+          changeShare: 640 / 610 - 1
+        })
+      ).toBe(
+        'Alone and combined live-animals page: P95 610ms alone (412 requests), 640ms combined (380 requests), +5%; failed 0% alone, 0% combined'
+      )
+    })
+
+    test('says not measured for a missing figure', () => {
+      expect(
+        aloneCombinedLine({
+          scenario: 'live-animals',
+          kind: 'page',
+          aloneP95Ms: undefined,
+          combinedP95Ms: 640,
+          aloneCount: 0,
+          combinedCount: 380,
+          aloneFailedRate: undefined,
+          combinedFailedRate: 0,
+          changeShare: null
+        })
+      ).toBe(
+        'Alone and combined live-animals page: P95 not measured alone (0 requests), 640ms combined (380 requests), not measured; failed not measured alone, 0% combined'
+      )
+    })
+
+    const isolation = {
+      spiking: 'live-animals',
+      other: 'high-risk-plants',
+      phase: 'animals-spike',
+      kind: 'page',
+      count: 31,
+      p95Ms: 700,
+      p99Ms: 900,
+      p95LimitMs: 2000,
+      p99LimitMs: 5000,
+      failedRate: 0,
+      within: true
+    }
+
+    test('states isolation within its limits', () => {
+      expect(isolationLine(isolation)).toBe(
+        'Isolation high-risk-plants page during the live-animals spike (animals-spike): 31 requests, P95 700ms against 2000ms, P99 900ms against 5000ms, failed 0% against 1%: within'
+      )
+    })
+
+    test('states isolation over its limits', () => {
+      expect(
+        isolationLine({ ...isolation, p95Ms: 2100, within: false })
+      ).toContain('P95 2100ms against 2000ms')
+      expect(
+        isolationLine({ ...isolation, p95Ms: 2100, within: false })
+      ).toMatch(/: OVER$/)
+    })
+
+    test('says no requests when the other journey made none', () => {
+      expect(isolationLine({ ...isolation, count: 0 })).toBe(
+        'Isolation high-risk-plants page during the live-animals spike (animals-spike): no requests'
+      )
+    })
+
+    const row = {
+      endpoint: 'reference-data-countries-sps',
+      path: '/countries?blocks=GBNAG_SPS_EX',
+      readBy: 'animals and plants frontends',
+      forcedMiss: false,
+      cold: { count: 2, p95Ms: 480, maxMs: 512 },
+      warm: { count: 1238, p95Ms: 9, maxMs: 31 },
+      unclassified: { count: 0 },
+      failed: 0,
+      firstRead: 'warm'
+    }
+
+    test('states reference data cold and warm', () => {
+      expect(referenceDataLine(row)).toBe(
+        'Reference data reference-data-countries-sps (/countries?blocks=GBNAG_SPS_EX): cold 2 reads (MDM called), P95 480ms, max 512ms; warm 1238 reads, P95 9ms, max 31ms; first read in the run warm'
+      )
+    })
+
+    test('says a forced miss is cold on every read', () => {
+      expect(referenceDataLine({ ...row, forcedMiss: true })).toMatch(
+        /; a forced miss, cold on every read$/
+      )
+    })
+
+    test('counts reads it could not classify', () => {
+      expect(
+        referenceDataLine({ ...row, unclassified: { count: 4 } })
+      ).toContain('; 4 unclassified (the stub did not report its MDM count)')
+    })
+
+    test('states the cache lifetime and what a watch should see', () => {
+      expect(
+        referenceDataCacheLine({ model: fullModel, watchSeconds: 14_430 })
+      ).toBe(
+        'Reference data cache: reference-data keeps MDM answers 60 minutes (cache.mdm.ttl-minutes), so a 4h watch should see about 4 cold reads for each key it reads, and one more for each key not yet cached when the run started'
+      )
+    })
+  })
+
+  describe('aloneCombinedComparisons', () => {
+    const comparisonMetrics = (aloneP95) =>
+      Object.fromEntries([
+        ...(aloneP95 === undefined
+          ? []
+          : [
+              duration(
+                {
+                  scenario: 'live-animals',
+                  kind: 'page',
+                  phase: 'animals-alone'
+                },
+                { count: 100, 'p(95)': aloneP95 }
+              )
+            ]),
+        duration(
+          { scenario: 'live-animals', kind: 'page', phase: 'combined' },
+          { count: 90, 'p(95)': 660 }
+        )
+      ])
+    const pageOf = (metrics) =>
+      aloneCombinedComparisons({ metrics, scenarioSet: SCENARIOS }).find(
+        ({ scenario, kind }) => scenario === 'live-animals' && kind === 'page'
+      )
+
+    test('works out the change in P95 from alone to combined', () => {
+      const comparison = pageOf(comparisonMetrics(600))
+
+      expect(comparison.changeShare).toBeCloseTo(0.1)
+      expect(comparison).toMatchObject({ aloneCount: 100, combinedCount: 90 })
+    })
+
+    test('treats a phase with no requests as not measured, though k6 reports a P95 of 0', () => {
+      const metrics = {
+        ...comparisonMetrics(600),
+        ...Object.fromEntries([
+          duration(
+            { scenario: 'live-animals', kind: 'page', phase: 'animals-alone' },
+            { count: 0, 'p(95)': 0 }
+          )
+        ])
+      }
+      const comparison = pageOf(metrics)
+
+      expect(comparison.aloneP95Ms).toBeUndefined()
+      expect(comparison.changeShare).toBeNull()
+    })
+
+    test('has no change when the alone P95 is missing', () => {
+      expect(pageOf(comparisonMetrics(undefined)).changeShare).toBeNull()
+    })
+  })
+
+  describe('isolationRows', () => {
+    const isolationMetrics = ({ p95, failedRate, count = 31 }) =>
+      Object.fromEntries([
+        duration(
+          {
+            scenario: 'high-risk-plants',
+            kind: 'page',
+            phase: 'animals-spike'
+          },
+          { count, 'p(95)': p95, 'p(99)': 900 }
+        ),
+        [
+          subMetricKey('http_req_failed', {
+            scenario: 'high-risk-plants',
+            phase: 'animals-spike'
+          }),
+          metric({ rate: failedRate })
+        ]
+      ])
+    const plantsPageDuringAnimalsSpike = (metrics) =>
+      isolationRows({ metrics, scenarioSet: SCENARIOS }).find(
+        ({ other, phase, kind }) =>
+          other === 'high-risk-plants' &&
+          phase === 'animals-spike' &&
+          kind === 'page'
+      )
+
+    test('is within when the limits and the failure rate hold', () => {
+      expect(
+        plantsPageDuringAnimalsSpike(
+          isolationMetrics({ p95: 700, failedRate: 0 })
+        )
+      ).toMatchObject({ count: 31, p95LimitMs: 2000, within: true })
+    })
+
+    test('is not within when the page P95 is 2,100ms', () => {
+      expect(
+        plantsPageDuringAnimalsSpike(
+          isolationMetrics({ p95: 2100, failedRate: 0 })
+        ).within
+      ).toBe(false)
+    })
+
+    test('is not within when 2% of requests failed', () => {
+      expect(
+        plantsPageDuringAnimalsSpike(
+          isolationMetrics({ p95: 700, failedRate: 0.02 })
+        ).within
+      ).toBe(false)
+    })
+
+    test.each([
+      ['has no sub-metrics', {}],
+      [
+        'has a sub-metric with no requests',
+        isolationMetrics({ p95: 0, failedRate: 0, count: 0 })
+      ]
+    ])(
+      'is neither measured nor within when the other journey %s',
+      (_case, metrics) => {
+        expect(plantsPageDuringAnimalsSpike(metrics)).toMatchObject({
+          count: 0,
+          measured: false,
+          within: false
+        })
+      }
+    )
+
+    test('marks a row with requests as measured', () => {
+      expect(
+        plantsPageDuringAnimalsSpike(
+          isolationMetrics({ p95: 700, failedRate: 0 })
+        ).measured
+      ).toBe(true)
+    })
+
+    test('says not measured in the HTML Isolation cell of a row with no requests', () => {
+      const model = resolveTrafficModel({}, SCENARIO_LENGTH_PROFILES.local)
+      const html = designTargetHtml(
+        designTargetReport({
+          metrics: {},
+          shape: SHAPES.COMBINED,
+          scenarioLength: 'local',
+          environment: 'local',
+          stubProfile: 'zero-delay',
+          schedule: phaseSchedule({
+            shape: SHAPES.COMBINED,
+            model,
+            scenarioNames: Object.keys(SCENARIOS)
+          }),
+          scenarioSet: SCENARIOS,
+          model
+        })
+      )
+      const isolationTable = html
+        .split('<h2>Isolation</h2>')[1]
+        .split('<h2>')[0]
+
+      expect(isolationTable).toContain('>not measured</td></tr>')
+      expect(isolationTable).not.toContain('>yes</td></tr>')
+    })
+
+    test('has a row for each journey, phase and kind it makes', () => {
+      const phases = isolationRows({
+        metrics: {},
+        scenarioSet: SCENARIOS
+      }).map(({ other, phase }) => `${other} ${phase}`)
+
+      expect(new Set(phases)).toEqual(
+        new Set([
+          'high-risk-plants animals-spike',
+          'high-risk-plants animals-spike-recovery',
+          'live-animals plants-spike',
+          'live-animals plants-spike-recovery'
+        ])
+      )
+    })
+  })
+
+  describe('referenceDataRows', () => {
+    const readMetrics = {
+      'reference_data_duration{endpoint:reference-data-countries,cache:cold}':
+        metric({ count: 3, 'p(95)': 400, max: 450 }),
+      'reference_data_duration{endpoint:reference-data-countries,cache:warm}':
+        metric({ count: 100, 'p(95)': 8, max: 20 }),
+      'reference_data_first_read{endpoint:reference-data-countries}': metric({
+        value: 1
+      }),
+      'reference_data_first_read{endpoint:reference-data-ports-of-entry}':
+        metric({ value: 0 })
+    }
+    const rows = referenceDataRows(readMetrics)
+    const rowFor = (endpoint) =>
+      rows.find((entry) => entry.endpoint === endpoint)
+
+    test('collects cold and warm counts and P95', () => {
+      expect(rowFor('reference-data-countries')).toMatchObject({
+        cold: { count: 3, p95Ms: 400, maxMs: 450 },
+        warm: { count: 100, p95Ms: 8, maxMs: 20 }
+      })
+    })
+
+    test('reads the first read from the gauge', () => {
+      expect(rowFor('reference-data-countries').firstRead).toBe('cold')
+      expect(rowFor('reference-data-ports-of-entry').firstRead).toBe('warm')
+      expect(rowFor('reference-data-countries-sps').firstRead).toBe(
+        'not measured'
+      )
+    })
+
+    test('collects the failed reads of an endpoint', () => {
+      const failedRows = referenceDataRows({
+        ...readMetrics,
+        'reference_data_failed_reads{endpoint:reference-data-countries}':
+          metric({ count: 3 })
+      })
+      const failedRow = failedRows.find(
+        ({ endpoint }) => endpoint === 'reference-data-countries'
+      )
+
+      expect(failedRow.failed).toBe(3)
+      expect(referenceDataLine(failedRow)).toContain(
+        '; 3 failed reads (not timed)'
+      )
+      expect(rowFor('reference-data-countries').failed).toBe(0)
+      expect(
+        referenceDataLine(rowFor('reference-data-countries'))
+      ).not.toContain('failed reads')
+    })
+
+    test('marks only the uncached read as a forced miss', () => {
+      expect(
+        rows
+          .filter(({ forcedMiss }) => forcedMiss)
+          .map(({ endpoint }) => endpoint)
+      ).toEqual(['reference-data-countries-uncached'])
+    })
+  })
+
+  describe('designTargetReport', () => {
+    const model = resolveTrafficModel({}, SCENARIO_LENGTH_PROFILES.local)
+    const schedule = phaseSchedule({
+      shape: SHAPES.COMBINED,
+      model,
+      scenarioNames: Object.keys(SCENARIOS)
+    })
+    const reportFor = () =>
+      designTargetReport({
+        metrics: {},
+        shape: SHAPES.COMBINED,
+        scenarioLength: 'local',
+        environment: 'local',
+        stubProfile: 'zero-delay',
+        schedule,
+        scenarioSet: SCENARIOS,
+        model
+      })
+
+    test('never fails a relative threshold and carries every combined part', () => {
+      const report = reportFor()
+
+      expect(report.relativeFailed).toBe(false)
+      expect(report.relative).toEqual([])
+      expect(Object.keys(report.alone)).toEqual([
+        'live-animals',
+        'high-risk-plants'
+      ])
+      expect(Object.keys(report.shared)).toEqual([
+        'combined',
+        'burst',
+        'session-spike'
+      ])
+      expect(report.comparisons.length).toBeGreaterThanOrEqual(2)
+      expect(report.isolation.length).toBeGreaterThanOrEqual(4)
+      expect(report.referenceData.rows).toHaveLength(4)
+      expect(report.eventCounts).toHaveLength(2)
+    })
+
+    test('writes text that starts with the run and profile lines and holds each combined line', () => {
+      const report = reportFor()
+      const lines = designTargetText(report, {}).trimEnd().split('\n')
+      const startsWith = (prefix) =>
+        lines.filter((line) => line.startsWith(prefix))
+
+      expect(lines[0]).toBe(report.run.line)
+      expect(lines[1]).toMatch(/^Combined: live animals alone 3m/)
+      expect(startsWith('Session path (each frontend')).toHaveLength(1)
+      expect(startsWith('Dashboard read model (one read')).toHaveLength(1)
+      expect(startsWith('Read model consumer: ')).toHaveLength(1)
+      expect(startsWith('Reference data reference-data-')).toHaveLength(4)
+      expect(startsWith('Reference data cache: ')).toHaveLength(1)
+      expect(startsWith('Alone and combined ').length).toBeGreaterThanOrEqual(2)
+      expect(startsWith('Isolation ').length).toBeGreaterThanOrEqual(4)
+      expect(
+        startsWith('Achieved live-animals over the combined')
+      ).toHaveLength(1)
+      expect(
+        startsWith('Achieved high-risk-plants over the animals-alone')
+      ).toHaveLength(0)
+      expect(
+        startsWith('Achieved high-risk-plants over the plants-alone')
+      ).toHaveLength(1)
+    })
+
+    test('writes HTML with the five combined tables and escaped values', () => {
+      const report = reportFor()
+      const [first, ...rest] = report.referenceData.rows
+      const html = designTargetHtml({
+        ...report,
+        referenceData: {
+          ...report.referenceData,
+          rows: [{ ...first, endpoint: '<script>alert(1)</script>' }, ...rest]
+        }
+      })
+
+      expect(html).toContain('<h2>Achieved over the combined</h2>')
+      expect(html).toContain('<h2>Shared components</h2>')
+      expect(html).toContain('<h2>Alone and combined</h2>')
+      expect(html).toContain('<h2>Isolation</h2>')
+      expect(html).toContain('<h2>Reference data</h2>')
+      expect(html).not.toContain('<script>')
+      expect(html).toContain('&lt;script&gt;')
+    })
   })
 })

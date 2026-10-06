@@ -1,5 +1,6 @@
 import { Counter, Rate, Trend } from 'k6/metrics'
 
+import { READ_MODEL_ENDPOINTS } from '../config/endpoints.js'
 import { TRAFFIC_CLASSES, isDashboardRead } from '../config/request-mix.js'
 import { thinkSeconds } from '../lib/traffic-shape.js'
 import { markPhase, pacedSleep } from './phase.js'
@@ -14,6 +15,13 @@ const pagesPerNotification = new Trend('pages_per_notification')
 const sessionSeconds = new Trend('session_seconds')
 const notificationsStarted = new Counter('notifications_started')
 const notificationsSubmitted = new Counter('notifications_submitted')
+const readModelReads = new Counter('read_model_reads')
+
+const recordReadModelRead = (endpoint) => {
+  if (READ_MODEL_ENDPOINTS.includes(endpoint)) {
+    readModelReads.add(1)
+  }
+}
 
 const pathOf = (url) => url.replace(/^https?:\/\/[^/?#]+/, '').split(/[?#]/)[0]
 
@@ -87,7 +95,8 @@ export const recordSession = (seconds) => {
  * Every navigation a scenario makes goes through here, which is what keeps the
  * request mix honest and the load paced like a person's. `upload` posts a
  * multipart form with one file and calls `onLanded` with the landing page
- * before the think time, so scan polling starts when the upload lands.
+ * before the think time, so scan polling starts when the upload lands. Opening
+ * a read-model endpoint also adds to the `read_model_reads` counter.
  *
  * @param {object} options - Walker settings.
  * @param {object} options.session - A browser session.
@@ -116,7 +125,13 @@ export const createWalker = ({
     return page
   }
 
-  const open = (path, endpoint) => settle(session.open(path, endpoint))
+  const open = (path, endpoint) => {
+    const page = session.open(path, endpoint)
+
+    recordReadModelRead(endpoint)
+
+    return settle(page)
+  }
 
   const post = (path, fields, endpoint) =>
     settle(session.post(path, fields, endpoint))

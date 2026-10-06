@@ -3,11 +3,14 @@ import { Counter } from 'k6/metrics'
 
 import { DATASTORES, indexesBuiltLine } from '../config/background-volume.js'
 import {
+  REFERENCE_DATA_WATCH_SCENARIO,
   REPORTED_PHASES,
   RETURNING_SCENARIOS,
   SCENARIO_LENGTH_PROFILES,
   SHAPES,
   averageLoadProfileLine,
+  combinedProfileLine,
+  confirmsArrivals,
   designTargetScenarios,
   enduranceProfileLine,
   enduranceRunSeconds,
@@ -16,6 +19,7 @@ import {
   isScriptCheck,
   localRunLine,
   phaseSchedule,
+  referenceDataWatchScenario,
   requiredStubProfileFor,
   resolveScenarioLength,
   runLine,
@@ -23,7 +27,8 @@ import {
   scenarioSetForShape,
   spikeProfileLine,
   watchesDeadLetters,
-  watchesEventing
+  watchesEventing,
+  watchesReferenceData
 } from '../config/design-target.js'
 import { mixTargetLine } from '../config/request-mix.js'
 import {
@@ -39,6 +44,7 @@ import { resolveRecordedCeilings } from '../config/stub-ceilings.js'
 import { STUBBED_INTEGRATIONS } from '../config/stub-profiles.js'
 import {
   backgroundVolumeReportThresholds,
+  combinedReportThresholds,
   designTargetReportThresholds,
   designTargetThresholds,
   documentScanThresholds,
@@ -63,7 +69,8 @@ import {
   designTargetHtml,
   designTargetReport,
   designTargetText,
-  failedComparisonLines
+  failedComparisonLines,
+  readModelLine
 } from '../lib/design-target-summary.js'
 import {
   measureBackgroundVolume,
@@ -71,7 +78,12 @@ import {
   requireBackgroundVolume
 } from './background-volume.js'
 import { readDeadLetterCount, reportDeadLetters } from './dead-letters.js'
-import { reportEventingWatchSetup, watchEventing } from './eventing.js'
+import {
+  readEventingStart,
+  reportEventCounts,
+  reportEventingWatchSetup,
+  watchEventing
+} from './eventing.js'
 import {
   addressBookSession,
   dashboardOnlySession,
@@ -82,6 +94,7 @@ import { notificationJourney } from './journeys.js'
 import { LIVE_ANIMALS_STEPS } from './live-animals.js'
 import { usePhaseSchedule } from './phase.js'
 import { waitForReadiness } from './readiness.js'
+import { watchReferenceData } from './reference-data.js'
 import { returningVisit } from './returning-session.js'
 import { reportStubHeadroom } from './stub-ceilings.js'
 import {
@@ -156,6 +169,12 @@ const thresholdsFor = ({ shape, run }) => ({
         scenarioSet: run.scenarioSet,
         phases: REPORTED_PHASES[shape]
       })),
+  ...(shape === SHAPES.COMBINED
+    ? combinedReportThresholds({
+        scenarioSet: run.scenarioSet,
+        phases: REPORTED_PHASES[shape]
+      })
+    : {}),
   ...designTargetThresholds({ shape, scenarioSet: run.scenarioSet }),
   ...(shape === SHAPES.ENDURANCE ? reauthenticationReportThresholds() : {}),
   ...documentScanThresholds('live-animals'),
@@ -170,8 +189,8 @@ const thresholdsFor = ({ shape, run }) => ({
  * Builds a design-target run: the options, set-up, tear-down, summary and exec
  * functions a suite file re-exports.
  *
- * The shape (sustained peak, P99 burst, average load, spike and recovery or
- * endurance) and the run length come from configuration, so
+ * The shape (sustained peak, P99 burst, average load, spike and recovery,
+ * endurance or combined) and the run length come from configuration, so
  * a suite is the import and the re-exports only.
  * Run it at k6's init stage: it reads the environment and resolves the model.
  *
@@ -213,6 +232,14 @@ export const createDesignTargetRun = ({ shape, env }) => {
       }),
       ...(watchesEventing(shape)
         ? { 'eventing-watch': eventingWatchScenario({ schedule }) }
+        : {}),
+      ...(watchesReferenceData(shape)
+        ? {
+            [REFERENCE_DATA_WATCH_SCENARIO]: referenceDataWatchScenario({
+              model,
+              schedule
+            })
+          }
         : {})
     },
     thresholds: thresholdsFor({ shape, run }),
@@ -229,6 +256,10 @@ export const createDesignTargetRun = ({ shape, env }) => {
 
   const logRunSettings = () => {
     console.log(runLine(settings))
+
+    if (shape === SHAPES.COMBINED) {
+      console.log(combinedProfileLine({ model, scenarioSet: run.scenarioSet }))
+    }
 
     if (shape === SHAPES.AVERAGE_LOAD) {
       console.log(averageLoadProfileLine(model))
@@ -298,11 +329,18 @@ export const createDesignTargetRun = ({ shape, env }) => {
       requireBackgroundVolume(volume, model.backgroundVolume)
     }
 
+    if (shape === SHAPES.COMBINED) {
+      console.log(readModelLine({ volume }))
+    }
+
     return {
       addressName: PERF_ADDRESS.name,
       stubLoadSince,
       deadLettersAtStart: watchesDeadLetters(shape)
         ? readDeadLetterCount({ urls })
+        : null,
+      eventingStart: confirmsArrivals(shape)
+        ? readEventingStart({ urls })
         : null
     }
   }
@@ -325,6 +363,10 @@ export const createDesignTargetRun = ({ shape, env }) => {
           before: data.deadLettersAtStart,
           after: readDeadLetterCount({ urls })
         })
+      }
+
+      if (data.eventingStart !== null) {
+        reportEventCounts({ urls, start: data.eventingStart })
       }
     }
   }
@@ -350,7 +392,9 @@ export const createDesignTargetRun = ({ shape, env }) => {
     staleRedirects,
     addressName: data.addressName,
     vu: exec.vu.idInTest,
-    iterationInTest: exec.scenario.iterationInTest
+    iterationInTest: exec.scenario.iterationInTest,
+    confirmsEventArrival: confirmsArrivals(shape),
+    insBackendUrl: urls.insBackend
   })
 
   const scheduled = (name, work) => (data) => {
@@ -434,6 +478,7 @@ export const createDesignTargetRun = ({ shape, env }) => {
         urls,
         window: eventingWindow({ shape, schedule })
       }),
+    referenceDataWatch: () => watchReferenceData({ urls }),
     returningIns: returning('returning-ins'),
     returningAnimals: returning('returning-animals'),
     returningPlants: returning('returning-plants')

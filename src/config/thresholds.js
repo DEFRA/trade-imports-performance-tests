@@ -1,11 +1,14 @@
 import {
+  ISOLATION_PAIRS,
   PHASES,
+  REFERENCE_DATA_WATCH_SCENARIO,
   RETURNING_SCENARIOS,
   SHAPES,
   journeyScenariosIn
 } from './design-target.js'
 import { kindOf } from './endpoints.js'
 import { SCHEMA_VERSIONS, publishesEvents } from './eventing.js'
+import { CACHE_CLASSES, REFERENCE_DATA_READS } from './reference-data.js'
 import { RE_AUTHENTICATION_TAG, TRAFFIC_CLASSES } from './request-mix.js'
 import { JOURNEYS } from './smoke.js'
 import { HEADROOM_MEASURES } from './stub-ceilings.js'
@@ -348,7 +351,11 @@ const NEVER_FAILING_LIMITS = Object.freeze({
   event_arrival_seconds: ['p(95)>=0'],
   eventing_backlog_drained: ['rate>=0'],
   service_bus_forwarded_messages: ['count>=0'],
-  service_bus_forwarded: ['value>=0']
+  service_bus_forwarded: ['value>=0'],
+  read_model_reads: ['count>=0'],
+  reference_data_duration: ['p(95)>=0'],
+  reference_data_failed_reads: ['count>=0'],
+  reference_data_first_read: ['value>=0']
 })
 
 const metricNameOf = (key) => key.split('{')[0]
@@ -556,6 +563,60 @@ const enduranceScenarioThresholds = (scenario, endpoints) => ({
     : {})
 })
 
+const combinedScenarioThresholds = (scenario, endpoints) => ({
+  ...Object.fromEntries(
+    endpoints.map((endpoint) => [
+      subMetricKey('http_req_duration', {
+        scenario,
+        endpoint,
+        phase: PHASES.COMBINED
+      }),
+      durationLimits(kindOf(endpoint))
+    ])
+  ),
+  ...endOfRunHealthThresholds(scenario)
+})
+
+const isolationThresholds = ({ scenarioSet }) =>
+  Object.assign(
+    {},
+    ...ISOLATION_PAIRS.flatMap(({ other, phases }) =>
+      phases.map((phase) => ({
+        ...Object.fromEntries(
+          scenarioSet[other].endpoints.map((endpoint) => [
+            subMetricKey('http_req_duration', {
+              scenario: other,
+              endpoint,
+              phase
+            }),
+            durationLimits(kindOf(endpoint))
+          ])
+        ),
+        [subMetricKey('http_req_failed', { scenario: other, phase })]: [
+          `rate<${INTERIM_TARGETS.maxFailureRate}`
+        ]
+      }))
+    )
+  )
+
+const referenceDataThresholds = () => ({
+  ...Object.fromEntries(
+    REFERENCE_DATA_READS.filter(({ forcedMiss }) => !forcedMiss).map(
+      ({ endpoint }) => [
+        subMetricKey('reference_data_duration', { endpoint, cache: 'warm' }),
+        durationLimits('api')
+      ]
+    )
+  ),
+  [subMetricKey('checks', { scenario: REFERENCE_DATA_WATCH_SCENARIO })]: [
+    `rate>${INTERIM_TARGETS.minCheckPassRate}`
+  ],
+  [subMetricKey('http_req_failed', {
+    scenario: REFERENCE_DATA_WATCH_SCENARIO
+  })]: [`rate<${INTERIM_TARGETS.maxFailureRate}`],
+  reference_data_failed_reads: ['count<1']
+})
+
 const mergedPerScenario = (scenarioSet, thresholdsFor) =>
   Object.assign(
     {},
@@ -578,6 +639,13 @@ const THRESHOLDS_BY_SHAPE = {
   [SHAPES.ENDURANCE]: (scenarioSet) => ({
     ...mergedPerScenario(scenarioSet, enduranceScenarioThresholds),
     ...deadLetterThresholds()
+  }),
+  [SHAPES.COMBINED]: (scenarioSet) => ({
+    ...mergedPerScenario(scenarioSet, combinedScenarioThresholds),
+    ...isolationThresholds({ scenarioSet }),
+    ...eventArrivalThresholds(scenarioSet),
+    ...deadLetterThresholds(),
+    ...referenceDataThresholds()
   })
 }
 
@@ -601,7 +669,11 @@ const burstThresholds = (scenarioSet) =>
  * because recovery is the rule. The endurance run judges what the average-load
  * run does over its whole length, plus no transport error in any scenario, at
  * least one re-authentication from each returning user and no dead-letter
- * growth.
+ * growth. The combined run judges each scenario's response times in the
+ * combined phase and its whole-run health at the end, never aborting; each
+ * journey's response times and failures while the other spikes and the minute
+ * after; the arrival of every live-animals event at the read model; no
+ * dead-letter growth; and warm reference-data reads at the interim API limits.
  *
  * @param {object} options - The run.
  * @param {string} options.shape - A value of `SHAPES`.
@@ -707,3 +779,39 @@ export const reauthenticationReportThresholds = () => ({
   })]: ['count>=0'],
   transport_errors: ['count>=0']
 })
+
+/**
+ * Builds the reporting-only thresholds that put the combined run's extra
+ * figures in the summary data `handleSummary` reads: the dashboard read
+ * model's reads, each scenario's failed requests in each reported phase, and
+ * reference-data's cold and warm response times and first reads.
+ *
+ * These can never fail. k6 keeps a sub-metric's figures only when a threshold
+ * names it. Put them before the gating thresholds, so a key that gates keeps
+ * its limit.
+ *
+ * @param {object} options - The run.
+ * @param {Record<string, { endpoints: string[] }>} options.scenarioSet - Scenarios shaped like `SCENARIOS`.
+ * @param {string[]} options.phases - The phases the run reports.
+ * @returns {Record<string, string[]>} k6 thresholds.
+ */
+export const combinedReportThresholds = ({ scenarioSet, phases }) =>
+  asReportingOnly(
+    Object.fromEntries(
+      [
+        ...phases.flatMap((phase) => [
+          subMetricKey('read_model_reads', { phase }),
+          ...Object.keys(scenarioSet).map((scenario) =>
+            subMetricKey('http_req_failed', { scenario, phase })
+          )
+        ]),
+        ...REFERENCE_DATA_READS.flatMap(({ endpoint }) => [
+          ...CACHE_CLASSES.map((cache) =>
+            subMetricKey('reference_data_duration', { endpoint, cache })
+          ),
+          subMetricKey('reference_data_first_read', { endpoint }),
+          subMetricKey('reference_data_failed_reads', { endpoint })
+        ])
+      ].map((key) => [key, null])
+    )
+  )

@@ -116,6 +116,13 @@ const BACKEND_APIS = [
   'plants-backend-replace'
 ]
 
+export const REFERENCE_DATA_APIS = Object.freeze([
+  'reference-data-countries-sps',
+  'reference-data-countries',
+  'reference-data-ports-of-entry',
+  'reference-data-countries-uncached'
+])
+
 const STUB_CALLS = [
   'stub-trade-token',
   'stub-mdm-countries',
@@ -138,18 +145,22 @@ export const ENDPOINTS = Object.freeze(
     ...ofKind(PAGE, ANIMALS_PAGES),
     ...ofKind(UPLOAD, ANIMALS_UPLOADS),
     ...ofKind(PAGE, PLANTS_PAGES),
-    ...ofKind(API, BACKEND_APIS)
+    ...ofKind(API, BACKEND_APIS),
+    ...ofKind(API, REFERENCE_DATA_APIS)
   ])
 )
 
+// The INS dashboard reads the dashboard read model (ins-backend GET /notifications) once a view; the journeys' dashboards read their own backends.
+export const READ_MODEL_ENDPOINTS = Object.freeze(['ins-dashboard'])
+
 /**
- * Looks up whether an endpoint is a frontend page or a backend API call.
+ * Looks up the kind of an endpoint: one of the `ENDPOINT_KINDS` values.
  *
  * Throws for a name outside the catalogue, so a typo cannot leave a request
  * without a threshold.
  *
  * @param {string} endpoint - An endpoint name from `ENDPOINTS`.
- * @returns {string} `page` or `api`.
+ * @returns {string} The endpoint's `ENDPOINT_KINDS` value: `page`, `api`, `upload` or `stub`.
  */
 export const kindOf = (endpoint) => {
   const kind = ENDPOINTS[endpoint]

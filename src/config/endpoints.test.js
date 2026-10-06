@@ -1,6 +1,26 @@
 import { describe, expect, test } from 'vitest'
 
-import { ENDPOINT_KINDS, ENDPOINTS, kindOf } from './endpoints.js'
+import {
+  ENDPOINT_KINDS,
+  ENDPOINTS,
+  READ_MODEL_ENDPOINTS,
+  REFERENCE_DATA_APIS,
+  kindOf
+} from './endpoints.js'
+
+describe('reference-data and read-model endpoints', () => {
+  test.each(REFERENCE_DATA_APIS)('%s is an api call', (endpoint) => {
+    expect(kindOf(endpoint)).toBe('api')
+  })
+
+  test('freezes the reference-data endpoint list', () => {
+    expect(Object.isFrozen(REFERENCE_DATA_APIS)).toBe(true)
+  })
+
+  test('counts the INS dashboard as the read model read', () => {
+    expect(READ_MODEL_ENDPOINTS).toEqual(['ins-dashboard'])
+  })
+})
 
 describe('ENDPOINTS', () => {
   test.each(Object.entries(ENDPOINTS))(
