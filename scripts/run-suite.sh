@@ -12,6 +12,7 @@ touch "$sampling_flag_file"
 sh "$script_dir/sample-generator.sh" "$REPORTS_DIR/generator-samples.txt" "$sampling_flag_file" &
 sampler_pid=$!
 
+run_started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 env K6_WEB_DASHBOARD=true \
   K6_WEB_DASHBOARD_EXPORT="$REPORTS_DIR/index.html" \
   K6_WEB_DASHBOARD_PERIOD="${K6_WEB_DASHBOARD_PERIOD:-1s}" \
@@ -21,6 +22,7 @@ env K6_WEB_DASHBOARD=true \
   --out json="$REPORTS_DIR/timeseries.json.gz" \
   "$1"
 k6_exit_code=$?
+run_ended_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 rm -f "$sampling_flag_file"
 wait "$sampler_pid"
@@ -42,6 +44,10 @@ run_generator_verdict() {
 
 if ! run_generator_verdict; then
   echo "Generator trust: not judged: the generator verdict run failed"
+fi
+
+if ! REPORTS_DIR="$REPORTS_DIR" sh "$script_dir/external-call-report.sh" "$run_started_at" "$run_ended_at"; then
+  echo "External calls: not reported: the external call report failed"
 fi
 
 if [ "$k6_exit_code" -eq 0 ] && [ -f "$REPORTS_DIR/relative-thresholds-failed.txt" ]; then
