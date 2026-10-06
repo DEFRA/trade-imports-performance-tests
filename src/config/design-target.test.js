@@ -26,8 +26,13 @@ import {
   spikeCapacities,
   spikeFactors,
   spikeProfileLine,
-  watchesDeadLetters
+  eventingWatchScenario,
+  eventingWatchSeconds,
+  eventingWindow,
+  watchesDeadLetters,
+  watchesEventing
 } from './design-target.js'
+import { DRAIN_WATCH_SECONDS } from './eventing.js'
 import { SCENARIOS } from './smoke.js'
 import {
   durationSeconds,
@@ -875,6 +880,81 @@ describe('run lines for spike and endurance', () => {
   test('names a local endurance run with the browser forgetting sessions', () => {
     expect(lineFor('endurance', 'local', 'local')).toContain(
       'first and final hour 3m each, the browser forgets each session after 3m)'
+    )
+  })
+})
+
+describe('watchesEventing', () => {
+  test.each([
+    [SHAPES.P99_BURST, true],
+    [SHAPES.SPIKE_RECOVERY, true],
+    [SHAPES.SUSTAINED_PEAK, false],
+    [SHAPES.AVERAGE_LOAD, false],
+    [SHAPES.ENDURANCE, false]
+  ])('%s is %s', (shape, expected) => {
+    expect(watchesEventing(shape)).toBe(expected)
+  })
+})
+
+describe('eventingWindow', () => {
+  test('is the burst phase of the burst run at local length', () => {
+    expect(
+      eventingWindow({
+        shape: SHAPES.P99_BURST,
+        schedule: scheduleFor(SHAPES.P99_BURST, 'local')
+      })
+    ).toEqual({ phase: 'burst', startSeconds: 480, endSeconds: 540 })
+  })
+
+  test('is the spike phase of the spike run at local length', () => {
+    expect(
+      eventingWindow({
+        shape: SHAPES.SPIKE_RECOVERY,
+        schedule: scheduleFor(SHAPES.SPIKE_RECOVERY, 'local')
+      })
+    ).toEqual({ phase: 'spike', startSeconds: 360, endSeconds: 370 })
+  })
+})
+
+describe('eventingWatchSeconds', () => {
+  test('is the start of the tail plus the drain watch', () => {
+    const schedule = [
+      { phase: 'burst', startSeconds: 100, endSeconds: 200 },
+      { phase: 'tail', startSeconds: 300, endSeconds: 400 }
+    ]
+
+    expect(eventingWatchSeconds({ schedule })).toBe(300 + DRAIN_WATCH_SECONDS)
+  })
+})
+
+describe('eventingWatchScenario', () => {
+  test.each([
+    [SHAPES.P99_BURST, '720s'],
+    [SHAPES.SPIKE_RECOVERY, '670s']
+  ])(
+    'in the %s run reads once a second until 180s after the tail begins: %s',
+    (shape, duration) => {
+      expect(
+        eventingWatchScenario({ schedule: scheduleFor(shape, 'local') })
+      ).toEqual({
+        executor: 'constant-arrival-rate',
+        rate: 1,
+        timeUnit: '1s',
+        duration,
+        preAllocatedVUs: 1,
+        maxVUs: 1,
+        exec: 'eventingWatch',
+        tags: { watch: 'eventing' }
+      })
+    }
+  )
+
+  test('runs to the end of the drain watch after the tail begins', () => {
+    const schedule = scheduleFor(SHAPES.P99_BURST, 'full')
+    const tail = schedule.find(({ phase }) => phase === 'tail')
+
+    expect(eventingWatchScenario({ schedule }).duration).toBe(
+      `${tail.startSeconds + 180}s`
     )
   })
 })

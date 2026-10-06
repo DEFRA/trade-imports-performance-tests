@@ -1,3 +1,4 @@
+import { DRAIN_WATCH_SECONDS } from './eventing.js'
 import { sharedEndpoints } from './journey-endpoints.js'
 import { JOURNEYS, SCENARIOS } from './smoke.js'
 import {
@@ -899,6 +900,72 @@ export const runLine = ({
  */
 export const watchesDeadLetters = (shape) =>
   shape === SHAPES.SPIKE_RECOVERY || shape === SHAPES.ENDURANCE
+
+const EVENTING_WATCH_PHASES = Object.freeze({
+  [SHAPES.P99_BURST]: PHASES.BURST,
+  [SHAPES.SPIKE_RECOVERY]: PHASES.SPIKE
+})
+
+/**
+ * Tells whether a shape watches the eventing path, the gateway's forwarded count
+ * and the SQS backlog, through its burst or spike.
+ *
+ * @param {string} shape - A value of `SHAPES`.
+ * @returns {boolean} True for the burst and spike shapes.
+ */
+export const watchesEventing = (shape) => shape in EVENTING_WATCH_PHASES
+
+/**
+ * Finds the window the eventing watch judges: the burst or spike phase.
+ *
+ * @param {object} options - The run.
+ * @param {string} options.shape - A value of `SHAPES`.
+ * @param {ReadonlyArray<{ phase: string, startSeconds: number, endSeconds: number | null }>} options.schedule - The run's phase schedule.
+ * @returns {{ phase: string, startSeconds: number, endSeconds: number }} The window on the run's clock. Throws for a shape that does not watch.
+ */
+export const eventingWindow = ({ shape, schedule }) => {
+  const phase = EVENTING_WATCH_PHASES[shape]
+  const { startSeconds, endSeconds } = schedule.find(
+    (entry) => entry.phase === phase
+  )
+
+  return { phase, startSeconds, endSeconds }
+}
+
+/**
+ * Finds how long the eventing watch runs: until the drain watch after the
+ * schedule's tail begins has passed.
+ *
+ * @param {object} options - The run.
+ * @param {ReadonlyArray<{ phase: string, startSeconds: number }>} options.schedule - The run's phase schedule.
+ * @returns {number} The watch's end, in seconds from the start of the run.
+ */
+export const eventingWatchSeconds = ({ schedule }) => {
+  const tail = schedule.find(({ phase }) => phase === PHASES.TAIL)
+
+  return tail.startSeconds + DRAIN_WATCH_SECONDS
+}
+
+/**
+ * Builds the scenario that reads the eventing path once a second: one virtual
+ * user, so one owner of the watch state, and an overrun drops a sample instead
+ * of splitting that state. It runs until the drain watch after the schedule's
+ * tail begins has passed.
+ *
+ * @param {object} options - The run.
+ * @param {ReadonlyArray<{ phase: string, startSeconds: number }>} options.schedule - The run's phase schedule.
+ * @returns {object} A k6 scenario.
+ */
+export const eventingWatchScenario = ({ schedule }) => ({
+  executor: 'constant-arrival-rate',
+  rate: 1,
+  timeUnit: '1s',
+  duration: `${eventingWatchSeconds({ schedule })}s`,
+  preAllocatedVUs: 1,
+  maxVUs: 1,
+  exec: 'eventingWatch',
+  tags: { watch: 'eventing' }
+})
 
 /**
  * Works out the stated capacity of each component the spike hits, in RPS.

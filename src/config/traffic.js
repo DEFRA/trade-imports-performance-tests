@@ -21,6 +21,11 @@ const GBN_PP_ANNUAL_NOTIFICATIONS = 34_000
 const INTERIM_ADDRESS_BOOK_ENTRIES = 500
 const BACKGROUND_VIRTUAL_USERS = 10
 const BACKGROUND_MAX_DURATION = '24h'
+// Volumetrics §6.4 NFR-VOL-AG-06 / §7.4 NFR-VOL-PP-06: the peak-day volume.
+const NFR_VOL_AG_06_PEAK_DAY_NOTIFICATIONS = 546
+const NFR_VOL_PP_06_PEAK_DAY_NOTIFICATIONS = 442
+// Interim: 12 hours puts both journeys within 4% of their design peak-hour rate.
+const PEAK_DAY_DURATION = '12h'
 
 // DR-EUDP-005 'Scenario shapes' row 1: ramp over 3 hours, hold over the 7-hour 09:00 to 16:00 window.
 const T1_RAMP_DURATION = '3h'
@@ -181,6 +186,11 @@ export const TRAFFIC_DEFAULTS = freezeDeep({
     maxCreatedPerRun: GBN_AG_ANNUAL_NOTIFICATIONS,
     virtualUsers: BACKGROUND_VIRTUAL_USERS,
     maxDuration: BACKGROUND_MAX_DURATION
+  },
+  peakDay: {
+    liveAnimalsNotifications: NFR_VOL_AG_06_PEAK_DAY_NOTIFICATIONS,
+    highRiskPlantsNotifications: NFR_VOL_PP_06_PEAK_DAY_NOTIFICATIONS,
+    duration: PEAK_DAY_DURATION
   },
   duration: DEFAULT_DURATION
 })

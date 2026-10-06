@@ -13,6 +13,7 @@ const amendmentPages = new Counter('amendment_pages')
 const pagesPerNotification = new Trend('pages_per_notification')
 const sessionSeconds = new Trend('session_seconds')
 const notificationsStarted = new Counter('notifications_started')
+const notificationsSubmitted = new Counter('notifications_submitted')
 
 const pathOf = (url) => url.replace(/^https?:\/\/[^/?#]+/, '').split(/[?#]/)[0]
 
@@ -57,6 +58,17 @@ export const recordNotificationPages = (count) =>
 export const recordNotificationStarted = (notificationType) => {
   markPhase()
   notificationsStarted.add(1, { notification_type: notificationType })
+}
+
+/**
+ * Counts a notification submitted, split by whether it is the first submission
+ * or the resubmission of an amendment.
+ *
+ * @param {string} submission - `first` or `amendment`.
+ */
+export const recordSubmission = (submission) => {
+  markPhase()
+  notificationsSubmitted.add(1, { submission })
 }
 
 /**

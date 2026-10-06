@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest'
 
 import { DATASTORES } from './background-volume.js'
 import { HOUR_PHASES } from './design-target.js'
+import { SCHEMA_VERSIONS } from './eventing.js'
 import { STUBBED_INTEGRATIONS } from './stub-profiles.js'
 import {
   INTERIM_TARGETS,
@@ -11,11 +12,15 @@ import {
   designTargetReportThresholds,
   designTargetThresholds,
   documentScanThresholds,
+  eventArrivalThresholds,
+  eventingReportThresholds,
   hourlyReportThresholds,
   notificationSplitThresholds,
+  peakDayThresholds,
   reauthenticationReportThresholds,
   runEnvironmentReportThresholds,
   scenarioThresholds,
+  serviceBusThresholds,
   signInTargetThresholds,
   smokeThresholds,
   stubCeilingStepThresholds,
@@ -528,8 +533,8 @@ describe('hourlyReportThresholds', () => {
     phases: HOUR_PHASES
   })
 
-  test('holds the ten keys of each hour', () => {
-    expect(Object.keys(set)).toHaveLength(240)
+  test('holds the eleven keys of each hour', () => {
+    expect(Object.keys(set)).toHaveLength(264)
   })
 
   test('holds each hour for each journey and for the front door', () => {
@@ -726,5 +731,131 @@ describe('INTERIM_TARGETS for spike and endurance', () => {
       p95FactorOverFirstHour: 1.2,
       minSamples: 10
     })
+  })
+})
+
+describe('eventArrivalThresholds', () => {
+  test('requires every live-animals notification to arrive, and names no other journey', () => {
+    expect(
+      eventArrivalThresholds({
+        'ins-front-door': {},
+        'live-animals': {},
+        'high-risk-plants': {}
+      })
+    ).toEqual({ 'event_arrivals{scenario:live-animals}': ['rate==1'] })
+  })
+
+  test('has no threshold for a set with no publishing journey', () => {
+    expect(eventArrivalThresholds({ 'high-risk-plants': {} })).toEqual({})
+  })
+})
+
+describe('serviceBusThresholds', () => {
+  test('gates the v0.1.0 count at one or more in local, and reports v0.2.0', () => {
+    expect(serviceBusThresholds('local')).toEqual({
+      'service_bus_forwarded{schema_version:0.1.0}': ['value>=1'],
+      'service_bus_forwarded{schema_version:0.2.0}': ['value>=0']
+    })
+  })
+
+  test('only reports both counts outside local', () => {
+    expect(serviceBusThresholds('test')).toEqual({
+      'service_bus_forwarded{schema_version:0.1.0}': ['value>=0'],
+      'service_bus_forwarded{schema_version:0.2.0}': ['value>=0']
+    })
+  })
+})
+
+describe('eventingReportThresholds', () => {
+  const set = eventingReportThresholds()
+
+  test('names the submissions of both journeys, both kinds', () => {
+    for (const scenario of ['live-animals', 'high-risk-plants']) {
+      for (const submission of ['first', 'amendment']) {
+        expect(
+          set[
+            `notifications_submitted{scenario:${scenario},submission:${submission}}`
+          ]
+        ).toEqual(['count>=0'])
+      }
+    }
+  })
+
+  test('names events published and arrival times for live animals alone', () => {
+    expect(set['external_events_published{scenario:live-animals}']).toEqual([
+      'count>=0'
+    ])
+    expect(set['event_arrival_seconds{scenario:live-animals}']).toEqual([
+      'p(95)>=0'
+    ])
+    expect(
+      Object.keys(set).filter((key) => key.includes('high-risk-plants'))
+    ).toEqual([
+      'notifications_submitted{scenario:high-risk-plants,submission:first}',
+      'notifications_submitted{scenario:high-risk-plants,submission:amendment}'
+    ])
+  })
+
+  test('names the watch gauges and the outbound counter', () => {
+    expect(set.eventing_backlog_depth).toEqual(['value>=0'])
+    expect(set.eventing_backlog_pre_burst_depth).toEqual(['value>=0'])
+    expect(set.eventing_backlog_peak_depth).toEqual(['value>=0'])
+    expect(set.eventing_backlog_drain_seconds).toEqual(['value>=0'])
+    expect(set.eventing_backlog_drained).toEqual(['rate>=0'])
+    expect(set.service_bus_peak_per_second).toEqual(['value>=0'])
+    expect(set.service_bus_forwarded_messages).toEqual(['count>=0'])
+  })
+
+  test('keeps the forwarded count of every schema version', () => {
+    for (const version of SCHEMA_VERSIONS) {
+      expect(Object.keys(set)).toContain(
+        subMetricKey('service_bus_forwarded', { schema_version: version })
+      )
+    }
+  })
+
+  test('leaves the smoke gate on the first version when the gate is spread after it', () => {
+    const smoke = {
+      ...eventingReportThresholds(),
+      ...serviceBusThresholds('local')
+    }
+
+    expect(
+      smoke[
+        subMetricKey('service_bus_forwarded', {
+          schema_version: SCHEMA_VERSIONS[0]
+        })
+      ]
+    ).toEqual(['value>=1'])
+  })
+
+  test('can never fail: every limit is always true', () => {
+    for (const limits of Object.values(set)) {
+      expect(limits).toHaveLength(1)
+      expect(limits[0].endsWith('>=0')).toBe(true)
+    }
+  })
+})
+
+describe('peakDayThresholds', () => {
+  const set = peakDayThresholds({ 'live-animals': {}, 'high-risk-plants': {} })
+
+  test('judges each journey at the end of the run, with no abort', () => {
+    for (const scenario of ['live-animals', 'high-risk-plants']) {
+      expect(set[`http_req_failed{scenario:${scenario}}`]).toEqual([
+        'rate<0.01'
+      ])
+      expect(set[`checks{scenario:${scenario}}`]).toEqual(['rate>0.99'])
+      expect(set[`dropped_iterations{scenario:${scenario}}`]).toEqual([
+        'count<1'
+      ])
+    }
+  })
+
+  test('gates only live animals on arrival', () => {
+    expect(set['event_arrivals{scenario:live-animals}']).toEqual(['rate==1'])
+    expect(
+      Object.keys(set).filter((key) => key.startsWith('event_arrivals'))
+    ).toEqual(['event_arrivals{scenario:live-animals}'])
   })
 })

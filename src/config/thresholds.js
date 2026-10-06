@@ -5,7 +5,9 @@ import {
   journeyScenariosIn
 } from './design-target.js'
 import { kindOf } from './endpoints.js'
+import { SCHEMA_VERSIONS, publishesEvents } from './eventing.js'
 import { RE_AUTHENTICATION_TAG, TRAFFIC_CLASSES } from './request-mix.js'
+import { JOURNEYS } from './smoke.js'
 import { HEADROOM_MEASURES } from './stub-ceilings.js'
 import { FLAGS, PROFILES, QUANTILES } from './stub-profiles.js'
 
@@ -42,6 +44,7 @@ export const INTERIM_TARGETS = Object.freeze({
 })
 
 const MAX_DROPPED_ITERATIONS = 1
+const SUBMISSION_KINDS = Object.freeze(['first', 'amendment'])
 
 const ABORT = Object.freeze({ abortOnFail: true, delayAbortEval: '30s' })
 
@@ -338,7 +341,14 @@ const NEVER_FAILING_LIMITS = Object.freeze({
   notifications_started: ['count>=0'],
   transport_errors: ['count>=0'],
   reauthentications: ['count>=0'],
-  downstream_dead_letters: ['value>=0']
+  downstream_dead_letters: ['value>=0'],
+  notifications_submitted: ['count>=0'],
+  external_events_published: ['count>=0'],
+  event_arrivals: ['rate>=0'],
+  event_arrival_seconds: ['p(95)>=0'],
+  eventing_backlog_drained: ['rate>=0'],
+  service_bus_forwarded_messages: ['count>=0'],
+  service_bus_forwarded: ['value>=0']
 })
 
 const metricNameOf = (key) => key.split('{')[0]
@@ -369,6 +379,112 @@ const endOfRunHealthThresholds = (scenario) => ({
     `count<${MAX_DROPPED_ITERATIONS}`
   ]
 })
+
+const publishingScenarios = (scenarios) =>
+  Object.keys(scenarios).filter(
+    (scenario) => scenario in JOURNEYS && publishesEvents(JOURNEYS[scenario])
+  )
+
+/**
+ * Builds the threshold that every submitted notification's events reach the
+ * dashboard read model: each publishing journey's arrival rate must be 1.
+ *
+ * "Every" is the volumetrics figure (§9.7 row 4). A journey that publishes no
+ * events has no threshold, so zero against zero is never a pass.
+ *
+ * @param {Record<string, unknown>} scenarios - Scenarios keyed by name.
+ * @returns {Record<string, string[]>} k6 thresholds.
+ */
+export const eventArrivalThresholds = (scenarios) =>
+  Object.fromEntries(
+    publishingScenarios(scenarios).map((scenario) => [
+      subMetricKey('event_arrivals', { scenario }),
+      ['rate==1']
+    ])
+  )
+
+const SERVICE_BUS_GATED_VERSION = SCHEMA_VERSIONS[0]
+
+/**
+ * Builds the thresholds on the Service Bus stand-in's forwarded counts.
+ *
+ * Only the v0.1.0 count gates, and only in `local`, where one gateway holds
+ * every count: at least one message must have been forwarded, which proves the
+ * gateway's counter is live. Elsewhere the counts are reported, because they are
+ * read from one gateway instance. The v0.2.0 count is always reported.
+ *
+ * @param {string} environment - The environment the run targets.
+ * @returns {Record<string, string[]>} k6 thresholds.
+ */
+export const serviceBusThresholds = (environment) =>
+  Object.fromEntries(
+    SCHEMA_VERSIONS.map((version) => [
+      subMetricKey('service_bus_forwarded', { schema_version: version }),
+      version === SERVICE_BUS_GATED_VERSION && environment === 'local'
+        ? ['value>=1']
+        : ['value>=0']
+    ])
+  )
+
+const submissionKeys = () =>
+  Object.keys(JOURNEYS).flatMap((scenario) =>
+    SUBMISSION_KINDS.map((submission) =>
+      subMetricKey('notifications_submitted', { scenario, submission })
+    )
+  )
+
+const publishingJourneyKeys = () =>
+  publishingScenarios(JOURNEYS).flatMap((scenario) => [
+    subMetricKey('external_events_published', { scenario }),
+    subMetricKey('event_arrival_seconds', { scenario })
+  ])
+
+/**
+ * Builds the reporting-only thresholds that put the eventing path's figures in
+ * the summary data `handleSummary` reads: submissions, events published, arrival
+ * times, the burst and spike watch's gauges, and the per-version Service Bus
+ * forwarded counts.
+ *
+ * These can never fail. k6 keeps a sub-metric's figures only when a threshold
+ * names it. Smoothing and drain time have no volumetrics figure, so they are
+ * reported, never gated.
+ *
+ * @returns {Record<string, string[]>} k6 thresholds.
+ */
+export const eventingReportThresholds = () =>
+  asReportingOnly(
+    Object.fromEntries(
+      [
+        ...submissionKeys(),
+        ...publishingJourneyKeys(),
+        'eventing_backlog_depth',
+        'eventing_backlog_pre_burst_depth',
+        'eventing_backlog_peak_depth',
+        'eventing_backlog_drain_seconds',
+        'eventing_backlog_drained',
+        'service_bus_peak_per_second',
+        'service_bus_forwarded_messages',
+        ...SCHEMA_VERSIONS.map((version) =>
+          subMetricKey('service_bus_forwarded', { schema_version: version })
+        )
+      ].map((key) => [key, null])
+    )
+  )
+
+/**
+ * Builds the thresholds of the peak-day run: each journey's failed requests,
+ * checks and dropped iterations at the end of the run, and the arrival of every
+ * publishing journey's events.
+ *
+ * @param {Record<string, unknown>} scenarios - Scenarios keyed by name.
+ * @returns {Record<string, string[]>} k6 thresholds.
+ */
+export const peakDayThresholds = (scenarios) =>
+  Object.assign(
+    {},
+    ...Object.keys(scenarios).map(endOfRunHealthThresholds),
+    eventArrivalThresholds(scenarios)
+  )
 
 const burstScenarioThresholds = (scenario, endpoints) => ({
   [subMetricKey('server_errors', { scenario, phase: PHASES.BURST })]: [
@@ -512,6 +628,7 @@ const runReportKeys = (phase) => [
     subMetricKey('page_requests', { frontend, phase })
   ),
   subMetricKey('page_requests', { traffic_class: 'sign-in', phase }),
+  subMetricKey('notifications_submitted', { phase }),
   subMetricKey('session_seconds', { phase }),
   subMetricKey('dashboard_read_share', { phase })
 ]
