@@ -1,4 +1,4 @@
-import { DRAIN_WATCH_SECONDS } from './eventing.js'
+import { ARRIVAL_TIMEOUT_SECONDS, DRAIN_WATCH_SECONDS } from './eventing.js'
 import { sharedEndpoints } from './journey-endpoints.js'
 import { JOURNEYS, SCENARIOS } from './smoke.js'
 import {
@@ -8,6 +8,7 @@ import {
 } from './stub-profiles.js'
 import {
   HOURS_PER_DAY,
+  MAX_VUS_FACTOR,
   SECONDS_PER_HOUR,
   TRAFFIC_DEFAULTS,
   durationSeconds,
@@ -27,7 +28,8 @@ export const SHAPES = Object.freeze({
   P99_BURST: 'p99-burst',
   AVERAGE_LOAD: 'average-load',
   SPIKE_RECOVERY: 'spike-recovery',
-  ENDURANCE: 'endurance'
+  ENDURANCE: 'endurance',
+  COMBINED: 'combined'
 })
 
 // k6 rates are whole numbers: counted per day, a quiet hour's rate stays within a few per cent of its target, where per hour it would round to 1.
@@ -137,8 +139,47 @@ export const PHASES = Object.freeze({
   FIRST_HOUR: 'first-hour',
   MIDDLE: 'middle',
   FINAL_HOUR: 'final-hour',
+  ANIMALS_ALONE: 'animals-alone',
+  PLANTS_WARM_UP: 'plants-warm-up',
+  COMBINED: 'combined',
+  SETTLE_AFTER_BURST: 'settle-after-burst',
+  ANIMALS_SPIKE: 'animals-spike',
+  ANIMALS_SPIKE_RECOVERY: 'animals-spike-recovery',
+  SETTLE_AFTER_ANIMALS_SPIKE: 'settle-after-animals-spike',
+  PLANTS_SPIKE: 'plants-spike',
+  PLANTS_SPIKE_RECOVERY: 'plants-spike-recovery',
+  SETTLE_AFTER_PLANTS_SPIKE: 'settle-after-plants-spike',
+  SESSION_SPIKE: 'session-spike',
+  SESSION_SPIKE_RECOVERY: 'session-spike-recovery',
+  ANIMALS_DRAIN: 'animals-drain',
+  PLANTS_ALONE: 'plants-alone',
   TAIL: 'tail'
 })
+
+/** The phase each journey runs alone in the combined run. */
+export const ALONE_PHASES = Object.freeze({
+  'live-animals': PHASES.ANIMALS_ALONE,
+  'high-risk-plants': PHASES.PLANTS_ALONE
+})
+
+/** The combined run's isolation checks: the journey that spikes, the other journey that is judged, and the phases it is judged over. */
+export const ISOLATION_PAIRS = Object.freeze(
+  [
+    {
+      spiking: 'live-animals',
+      other: 'high-risk-plants',
+      phases: Object.freeze([
+        PHASES.ANIMALS_SPIKE,
+        PHASES.ANIMALS_SPIKE_RECOVERY
+      ])
+    },
+    {
+      spiking: 'high-risk-plants',
+      other: 'live-animals',
+      phases: Object.freeze([PHASES.PLANTS_SPIKE, PHASES.PLANTS_SPIKE_RECOVERY])
+    }
+  ].map(Object.freeze)
+)
 
 export const SCENARIO_LENGTHS = Object.freeze({
   FULL: 'full',
@@ -158,7 +199,8 @@ export const SCENARIO_LENGTHS = Object.freeze({
  * 2m and 1m at `local`. The endurance run holds 12m at `local`, in 3m
  * windows, and its returning users clear their cookies after 3m, standing in
  * for the frontends' 4-hour session expiry that a compressed run cannot reach;
- * `nightly` leaves both as the DR's figures.
+ * `nightly` leaves both as the DR's figures. The combined run's alone, combined
+ * and settle windows shorten to 3m, 3m and 1m at `local`.
  */
 export const SCENARIO_LENGTH_PROFILES = freezeDeep({
   full: {},
@@ -180,6 +222,11 @@ export const SCENARIO_LENGTH_PROFILES = freezeDeep({
       sessionExpiry: 'client',
       sessionLifetime: '3m',
       visitInterval: '20s'
+    },
+    combined: {
+      aloneDuration: '3m',
+      combinedDuration: '3m',
+      settleDuration: '1m'
     }
   }
 })
@@ -335,7 +382,18 @@ export const REPORTED_PHASES = Object.freeze({
     PHASES.RECOVERY,
     PHASES.RECOVERED
   ]),
-  [SHAPES.ENDURANCE]: Object.freeze([PHASES.FIRST_HOUR, PHASES.FINAL_HOUR])
+  [SHAPES.ENDURANCE]: Object.freeze([PHASES.FIRST_HOUR, PHASES.FINAL_HOUR]),
+  [SHAPES.COMBINED]: Object.freeze([
+    PHASES.COMBINED,
+    PHASES.BURST,
+    PHASES.ANIMALS_ALONE,
+    PHASES.PLANTS_ALONE,
+    PHASES.ANIMALS_SPIKE,
+    PHASES.ANIMALS_SPIKE_RECOVERY,
+    PHASES.PLANTS_SPIKE,
+    PHASES.PLANTS_SPIKE_RECOVERY,
+    PHASES.SESSION_SPIKE
+  ])
 })
 
 const longestIterationSeconds = (model, scenarioNames) => {
@@ -482,11 +540,56 @@ const enduranceSchedule = (model, scenarioNames) => {
   )
 }
 
+const FRONT_DOOR_AND_ANIMALS = Object.freeze([
+  'live-animals',
+  'ins-front-door',
+  'ins-address-book'
+])
+
+/**
+ * The lengths, in seconds, of the combined run's phases before the tail.
+ *
+ * @param {object} model - A resolved traffic model.
+ * @returns {Array<[string, number]>} Each phase and its length, in order.
+ */
+const combinedPhaseLengths = (model) => {
+  const seconds = iterationSeconds(model)
+  const { aloneDuration, combinedDuration, settleDuration } = model.combined
+  const { spikeDuration, recoveryDuration } = model.spikeRecovery
+  const settle = durationSeconds(settleDuration)
+  const spike = durationSeconds(spikeDuration)
+  const recovery = durationSeconds(recoveryDuration)
+  const alone = durationSeconds(aloneDuration)
+
+  return [
+    [PHASES.WARM_UP, longestIterationSeconds(model, FRONT_DOOR_AND_ANIMALS)],
+    [PHASES.ANIMALS_ALONE, alone],
+    [PHASES.PLANTS_WARM_UP, seconds['high-risk-plants']],
+    [PHASES.COMBINED, durationSeconds(combinedDuration)],
+    [PHASES.BURST, durationSeconds(model.p99Burst.burstDuration)],
+    [PHASES.SETTLE_AFTER_BURST, settle],
+    [PHASES.ANIMALS_SPIKE, spike],
+    [PHASES.ANIMALS_SPIKE_RECOVERY, recovery],
+    [PHASES.SETTLE_AFTER_ANIMALS_SPIKE, settle],
+    [PHASES.PLANTS_SPIKE, spike],
+    [PHASES.PLANTS_SPIKE_RECOVERY, recovery],
+    [PHASES.SETTLE_AFTER_PLANTS_SPIKE, settle],
+    [PHASES.SESSION_SPIKE, spike],
+    [PHASES.SESSION_SPIKE_RECOVERY, recovery],
+    [PHASES.ANIMALS_DRAIN, seconds['live-animals'] + ARRIVAL_TIMEOUT_SECONDS],
+    [PHASES.PLANTS_ALONE, alone]
+  ]
+}
+
+const combinedSchedule = (model) =>
+  withTail(timedPhases(0, combinedPhaseLengths(model)))
+
 const SCHEDULES = {
   [SHAPES.SUSTAINED_PEAK]: sustainedPeakSchedule,
   [SHAPES.AVERAGE_LOAD]: averageLoadSchedule,
   [SHAPES.SPIKE_RECOVERY]: spikeRecoverySchedule,
-  [SHAPES.ENDURANCE]: enduranceSchedule
+  [SHAPES.ENDURANCE]: enduranceSchedule,
+  [SHAPES.COMBINED]: combinedSchedule
 }
 
 const scheduleFor = ({ shape, model, scenarioNames }) =>
@@ -501,7 +604,10 @@ const scheduleFor = ({ shape, model, scenarioNames }) =>
  * phase's pace is set per scenario by `scenarioSchedules`. The average-load run
  * has one phase for each of its 24 weekday hours, then the tail. The spike run
  * is warm-up, baseline, spike, recovery and recovered; the endurance run is
- * warm-up, first hour, middle and final hour.
+ * warm-up, first hour, middle and final hour. The combined run warms live
+ * animals and the front door up, measures live animals alone, adds high-risk
+ * plants, holds both, bursts, spikes each journey and then all three frontends
+ * in turn, drains live animals and measures high-risk plants alone.
  *
  * @param {object} options - The run.
  * @param {string} options.shape - A value of `SHAPES`.
@@ -536,10 +642,6 @@ const averageLoadScenario = ({ base, model, rate, seconds }) => {
   }
 }
 
-const JOURNEY_FRONTENDS = Object.freeze({
-  'live-animals': 'animals',
-  'high-risk-plants': 'plants'
-})
 const FRONT_DOOR_SCENARIOS = Object.freeze([
   'ins-front-door',
   'ins-address-book'
@@ -548,14 +650,14 @@ const FRONT_DOOR_SCENARIOS = Object.freeze([
 const sumOf = (values) => values.reduce((total, value) => total + value, 0)
 
 const journeyFactor = ({ pages, capacityRps, scenario }) => {
-  const frontend = JOURNEY_FRONTENDS[scenario]
+  const frontend = FRONTEND_OF_SCENARIO[scenario]
 
   return (capacityRps[frontend] * SECONDS_PER_HOUR) / pages[scenario][frontend]
 }
 
 const frontDoorFactor = ({ pages, capacityRps, journeyFactors }) => {
   const journeyPages = sumOf(
-    Object.keys(JOURNEY_FRONTENDS).map(
+    Object.keys(FRONTEND_OF_SCENARIO).map(
       (scenario) => pages[scenario].ins * journeyFactors[scenario]
     )
   )
@@ -582,13 +684,17 @@ const frontDoorFactor = ({ pages, capacityRps, journeyFactors }) => {
  * @param {object} options - The run.
  * @param {object} options.model - A resolved traffic model.
  * @param {Record<string, unknown>} options.scenarioSet - The scenarios that run.
+ * @param {{ ins: number, animals: number, plants: number }} [options.capacityRps] - The capacity each frontend is taken to. Defaults to the model's stated capacities.
  * @returns {Record<string, number>} The pace factor for each scenario in the set that has one.
  */
-export const spikeFactors = ({ model, scenarioSet }) => {
+export const spikeFactors = ({
+  model,
+  scenarioSet,
+  capacityRps = model.spikeRecovery.capacityRps
+}) => {
   const pages = scenarioPagesPerHour(model)
-  const { capacityRps } = model.spikeRecovery
   const journeyFactors = Object.fromEntries(
-    Object.keys(JOURNEY_FRONTENDS).map((scenario) => [
+    Object.keys(FRONTEND_OF_SCENARIO).map((scenario) => [
       scenario,
       journeyFactor({ pages, capacityRps, scenario })
     ])
@@ -607,10 +713,83 @@ export const spikeFactors = ({ model, scenarioSet }) => {
 }
 
 /**
+ * Scales the frontends' stated spike capacities so they add up to the session
+ * path's spike figure.
+ *
+ * Each frontend resolves sessions from its own store, so the stores carry the
+ * session path's spike only when the frontends together serve it. The
+ * capacities keep their proportions.
+ *
+ * @param {object} model - A resolved traffic model.
+ * @returns {{ ins: number, animals: number, plants: number }} Capacities in RPS that sum to `combined.sessionPathSpikeRps`.
+ */
+export const sessionSpikeCapacities = (model) => {
+  const { capacityRps } = model.spikeRecovery
+  const scale =
+    model.combined.sessionPathSpikeRps / sumOf(Object.values(capacityRps))
+
+  return Object.fromEntries(
+    Object.entries(capacityRps).map(([frontend, rps]) => [
+      frontend,
+      rps * scale
+    ])
+  )
+}
+
+/**
+ * Works out the pace factor of each scenario in the combined run's raised phases.
+ *
+ * The burst raises every scenario to `burstFactor`. Each journey's spike
+ * raises that journey alone to its frontend's stated capacity. The session
+ * spike raises every scenario so the frontends together serve the session
+ * path's spike figure.
+ *
+ * @param {object} options - The run.
+ * @param {object} options.model - A resolved traffic model.
+ * @param {Record<string, unknown>} options.scenarioSet - The scenarios that run.
+ * @returns {Record<string, Record<string, number>>} A factor by scenario, for each raised phase.
+ */
+export const combinedPaceFactors = ({ model, scenarioSet }) => {
+  const names = Object.keys(scenarioSet)
+  const stated = spikeFactors({ model, scenarioSet })
+
+  return {
+    [PHASES.BURST]: Object.fromEntries(
+      names.map((name) => [name, model.p99Burst.burstFactor])
+    ),
+    [PHASES.ANIMALS_SPIKE]: { 'live-animals': stated['live-animals'] },
+    [PHASES.PLANTS_SPIKE]: { 'high-risk-plants': stated['high-risk-plants'] },
+    [PHASES.SESSION_SPIKE]: spikeFactors({
+      model,
+      scenarioSet,
+      capacityRps: sessionSpikeCapacities(model)
+    })
+  }
+}
+
+const combinedSchedules = ({ schedule, model, scenarioSet }) => {
+  const factors = combinedPaceFactors({ model, scenarioSet })
+
+  return Object.fromEntries(
+    Object.keys(scenarioSet).map((name) => [
+      name,
+      freezeDeep(
+        schedule.map((entry) => ({
+          ...entry,
+          paceFactor: factors[entry.phase]?.[name] ?? 1
+        }))
+      )
+    ])
+  )
+}
+
+/**
  * Gives each scenario its own phase schedule.
  *
  * In the spike run each scenario's `spike` phase carries its own pace factor
- * from `spikeFactors`; in every other run all scenarios share the schedule.
+ * from `spikeFactors`; in the combined run each scenario carries its own pace
+ * factor in the burst, the two journey spikes and the session spike; in every
+ * other run all scenarios share the schedule.
  *
  * @param {object} options - The run.
  * @param {string} options.shape - A value of `SHAPES`.
@@ -621,6 +800,10 @@ export const spikeFactors = ({ model, scenarioSet }) => {
  */
 export const scenarioSchedules = ({ shape, schedule, model, scenarioSet }) => {
   const names = Object.keys(scenarioSet)
+
+  if (shape === SHAPES.COMBINED) {
+    return combinedSchedules({ schedule, model, scenarioSet })
+  }
 
   if (shape !== SHAPES.SPIKE_RECOVERY) {
     return Object.fromEntries(names.map((name) => [name, schedule]))
@@ -658,6 +841,82 @@ const spikeScenario = ({ base, schedule, rate, factor, seconds }) => {
       { duration: `${spikeSeconds - 1}s`, target: spikeRate },
       { duration: '1s', target: rate },
       { duration: `${afterSeconds}s`, target: rate }
+    ]
+  }
+}
+
+const COMBINED_ABSENT_PHASES = Object.freeze({
+  'live-animals': Object.freeze([PHASES.ANIMALS_DRAIN, PHASES.PLANTS_ALONE]),
+  'high-risk-plants': Object.freeze([PHASES.WARM_UP, PHASES.ANIMALS_ALONE])
+})
+const COMBINED_LAST_PHASES = Object.freeze({
+  'live-animals': PHASES.ANIMALS_DRAIN
+})
+
+const isAbsentFrom = (name, phase) =>
+  COMBINED_ABSENT_PHASES[name]?.includes(phase) ?? false
+
+const phasesThrough = (name, scenarioSchedule) => {
+  const last = COMBINED_LAST_PHASES[name] ?? PHASES.PLANTS_ALONE
+  const lastIndex = scenarioSchedule.findIndex(({ phase }) => phase === last)
+
+  return scenarioSchedule.slice(0, lastIndex + 1)
+}
+
+/**
+ * Sizes a combined-run scenario's virtual users: the users its steady rate
+ * needs, plus those the extra iterations of each raised phase start.
+ *
+ * Pacing shortens think time in proportion to the raised arrival rate, so
+ * concurrency stays near the steady figure; the extra term covers the
+ * iterations a raised phase starts. All are pre-allocated, so no iteration is
+ * dropped while k6 starts a user.
+ *
+ * @param {object} options - The scenario.
+ * @param {number} options.rate - Its steady arrival rate, iterations an hour.
+ * @param {number} options.seconds - The longest one iteration can run.
+ * @param {ReadonlyArray<{ startSeconds: number, endSeconds: number | null, paceFactor: number }>} options.scenarioSchedule - Its own phase schedule.
+ * @returns {{ preAllocatedVUs: number, maxVUs: number }} Users held ready, and twice as many as the ceiling.
+ */
+export const combinedVirtualUsers = ({ rate, seconds, scenarioSchedule }) => {
+  const raised = scenarioSchedule
+    .filter(
+      ({ endSeconds, paceFactor }) => endSeconds !== null && paceFactor > 1
+    )
+    .map(({ startSeconds, endSeconds, paceFactor }) =>
+      Math.ceil(
+        (rate * (paceFactor - 1) * (endSeconds - startSeconds)) /
+          SECONDS_PER_HOUR
+      )
+    )
+  const preAllocatedVUs =
+    virtualUsersFor(rate, seconds).preAllocatedVUs + sumOf(raised)
+
+  return { preAllocatedVUs, maxVUs: MAX_VUS_FACTOR * preAllocatedVUs }
+}
+
+const combinedScenario = ({ base, name, scenarioSchedule, rate, seconds }) => {
+  const [first, ...later] = phasesThrough(name, scenarioSchedule)
+  const targetOf = ({ phase, paceFactor }) =>
+    isAbsentFrom(name, phase) ? 0 : Math.round(rate * paceFactor)
+  const firstTarget = targetOf(first)
+
+  return {
+    ...base,
+    ...combinedVirtualUsers({ rate, seconds, scenarioSchedule }),
+    startRate: firstTarget,
+    stages: [
+      {
+        duration: `${first.endSeconds - first.startSeconds}s`,
+        target: firstTarget
+      },
+      ...later.flatMap((entry) => [
+        { duration: '1s', target: targetOf(entry) },
+        {
+          duration: `${entry.endSeconds - entry.startSeconds - 1}s`,
+          target: targetOf(entry)
+        }
+      ])
     ]
   }
 }
@@ -725,6 +984,16 @@ const scenarioFor = ({
     return enduranceScenario({ base, schedule, rate })
   }
 
+  if (shape === SHAPES.COMBINED) {
+    return combinedScenario({
+      base,
+      name,
+      scenarioSchedule: schedule,
+      rate,
+      seconds
+    })
+  }
+
   const [, peak, burst] = schedule
   const burstSeconds = burst.endSeconds - burst.startSeconds
   const burstRate = Math.ceil(rate * model.p99Burst.burstFactor)
@@ -765,6 +1034,10 @@ export const designTargetScenarios = ({
   const seconds = iterationSeconds(model)
   const factors =
     shape === SHAPES.SPIKE_RECOVERY ? spikeFactors({ model, scenarioSet }) : {}
+  const ownSchedules =
+    shape === SHAPES.COMBINED
+      ? scenarioSchedules({ shape, schedule, model, scenarioSet })
+      : {}
 
   return Object.fromEntries(
     Object.entries(scenarioSet).map(([name, { exec }]) => [
@@ -774,7 +1047,7 @@ export const designTargetScenarios = ({
         : scenarioFor({
             shape,
             model,
-            schedule,
+            schedule: ownSchedules[name] ?? schedule,
             rate: rates[name],
             seconds: seconds[name],
             exec,
@@ -810,6 +1083,18 @@ export const DESIGN_TARGETS = freezeDeep({
     burstRps: 0.6,
     source: 'NFR-VOL-CORE-01 to CORE-04'
   },
+  sharedComponents: {
+    sessionPath: {
+      sustainedRps: 1.35,
+      burstRps: 2,
+      source: 'NFR-DEP-05; NFR-VOL-CORE-06; §9.4'
+    },
+    readModel: {
+      sustainedRps: 0.17,
+      burstRps: 0.25,
+      source: '§9.4 SYN-21; NFR-VOL-CORE-07'
+    }
+  },
   dashboardReadShare: 0.25,
   backendCallsPerPage: 1
 })
@@ -838,6 +1123,15 @@ const frontendExpiryText = ({ sessionExpiry, sessionLifetime }) =>
 export const sessionExpiryText = (endurance) =>
   `${frontendExpiryText(endurance)}${endurance.sessionExpiry === 'client' ? ", standing in for the frontends' expiry" : ''}`
 
+const combinedLengthText = (model) => {
+  const lengths = Object.fromEntries(combinedPhaseLengths(model))
+  const { aloneDuration, combinedDuration, settleDuration } = model.combined
+  const { burstDuration, burstFactor } = model.p99Burst
+  const { spikeDuration, recoveryDuration } = model.spikeRecovery
+
+  return `animals warm-up ${durationText(lengths[PHASES.WARM_UP])}, alone ${aloneDuration}, plants warm-up ${durationText(lengths[PHASES.PLANTS_WARM_UP])}, combined ${combinedDuration}, burst ${burstDuration} at ${burstFactor}x, spikes ${spikeDuration} with ${recoveryDuration} after, settle ${settleDuration}, animals drain ${durationText(lengths[PHASES.ANIMALS_DRAIN])}, plants alone ${aloneDuration}`
+}
+
 const lengthText = ({ shape, model }) => {
   if (shape === SHAPES.SUSTAINED_PEAK) {
     return `ramp ${model.sustainedPeak.rampDuration}, hold ${model.sustainedPeak.holdDuration}`
@@ -847,6 +1141,10 @@ const lengthText = ({ shape, model }) => {
     const { hourDuration } = model.averageLoad
 
     return `${HOURS_PER_DAY} weekday hours of ${hourDuration} each, ${durationText(HOURS_PER_DAY * durationSeconds(hourDuration))} in all`
+  }
+
+  if (shape === SHAPES.COMBINED) {
+    return combinedLengthText(model)
   }
 
   const warmUp = longestIterationSeconds(model, Object.keys(SCENARIOS))
@@ -896,10 +1194,59 @@ export const runLine = ({
  * stand-in's sign of a cascade, before and after the run.
  *
  * @param {string} shape - A value of `SHAPES`.
- * @returns {boolean} True for the spike and endurance shapes.
+ * @returns {boolean} True for the spike, endurance and combined shapes.
  */
 export const watchesDeadLetters = (shape) =>
-  shape === SHAPES.SPIKE_RECOVERY || shape === SHAPES.ENDURANCE
+  shape === SHAPES.SPIKE_RECOVERY ||
+  shape === SHAPES.ENDURANCE ||
+  shape === SHAPES.COMBINED
+
+/**
+ * Tells whether a shape proves, for each notification a publishing journey
+ * finishes, that its events reached the dashboard read model.
+ *
+ * The combined run does, because its question is whether the read model's
+ * consumer keeps up with the journeys' event rate. The other shapes do not:
+ * the proof polls the read model for up to a minute, which would stretch the
+ * response-time windows they judge.
+ *
+ * @param {string} shape - A value of `SHAPES`.
+ * @returns {boolean} True for the combined shape.
+ */
+export const confirmsArrivals = (shape) => shape === SHAPES.COMBINED
+
+/**
+ * Tells whether a shape reads reference-data directly, to time its cold and
+ * warm answers.
+ *
+ * @param {string} shape - A value of `SHAPES`.
+ * @returns {boolean} True for the combined shape.
+ */
+export const watchesReferenceData = (shape) => shape === SHAPES.COMBINED
+
+/** The name of the scenario that watches reference-data. */
+export const REFERENCE_DATA_WATCH_SCENARIO = 'reference-data-watch'
+
+/**
+ * Builds the scenario that reads reference-data on a fixed interval: one
+ * virtual user, so one owner of the watch's state, from the start of the run
+ * to the end of the last phase before the tail.
+ *
+ * @param {object} options - The watch.
+ * @param {object} options.model - A resolved traffic model.
+ * @param {ReadonlyArray<{ phase: string, endSeconds: number | null }>} options.schedule - The combined run's phase schedule.
+ * @returns {object} A k6 scenario.
+ */
+export const referenceDataWatchScenario = ({ model, schedule }) => ({
+  executor: 'constant-arrival-rate',
+  rate: 1,
+  timeUnit: model.combined.referenceDataReadInterval,
+  duration: `${schedule.find(({ phase }) => phase === PHASES.PLANTS_ALONE).endSeconds}s`,
+  preAllocatedVUs: 1,
+  maxVUs: 1,
+  exec: 'referenceDataWatch',
+  tags: { watch: 'reference-data' }
+})
 
 const EVENTING_WATCH_PHASES = Object.freeze({
   [SHAPES.P99_BURST]: PHASES.BURST,
@@ -1045,3 +1392,34 @@ const usersText = (count) =>
  */
 export const enduranceProfileLine = ({ model, runSeconds }) =>
   `Endurance: ${usersText(model.endurance.returningUsersPerFrontend)} on ins, animals and plants keeps one browser for the whole run; ${sessionExpiryText(model.endurance)}, so each should sign in again about ${expectedReauthentications({ model, runSeconds })} times`
+
+const factorText = (factor) => `x${Number(factor.toFixed(FACTOR_DECIMALS))}`
+
+/**
+ * The log line that states what the combined run applies.
+ *
+ * @param {object} options - The run.
+ * @param {object} options.model - A resolved traffic model.
+ * @param {Record<string, unknown>} options.scenarioSet - The scenarios that run.
+ * @returns {string} The line.
+ */
+export const combinedProfileLine = ({ model, scenarioSet }) => {
+  const rates = scenarioRates(model)
+  const stated = spikeFactors({ model, scenarioSet })
+  const session = spikeFactors({
+    model,
+    scenarioSet,
+    capacityRps: sessionSpikeCapacities(model)
+  })
+  const { capacityRps } = model.spikeRecovery
+  const {
+    aloneDuration,
+    combinedDuration,
+    settleDuration,
+    sessionPathSpikeRps
+  } = model.combined
+  const { burstDuration, burstFactor } = model.p99Burst
+  const { spikeDuration } = model.spikeRecovery
+
+  return `Combined: live animals alone ${aloneDuration}, then both journeys at ${rates['live-animals']} and ${rates['high-risk-plants']} notifications an hour for ${combinedDuration}, a ${burstDuration} burst at ${burstFactor}x, a ${spikeDuration} spike on each journey in turn at its frontend's stated capacity (animals ${capacityRps.animals} RPS, ${paceText(stated['live-animals'])}; plants ${capacityRps.plants} RPS, ${paceText(stated['high-risk-plants'])}), a ${spikeDuration} session-path spike at ${sessionPathSpikeRps} RPS across the three frontends' own session stores (animals ${paceText(session['live-animals'])}, plants ${factorText(session['high-risk-plants'])}, front door ${factorText(session['ins-front-door'])}), then high-risk plants alone ${aloneDuration}; ${settleDuration} settles between`
+}

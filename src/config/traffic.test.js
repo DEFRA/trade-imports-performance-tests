@@ -79,7 +79,13 @@ describe('TRAFFIC_DEFAULTS', () => {
     ['endurance.sessionExpiry', 'frontend'],
     ['endurance.sessionLifetime', '4h'],
     ['endurance.visitInterval', '10m'],
-    ['endurance.returningUsersPerFrontend', 1]
+    ['endurance.returningUsersPerFrontend', 1],
+    ['combined.aloneDuration', '30m'],
+    ['combined.combinedDuration', '30m'],
+    ['combined.settleDuration', '5m'],
+    ['combined.sessionPathSpikeRps', 25],
+    ['combined.referenceDataReadInterval', '10s'],
+    ['combined.referenceDataCacheMinutes', 60]
   ])('%s is %s', (path, expected) => {
     expect(pathOf(TRAFFIC_DEFAULTS, path)).toBe(expected)
   })
@@ -412,6 +418,36 @@ describe('resolveTrafficModel', () => {
       })
     ).toThrow(
       'Traffic model value "endurance.returningUsersPerFrontend" must be a whole number'
+    )
+  })
+
+  test('rejects a combined alone window under the one-second step rule', () => {
+    expect(() =>
+      resolveTrafficModel({
+        TRAFFIC_MODEL: '{"combined":{"aloneDuration":"1s"}}'
+      })
+    ).toThrow(
+      "TRAFFIC_MODEL combined.aloneDuration must be at least 2s, got '1s'"
+    )
+  })
+
+  test('rejects a fractional MDM cache lifetime', () => {
+    expect(() =>
+      resolveTrafficModel({
+        TRAFFIC_MODEL: '{"combined":{"referenceDataCacheMinutes":1.5}}'
+      })
+    ).toThrow(
+      'Traffic model value "combined.referenceDataCacheMinutes" must be a whole number'
+    )
+  })
+
+  test('rejects a session path spike of 0', () => {
+    expect(() =>
+      resolveTrafficModel({
+        TRAFFIC_MODEL: '{"combined":{"sessionPathSpikeRps":0}}'
+      })
+    ).toThrow(
+      'Traffic model value "combined.sessionPathSpikeRps" must be a positive number'
     )
   })
 

@@ -64,13 +64,25 @@ const FRONTEND_SESSION_LIFETIME = '4h'
 const RETURNING_VISIT_INTERVAL = '10m'
 const RETURNING_USERS_PER_FRONTEND = 1
 const SESSION_EXPIRIES = ['frontend', 'client']
+// Interim: as long as the burst's peak (DR-EUDP-005 'Scenario shapes' row 2), so each journey is measured alone for a steady window.
+const COMBINED_ALONE_DURATION = '30m'
+// DR-EUDP-005 'Scenario shapes' row 2: 30 minutes at peak.
+const COMBINED_DURATION = '30m'
+// Interim: the pause that lets a spike's queues drain before the next phase.
+const COMBINED_SETTLE_DURATION = '5m'
+// Volumetrics section 9.4 Session API spike capacity (NFR-DEP-05).
+const SESSION_PATH_SPIKE_RPS = 25
+// Interim: how often the reference-data watch reads each endpoint.
+const REFERENCE_DATA_READ_INTERVAL = '10s'
+// trade-imports-reference-data cache.mdm.ttl-minutes default (CACHE_MDM_TTL_MINUTES).
+const MDM_CACHE_MINUTES = 60
 
 export const ADDRESS_BOOK_SESSION_PAGES = 12
-const SECONDS_PER_MINUTE = 60
+export const SECONDS_PER_MINUTE = 60
 const SIGN_IN_PAGES_WITHOUT_WAIT = 1
 export const SECONDS_PER_HOUR = 3600
 const GRACEFUL_STOP_FACTOR = 2
-const MAX_VUS_FACTOR = 2
+export const MAX_VUS_FACTOR = 2
 const DURATION_FORMAT = /^\d+[smh]$/
 // The burst stage list spends one second ramping to the burst rate, then holds it.
 const MIN_BURST_SECONDS = 2
@@ -178,6 +190,14 @@ export const TRAFFIC_DEFAULTS = freezeDeep({
     visitInterval: RETURNING_VISIT_INTERVAL,
     returningUsersPerFrontend: RETURNING_USERS_PER_FRONTEND
   },
+  combined: {
+    aloneDuration: COMBINED_ALONE_DURATION,
+    combinedDuration: COMBINED_DURATION,
+    settleDuration: COMBINED_SETTLE_DURATION,
+    sessionPathSpikeRps: SESSION_PATH_SPIKE_RPS,
+    referenceDataReadInterval: REFERENCE_DATA_READ_INTERVAL,
+    referenceDataCacheMinutes: MDM_CACHE_MINUTES
+  },
   mix: { dashboardReadShareTarget: D7_DASHBOARD_READ_SHARE },
   backgroundVolume: {
     liveAnimalsNotifications: GBN_AG_ANNUAL_NOTIFICATIONS,
@@ -250,7 +270,8 @@ const WHOLE_NUMBER_KEYS = new Set([
   'addressBookEntries',
   'maxCreatedPerRun',
   'virtualUsers',
-  'returningUsersPerFrontend'
+  'returningUsersPerFrontend',
+  'referenceDataCacheMinutes'
 ])
 const DURATION_KEYS = new Set([
   'duration',
@@ -266,7 +287,11 @@ const DURATION_KEYS = new Set([
   'recoveredDuration',
   'comparisonWindow',
   'sessionLifetime',
-  'visitInterval'
+  'visitInterval',
+  'aloneDuration',
+  'combinedDuration',
+  'settleDuration',
+  'referenceDataReadInterval'
 ])
 const CHOICE_KEYS = { sessionExpiry: SESSION_EXPIRIES }
 const SHARE_KEYS = new Set([
@@ -501,6 +526,22 @@ const failIfSpikeTooShort = (spikeDuration) => {
   }
 }
 
+const COMBINED_PHASE_KEYS = [
+  'aloneDuration',
+  'combinedDuration',
+  'settleDuration'
+]
+
+const failIfCombinedPhaseTooShort = (combined) => {
+  COMBINED_PHASE_KEYS.forEach((key) => {
+    if (durationSeconds(combined[key]) < MIN_BURST_SECONDS) {
+      throw new Error(
+        `TRAFFIC_MODEL combined.${key} must be at least ${MIN_BURST_SECONDS}s, got '${combined[key]}'`
+      )
+    }
+  })
+}
+
 const failIfWindowsOverlap = ({ holdDuration, comparisonWindow }) => {
   if (
     durationSeconds(comparisonWindow) * HALF_DENOMINATOR >
@@ -536,6 +577,7 @@ export const resolveTrafficModel = (env, profile = {}) => {
     holdDuration: model.endurance.holdDuration,
     comparisonWindow: model.endurance.comparisonWindow
   })
+  failIfCombinedPhaseTooShort(model.combined)
 
   return freezeDeep(model)
 }

@@ -7,7 +7,13 @@ import {
   SHAPES,
   averageLoadFactors,
   averageLoadProfileLine,
+  combinedProfileLine,
+  combinedVirtualUsers,
+  confirmsArrivals,
   designTargetScenarios,
+  referenceDataWatchScenario,
+  sessionSpikeCapacities,
+  watchesReferenceData,
   hourLabel,
   hourPhase,
   journeyScenariosIn,
@@ -968,5 +974,274 @@ describe('watchesDeadLetters', () => {
     [SHAPES.AVERAGE_LOAD, false]
   ])('%s is %s', (shape, expected) => {
     expect(watchesDeadLetters(shape)).toBe(expected)
+  })
+})
+
+describe('the combined run', () => {
+  const phaseRows = (length) =>
+    scheduleFor(SHAPES.COMBINED, length).map(
+      ({ phase, startSeconds, endSeconds }) => [phase, startSeconds, endSeconds]
+    )
+
+  const stagesOf = (scenario) => scenario.stages
+
+  const stageTargetAt = (scenario, seconds) => {
+    let elapsed = 0
+
+    for (const { duration, target } of scenario.stages) {
+      elapsed += Number.parseInt(duration, 10)
+
+      if (seconds < elapsed) {
+        return target
+      }
+    }
+
+    return undefined
+  }
+
+  const totalSeconds = (scenario) =>
+    stagesOf(scenario).reduce(
+      (sum, { duration }) => sum + Number.parseInt(duration, 10),
+      0
+    )
+
+  describe('phaseSchedule', () => {
+    test('lays out every phase at full length', () => {
+      expect(phaseRows('full')).toEqual([
+        ['warm-up', 0, 2400],
+        ['animals-alone', 2400, 4200],
+        ['plants-warm-up', 4200, 7200],
+        ['combined', 7200, 9000],
+        ['burst', 9000, 9060],
+        ['settle-after-burst', 9060, 9360],
+        ['animals-spike', 9360, 9370],
+        ['animals-spike-recovery', 9370, 9430],
+        ['settle-after-animals-spike', 9430, 9730],
+        ['plants-spike', 9730, 9740],
+        ['plants-spike-recovery', 9740, 9800],
+        ['settle-after-plants-spike', 9800, 10_100],
+        ['session-spike', 10_100, 10_110],
+        ['session-spike-recovery', 10_110, 10_170],
+        ['animals-drain', 10_170, 12_630],
+        ['plants-alone', 12_630, 14_430],
+        ['tail', 14_430, null]
+      ])
+    })
+
+    test('shortens the alone, combined and settle windows at local length', () => {
+      const rows = Object.fromEntries(
+        phaseRows('local').map(([phase, start, end]) => [phase, [start, end]])
+      )
+
+      expect(rows['animals-alone']).toEqual([240, 420])
+      expect(rows.combined).toEqual([660, 840])
+      expect(rows['animals-drain']).toEqual([1290, 1590])
+      expect(rows['plants-alone']).toEqual([1590, 1770])
+    })
+  })
+
+  describe('sessionSpikeCapacities', () => {
+    test('scales the stated capacities to sum to the session path spike', () => {
+      const capacities = sessionSpikeCapacities(modelFor('full'))
+
+      Object.values(capacities).forEach((rps) =>
+        expect(rps).toBeCloseTo(8.333, 3)
+      )
+      expect(
+        Object.values(capacities).reduce((sum, rps) => sum + rps, 0)
+      ).toBeCloseTo(25)
+    })
+  })
+
+  describe('spikeFactors with the session spike capacities', () => {
+    const model = modelFor('full')
+
+    test('takes each frontend to its share of 25 RPS', () => {
+      const factors = spikeFactors({
+        model,
+        scenarioSet: SCENARIOS,
+        capacityRps: sessionSpikeCapacities(model)
+      })
+
+      expect(factors['live-animals']).toBeCloseTo(17.045, 3)
+      expect(factors['high-risk-plants']).toBeCloseTo(16.667, 3)
+      expect(factors['ins-front-door']).toBeCloseTo(20.284, 3)
+    })
+
+    test('keeps the stated capacities without the parameter', () => {
+      const factors = spikeFactors({ model, scenarioSet: SCENARIOS })
+
+      expect(factors['live-animals']).toBeCloseTo(10.227, 3)
+      expect(factors['high-risk-plants']).toBe(10)
+      expect(factors['ins-front-door']).toBeCloseTo(12.17, 2)
+    })
+  })
+
+  describe('scenarioSchedules', () => {
+    const model = modelFor('full')
+    const schedule = scheduleFor(SHAPES.COMBINED, 'full')
+    const schedules = scenarioSchedules({
+      shape: SHAPES.COMBINED,
+      schedule,
+      model,
+      scenarioSet: SCENARIOS
+    })
+    const paceOf = (scenario, phase) =>
+      schedules[scenario].find((entry) => entry.phase === phase).paceFactor
+
+    test('spikes each journey alone at its stated capacity', () => {
+      expect(paceOf('live-animals', 'animals-spike')).toBeCloseTo(10.227, 3)
+      expect(paceOf('live-animals', 'plants-spike')).toBe(1)
+      expect(paceOf('high-risk-plants', 'plants-spike')).toBe(10)
+      expect(paceOf('high-risk-plants', 'animals-spike')).toBe(1)
+    })
+
+    test('bursts every scenario at the burst factor', () => {
+      Object.keys(SCENARIOS).forEach((scenario) =>
+        expect(paceOf(scenario, 'burst')).toBe(1.5)
+      )
+    })
+
+    test('spikes the front door in the session spike', () => {
+      expect(paceOf('ins-front-door', 'session-spike')).toBeCloseTo(20.284, 3)
+    })
+  })
+
+  describe('designTargetScenarios', () => {
+    const scenarios = scenariosFor(SHAPES.COMBINED, 'full')
+
+    test('starts live animals at its rate, bursts and spikes it, then drains it', () => {
+      const animals = scenarios['live-animals']
+
+      expect(animals.startRate).toBe(44)
+      expect(animals.stages[0]).toEqual({ duration: '2400s', target: 44 })
+      expect(stageTargetAt(animals, 9030)).toBe(66)
+      expect(stageTargetAt(animals, 9365)).toBe(450)
+      expect(stageTargetAt(animals, 9735)).toBe(44)
+      expect(stageTargetAt(animals, 10_105)).toBe(750)
+      expect(stageTargetAt(animals, 11_000)).toBe(0)
+      expect(totalSeconds(animals)).toBe(12_630)
+    })
+
+    test('holds high-risk plants at 0 until it joins, then paces it', () => {
+      const plants = scenarios['high-risk-plants']
+
+      expect(plants.startRate).toBe(0)
+      expect(stageTargetAt(plants, 1000)).toBe(0)
+      expect(stageTargetAt(plants, 3000)).toBe(0)
+      expect(stageTargetAt(plants, 4300)).toBe(36)
+      expect(stageTargetAt(plants, 9735)).toBe(360)
+      expect(stageTargetAt(plants, 10_105)).toBe(600)
+      expect(totalSeconds(plants)).toBe(14_430)
+    })
+
+    test('spikes the front door scenarios in the session spike', () => {
+      expect(stageTargetAt(scenarios['ins-front-door'], 10_105)).toBe(1623)
+      expect(stageTargetAt(scenarios['ins-address-book'], 10_105)).toBe(406)
+    })
+
+    test('sizes virtual users for the extra iterations of each raised phase', () => {
+      expect(
+        Object.fromEntries(
+          Object.entries(scenarios).map(([name, scenario]) => [
+            name,
+            [scenario.preAllocatedVUs, scenario.maxVUs]
+          ])
+        )
+      ).toEqual({
+        'live-animals': [35, 70],
+        'high-risk-plants': [34, 68],
+        'ins-front-door': [13, 26],
+        'ins-address-book': [6, 12]
+      })
+    })
+
+    test('has no NaN anywhere', () => {
+      expect(JSON.stringify(scenarios)).not.toContain('null')
+      expect(JSON.stringify(scenarios)).not.toContain('NaN')
+    })
+  })
+
+  describe('combinedVirtualUsers', () => {
+    test('adds the iterations a raised phase starts to the steady users', () => {
+      expect(
+        combinedVirtualUsers({
+          rate: 3600,
+          seconds: 10,
+          scenarioSchedule: [
+            { startSeconds: 0, endSeconds: 100, paceFactor: 1 },
+            { startSeconds: 100, endSeconds: 110, paceFactor: 3 },
+            { startSeconds: 110, endSeconds: null, paceFactor: 1 }
+          ]
+        })
+      ).toEqual({ preAllocatedVUs: 30, maxVUs: 60 })
+    })
+  })
+
+  describe('referenceDataWatchScenario', () => {
+    test('reads once an interval with one user to the end of the last phase', () => {
+      expect(
+        referenceDataWatchScenario({
+          model: modelFor('full'),
+          schedule: scheduleFor(SHAPES.COMBINED, 'full')
+        })
+      ).toEqual({
+        executor: 'constant-arrival-rate',
+        rate: 1,
+        timeUnit: '10s',
+        duration: '14430s',
+        preAllocatedVUs: 1,
+        maxVUs: 1,
+        exec: 'referenceDataWatch',
+        tags: { watch: 'reference-data' }
+      })
+    })
+  })
+
+  describe('lines', () => {
+    test('states the profile', () => {
+      expect(
+        combinedProfileLine({
+          model: modelFor('full'),
+          scenarioSet: SCENARIOS
+        })
+      ).toBe(
+        "Combined: live animals alone 30m, then both journeys at 44 and 36 notifications an hour for 30m, a 60s burst at 1.5x, a 10s spike on each journey in turn at its frontend's stated capacity (animals 5 RPS, pace x10.23; plants 5 RPS, pace x10), a 10s session-path spike at 25 RPS across the three frontends' own session stores (animals pace x17.05, plants x16.67, front door x20.28), then high-risk plants alone 30m; 5m settles between"
+      )
+    })
+
+    test('names the run with its windows', () => {
+      expect(
+        runLine({
+          shape: 'combined',
+          scenarioLength: 'full',
+          environment: 'perf-test',
+          stubProfile: 'sla',
+          model: modelFor('full')
+        })
+      ).toBe(
+        'Design-target run: combined, full length (animals warm-up 40m, alone 30m, plants warm-up 50m, combined 30m, burst 60s at 1.5x, spikes 10s with 60s after, settle 5m, animals drain 41m, plants alone 30m), in perf-test, requiring stub profile sla'
+      )
+    })
+  })
+
+  describe('shape predicates', () => {
+    test('watches dead letters, proves arrivals and reads reference data, but runs no eventing watch', () => {
+      expect(watchesDeadLetters(SHAPES.COMBINED)).toBe(true)
+      expect(watchesEventing(SHAPES.COMBINED)).toBe(false)
+      expect(confirmsArrivals(SHAPES.COMBINED)).toBe(true)
+      expect(watchesReferenceData(SHAPES.COMBINED)).toBe(true)
+    })
+
+    test.each([
+      SHAPES.SUSTAINED_PEAK,
+      SHAPES.P99_BURST,
+      SHAPES.AVERAGE_LOAD,
+      SHAPES.SPIKE_RECOVERY,
+      SHAPES.ENDURANCE
+    ])('%s proves no arrivals and reads no reference data', (shape) => {
+      expect(confirmsArrivals(shape)).toBe(false)
+      expect(watchesReferenceData(shape)).toBe(false)
+    })
   })
 })

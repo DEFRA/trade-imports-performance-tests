@@ -1,6 +1,8 @@
 import {
+  ALONE_PHASES,
   DESIGN_TARGETS,
   FRONTEND_OF_SCENARIO,
+  ISOLATION_PAIRS,
   JOURNEY_OF,
   REPORTED_PHASES,
   RETURNING_SCENARIOS,
@@ -8,6 +10,7 @@ import {
   SHAPES,
   averageLoadFactors,
   averageLoadProfileLine,
+  combinedProfileLine,
   enduranceProfileLine,
   enduranceRunSeconds,
   eventingWatchSeconds,
@@ -23,14 +26,23 @@ import {
   spikeProfileLine
 } from '../config/design-target.js'
 import { kindOf } from '../config/endpoints.js'
+import { REFERENCE_DATA_READS } from '../config/reference-data.js'
 import { RE_AUTHENTICATION_TAG } from '../config/request-mix.js'
 import { INTERIM_TARGETS, subMetricKey } from '../config/thresholds.js'
 import {
   SECONDS_PER_HOUR,
+  SECONDS_PER_MINUTE,
   durationSeconds,
   durationText
 } from '../config/traffic.js'
-import { drainLine, eventingWatchSummary, smoothingLine } from './eventing.js'
+import {
+  drainLine,
+  eventCountLines,
+  eventCountRows,
+  eventingWatchSummary,
+  smoothingLine
+} from './eventing.js'
+import { expectedExpiries } from './reference-data.js'
 import { thresholdLines, thresholdResults } from './summary-text.js'
 
 const PERCENT = 100
@@ -1023,10 +1035,410 @@ const enduranceReport = (options) => {
   }
 }
 
+const SHARED_PHASES = Object.freeze(['combined', 'burst', 'session-spike'])
+
+const sharedRow = ({ metrics, schedule, model, phase }) => {
+  const seconds = phaseSeconds(schedule, phase)
+  const { sessionPath, readModel } = DESIGN_TARGETS.sharedComponents
+  const rows = {
+    combined: {
+      duration: model.combined.combinedDuration,
+      sessionPathTarget: sessionPath.sustainedRps,
+      readModelTarget: readModel.sustainedRps
+    },
+    burst: {
+      duration: model.p99Burst.burstDuration,
+      sessionPathTarget: sessionPath.burstRps,
+      readModelTarget: readModel.burstRps
+    },
+    'session-spike': {
+      duration: model.spikeRecovery.spikeDuration,
+      sessionPathTarget: model.combined.sessionPathSpikeRps,
+      readModelTarget: undefined
+    }
+  }
+  const frontendPages = FRONTENDS.reduce(
+    (total, frontend) => total + pagesOver(metrics, { frontend, phase }),
+    0
+  )
+
+  return {
+    phase,
+    seconds,
+    ...rows[phase],
+    sessionPathRps: frontendPages / seconds,
+    readModelRps:
+      countOf(metrics, subMetricKey('read_model_reads', { phase })) / seconds
+  }
+}
+
+/**
+ * Works out the load the shared components carried in the combined run's
+ * sustained, burst and session-spike phases.
+ *
+ * The session path is the frontends' own session stores, one resolution a page
+ * request, so its rate is the three frontends' page requests a second. The
+ * read model's rate is the INS dashboard views a second, each one a read.
+ *
+ * @param {object} options - The run.
+ * @param {Record<string, object>} options.metrics - k6's summary metrics.
+ * @param {ReadonlyArray<object>} options.schedule - The run's phase schedule.
+ * @param {object} options.model - A resolved traffic model.
+ * @returns {Record<string, { phase: string, seconds: number, duration: string, sessionPathRps: number, readModelRps: number, sessionPathTarget: number, readModelTarget: number | undefined }>} A row for each of `combined`, `burst` and `session-spike`. Rates are zero, never NaN, where there are no samples.
+ */
+export const achievedSharedComponents = ({ metrics, schedule, model }) =>
+  Object.fromEntries(
+    SHARED_PHASES.map((phase) => [
+      phase,
+      sharedRow({ metrics, schedule, model, phase })
+    ])
+  )
+
+/**
+ * States the session path's achieved load against its three figures.
+ *
+ * @param {object} options - The figures.
+ * @param {ReturnType<typeof achievedSharedComponents>} options.shared - The shared components' rows.
+ * @returns {string} The line.
+ */
+export const sessionPathLine = ({ shared }) => {
+  const { combined, burst } = shared
+  const spike = shared['session-spike']
+
+  return `Session path (each frontend's own session store, one resolution a page request): ${rpsText(combined.sessionPathRps)} RPS over the combined (${combined.duration}) against ${rpsText(combined.sessionPathTarget)} sustained (NFR-DEP-05); ${rpsText(burst.sessionPathRps)} RPS in the burst (${burst.duration}) against ${rpsText(burst.sessionPathTarget)} (NFR-VOL-CORE-06); ${rpsText(spike.sessionPathRps)} RPS in the session spike (${spike.duration}) against ${rpsText(spike.sessionPathTarget)} (§9.4); no backend resolves a session today (c-008), so the frontends carry §9.4's backend share`
+}
+
+/**
+ * States the dashboard read model's achieved reads against its two figures.
+ *
+ * @param {object} options - The figures.
+ * @param {ReturnType<typeof achievedSharedComponents>} options.shared - The shared components' rows.
+ * @returns {string} The line.
+ */
+export const readModelReadsLine = ({ shared }) => {
+  const { combined, burst } = shared
+
+  return `Dashboard read model (one read an INS dashboard view): ${rpsText(combined.readModelRps)} reads a second over the combined (${combined.duration}) against ${rpsText(combined.readModelTarget)} (§9.4 SYN-21); ${rpsText(burst.readModelRps)} in the burst (${burst.duration}) against ${rpsText(burst.readModelTarget)}`
+}
+
+/**
+ * States how long the read model's consumer took to take in live animals' events.
+ *
+ * @param {Record<string, object>} metrics - k6's summary metrics.
+ * @returns {string} The line.
+ */
+export const arrivalLagLine = (metrics) => {
+  const key = subMetricKey('event_arrival_seconds', {
+    scenario: 'live-animals'
+  })
+
+  if (countOf(metrics, key) === 0) {
+    return 'Read model consumer: no live-animals arrival was measured'
+  }
+
+  return `Read model consumer: live-animals events arrived P95 ${figureText(valueOf(metrics, key, 'p(95)'))}s, max ${figureText(valueOf(metrics, key, 'max'))}s after the outbox read (event_arrival_seconds)`
+}
+
+const failedRateOf = (metrics, tags) =>
+  valueOf(metrics, subMetricKey('http_req_failed', tags), 'rate')
+
+/**
+ * Compares each journey's response times and failures run alone with run
+ * combined, for each request kind it makes.
+ *
+ * @param {object} options - The run.
+ * @param {Record<string, object>} options.metrics - k6's summary metrics.
+ * @param {Record<string, { endpoints: string[] }>} options.scenarioSet - Scenarios shaped like `SCENARIOS`.
+ * @returns {Array<{ scenario: string, kind: string, aloneP95Ms: number | undefined, combinedP95Ms: number | undefined, aloneCount: number, combinedCount: number, aloneFailedRate: number | undefined, combinedFailedRate: number | undefined, changeShare: number | null }>} One per journey and kind. `changeShare` is the combined P95 over the alone P95, less 1; null when either is missing.
+ */
+export const aloneCombinedComparisons = ({ metrics, scenarioSet }) =>
+  journeyScenariosIn(scenarioSet).flatMap((scenario) =>
+    kindsIn(scenarioSet[scenario].endpoints).map((kind) => {
+      const alone = { scenario, kind, phase: ALONE_PHASES[scenario] }
+      const combined = { scenario, kind, phase: 'combined' }
+      const aloneCount = durationOf(metrics, alone, 'count') ?? 0
+      const combinedCount = durationOf(metrics, combined, 'count') ?? 0
+      const aloneP95Ms =
+        aloneCount === 0 ? undefined : durationOf(metrics, alone, 'p(95)')
+      const combinedP95Ms =
+        combinedCount === 0 ? undefined : durationOf(metrics, combined, 'p(95)')
+
+      return {
+        scenario,
+        kind,
+        aloneP95Ms,
+        combinedP95Ms,
+        aloneCount,
+        combinedCount,
+        aloneFailedRate: failedRateOf(metrics, {
+          scenario,
+          phase: alone.phase
+        }),
+        combinedFailedRate: failedRateOf(metrics, {
+          scenario,
+          phase: combined.phase
+        }),
+        changeShare:
+          aloneP95Ms === undefined || combinedP95Ms === undefined
+            ? null
+            : combinedP95Ms / aloneP95Ms - 1
+      }
+    })
+  )
+
+const NOT_MEASURED = 'not measured'
+
+const measuredText = (value, format) =>
+  value === undefined ? NOT_MEASURED : format(value)
+
+const signedPercentText = (share) =>
+  `${share < 0 ? '-' : '+'}${Math.abs(Math.round(share * PERCENT))}%`
+
+/**
+ * States one journey and request kind's figures run alone and combined.
+ *
+ * @param {ReturnType<typeof aloneCombinedComparisons>[number]} comparison - The comparison.
+ * @returns {string} The line.
+ */
+export const aloneCombinedLine = ({
+  scenario,
+  kind,
+  aloneP95Ms,
+  combinedP95Ms,
+  aloneCount,
+  combinedCount,
+  aloneFailedRate,
+  combinedFailedRate,
+  changeShare
+}) =>
+  `Alone and combined ${scenario} ${kind}: P95 ${measuredText(aloneP95Ms, millisecondsText)} alone (${aloneCount} requests), ${measuredText(combinedP95Ms, millisecondsText)} combined (${combinedCount} requests), ${changeShare === null ? NOT_MEASURED : signedPercentText(changeShare)}; failed ${measuredText(aloneFailedRate, percentText)} alone, ${measuredText(combinedFailedRate, percentText)} combined`
+
+const holdsOrUnmeasured = (value, limit) =>
+  value === undefined || limitHolds(value, limit)
+
+/**
+ * Judges each journey, for each request kind, while the other journey spikes
+ * and the minute after.
+ *
+ * @param {object} options - The run.
+ * @param {Record<string, object>} options.metrics - k6's summary metrics.
+ * @param {Record<string, { endpoints: string[] }>} options.scenarioSet - Scenarios shaped like `SCENARIOS`.
+ * @returns {Array<{ spiking: string, other: string, phase: string, kind: string, count: number, measured: boolean, p95Ms: number | undefined, p99Ms: number | undefined, p95LimitMs: number | undefined, p99LimitMs: number | undefined, failedRate: number, within: boolean }>} One per pair, phase and kind; a row with no requests is not measured and not within.
+ */
+export const isolationRows = ({ metrics, scenarioSet }) =>
+  ISOLATION_PAIRS.flatMap(({ spiking, other, phases }) =>
+    phases.flatMap((phase) =>
+      kindsIn(scenarioSet[other].endpoints).map((kind) => {
+        const tags = { scenario: other, kind, phase }
+        const { p95Ms: p95LimitMs, p99Ms: p99LimitMs } = INTERIM_TARGETS[kind]
+        const p95Ms = durationOf(metrics, tags, 'p(95)')
+        const p99Ms = durationOf(metrics, tags, 'p(99)')
+        const failedRate =
+          failedRateOf(metrics, { scenario: other, phase }) ?? 0
+        const count = durationOf(metrics, tags, 'count') ?? 0
+
+        return {
+          spiking,
+          other,
+          phase,
+          kind,
+          count,
+          measured: count > 0,
+          p95Ms,
+          p99Ms,
+          p95LimitMs,
+          p99LimitMs,
+          failedRate,
+          within:
+            count > 0 &&
+            holdsOrUnmeasured(p95Ms, p95LimitMs) &&
+            holdsOrUnmeasured(p99Ms, p99LimitMs) &&
+            failedRate < INTERIM_TARGETS.maxFailureRate
+        }
+      })
+    )
+  )
+
+const againstLimitText = (value, limit) =>
+  limit === undefined
+    ? millisecondsText(value)
+    : `${millisecondsText(value)} against ${millisecondsText(limit)}`
+
+/**
+ * States how one journey and request kind fared while the other journey spiked.
+ *
+ * @param {ReturnType<typeof isolationRows>[number]} row - The row.
+ * @returns {string} The line.
+ */
+export const isolationLine = ({
+  spiking,
+  other,
+  phase,
+  kind,
+  count,
+  p95Ms,
+  p99Ms,
+  p95LimitMs,
+  p99LimitMs,
+  failedRate,
+  within
+}) => {
+  const subject = `Isolation ${other} ${kind} during the ${spiking} spike (${phase})`
+
+  if (count === 0) {
+    return `${subject}: no requests`
+  }
+
+  return `${subject}: ${count} requests, P95 ${againstLimitText(p95Ms, p95LimitMs)}, P99 ${againstLimitText(p99Ms, p99LimitMs)}, failed ${percentText(failedRate)} against ${percentText(INTERIM_TARGETS.maxFailureRate)}: ${within ? 'within' : 'OVER'}`
+}
+
+const cacheFigures = (metrics, endpoint, cache) => {
+  const key = subMetricKey('reference_data_duration', { endpoint, cache })
+
+  return {
+    count: countOf(metrics, key),
+    p95Ms: valueOf(metrics, key, 'p(95)'),
+    maxMs: valueOf(metrics, key, 'max')
+  }
+}
+
+const FIRST_READ_CLASSES = Object.freeze({ 0: 'warm', 1: 'cold' })
+
+/**
+ * Collects reference-data's cold and warm response times, per endpoint read.
+ *
+ * @param {Record<string, object>} metrics - k6's summary metrics.
+ * @returns {Array<{ endpoint: string, path: string, readBy: string, forcedMiss: boolean, cold: { count: number, p95Ms: number | undefined, maxMs: number | undefined }, warm: { count: number, p95Ms: number | undefined, maxMs: number | undefined }, unclassified: { count: number }, failed: number, firstRead: 'cold' | 'warm' | 'not measured' }>} One row per read.
+ */
+export const referenceDataRows = (metrics) =>
+  REFERENCE_DATA_READS.map(({ endpoint, path, readBy, forcedMiss }) => ({
+    endpoint,
+    path,
+    readBy,
+    forcedMiss,
+    cold: cacheFigures(metrics, endpoint, 'cold'),
+    warm: cacheFigures(metrics, endpoint, 'warm'),
+    unclassified: {
+      count: cacheFigures(metrics, endpoint, 'unclassified').count
+    },
+    failed: countOf(
+      metrics,
+      subMetricKey('reference_data_failed_reads', { endpoint })
+    ),
+    firstRead:
+      FIRST_READ_CLASSES[
+        valueOf(
+          metrics,
+          subMetricKey('reference_data_first_read', { endpoint }),
+          'value'
+        )
+      ] ?? NOT_MEASURED
+  }))
+
+const readsText = (label, { count, p95Ms, maxMs }, note = '') =>
+  count === 0
+    ? `${label} 0 reads${note}`
+    : `${label} ${count} ${count === 1 ? 'read' : 'reads'}${note}, P95 ${millisecondsText(p95Ms)}, max ${millisecondsText(maxMs)}`
+
+/**
+ * States reference-data's cold and warm response times for one read.
+ *
+ * @param {ReturnType<typeof referenceDataRows>[number]} row - The row.
+ * @returns {string} The line.
+ */
+export const referenceDataLine = ({
+  endpoint,
+  path,
+  forcedMiss,
+  cold,
+  warm,
+  unclassified,
+  failed,
+  firstRead
+}) =>
+  `Reference data ${endpoint} (${path}): ${readsText('cold', cold, ' (MDM called)')}; ${readsText('warm', warm)}${unclassified.count > 0 ? `; ${unclassified.count} unclassified (the stub did not report its MDM count)` : ''}${failed > 0 ? `; ${failed} failed reads (not timed)` : ''}${forcedMiss ? '; a forced miss, cold on every read' : `; first read in the run ${firstRead}`}`
+
+/**
+ * States how long reference-data keeps MDM answers, and what that means for the watch.
+ *
+ * @param {object} options - The watch.
+ * @param {object} options.model - A resolved traffic model.
+ * @param {number} options.watchSeconds - How long the watch ran.
+ * @returns {string} The line.
+ */
+export const referenceDataCacheLine = ({ model, watchSeconds }) =>
+  `Reference data cache: reference-data keeps MDM answers ${model.combined.referenceDataCacheMinutes} minutes (cache.mdm.ttl-minutes), so a ${durationText(Math.floor(watchSeconds / SECONDS_PER_MINUTE) * SECONDS_PER_MINUTE)} watch should see about ${expectedExpiries({ watchSeconds, cacheMinutes: model.combined.referenceDataCacheMinutes })} cold reads for each key it reads, and one more for each key not yet cached when the run started`
+
+/**
+ * States how many notifications the dashboard read model held at the start of
+ * a combined run, and why that is one journey's.
+ *
+ * @param {object} options - The reading.
+ * @param {Record<string, number>} options.volume - The count in each datastore.
+ * @returns {string} The line.
+ */
+export const readModelLine = ({ volume }) =>
+  `Read model at start: ${volume['dashboard-read-model']} notifications; it holds live animals' only, because high-risk plants publishes no events today (pbe-022); the journeys' backends hold ${volume['live-animals']} live-animals and ${volume['high-risk-plants']} high-risk-plants notifications`
+
+const combinedReport = (options) => {
+  const { metrics, shape, schedule, scenarioSet, model } = options
+  const [steady] = REPORTED_PHASES[shape]
+  const steadySeconds = phaseSeconds(schedule, steady)
+  const watchSeconds = schedule.find(
+    ({ phase }) => phase === 'plants-alone'
+  ).endSeconds
+
+  return {
+    run: {
+      ...runDescription(options),
+      profileLine: combinedProfileLine({ model, scenarioSet }),
+      steadyPhase: steady,
+      steadySeconds,
+      schedule
+    },
+    achieved: achievedOver({
+      metrics,
+      phase: steady,
+      seconds: steadySeconds,
+      scenarioSet
+    }),
+    alone: Object.fromEntries(
+      journeyScenariosIn(scenarioSet).map((scenario) => {
+        const phase = ALONE_PHASES[scenario]
+        const seconds = phaseSeconds(schedule, phase)
+
+        return [
+          scenario,
+          {
+            phase,
+            seconds,
+            achieved: achievedJourney({ metrics, scenario, phase, seconds }),
+            target: DESIGN_TARGETS[scenario]
+          }
+        ]
+      })
+    ),
+    shared: achievedSharedComponents({ metrics, schedule, model }),
+    comparisons: aloneCombinedComparisons({ metrics, scenarioSet }),
+    isolation: isolationRows({ metrics, scenarioSet }),
+    referenceData: {
+      rows: referenceDataRows(metrics),
+      watchSeconds,
+      cacheMinutes: model.combined.referenceDataCacheMinutes
+    },
+    eventCounts: eventCountRows(metrics),
+    relative: [],
+    endpoints: endpointRows({ metrics, scenarioSet, phase: steady }),
+    thresholds: thresholdResults(metrics),
+    relativeFailed: false
+  }
+}
+
 const REPORTS = {
   [SHAPES.AVERAGE_LOAD]: averageLoadReport,
   [SHAPES.SPIKE_RECOVERY]: spikeReport,
-  [SHAPES.ENDURANCE]: enduranceReport
+  [SHAPES.ENDURANCE]: enduranceReport,
+  [SHAPES.COMBINED]: combinedReport
 }
 
 /**
@@ -1034,7 +1446,9 @@ const REPORTS = {
  * achieved against the volumetrics figures, the burst verdicts and every
  * endpoint's response times, tagged by journey, scenario and kind. The
  * average-load run reports each hour of its weekday against that hour's target
- * instead.
+ * instead. The combined run reports the shared components, the alone-and-combined
+ * comparison, isolation while the other journey spikes, and reference data's cold
+ * and warm response times.
  *
  * @param {object} options - The run.
  * @param {Record<string, object>} options.metrics - k6's summary metrics.
@@ -1188,10 +1602,50 @@ const enduranceText = (report, metrics) =>
     ...thresholdLines(metrics)
   ].join('\n')}\n`
 
+const combinedText = (report, metrics) =>
+  `${[
+    report.run.line,
+    report.run.profileLine,
+    ...journeyLines(report),
+    achievedFrontDoorLine({
+      phase: report.run.steadyPhase,
+      seconds: report.run.steadySeconds,
+      ...report.achieved.frontDoor
+    }),
+    requestMixLine({
+      phase: report.run.steadyPhase,
+      share: report.achieved.frontDoor.achieved.dashboardReadShare
+    }),
+    ...Object.entries(report.alone).map(([scenario, figures]) =>
+      achievedJourneyLine({ scenario, ...figures })
+    ),
+    sessionPathLine({ shared: report.shared }),
+    readModelReadsLine({ shared: report.shared }),
+    ...eventCountLines({
+      rows: report.eventCounts,
+      environment: report.run.environment
+    }),
+    arrivalLagLine(metrics),
+    ...report.referenceData.rows.map(referenceDataLine),
+    referenceDataCacheLine({
+      model: {
+        combined: {
+          referenceDataCacheMinutes: report.referenceData.cacheMinutes
+        }
+      },
+      watchSeconds: report.referenceData.watchSeconds
+    }),
+    ...report.comparisons.map(aloneCombinedLine),
+    ...report.isolation.map(isolationLine),
+    ...report.endpoints.map(endpointLine),
+    ...thresholdLines(metrics)
+  ].join('\n')}\n`
+
 const TEXTS = {
   [SHAPES.AVERAGE_LOAD]: averageLoadText,
   [SHAPES.SPIKE_RECOVERY]: spikeText,
-  [SHAPES.ENDURANCE]: enduranceText
+  [SHAPES.ENDURANCE]: enduranceText,
+  [SHAPES.COMBINED]: combinedText
 }
 
 /**
@@ -1482,10 +1936,139 @@ const endpointsTable = (report) =>
     ])
   )
 
+const sharedRows = (shared) =>
+  Object.values(shared).flatMap(
+    ({
+      phase,
+      duration,
+      sessionPathRps,
+      readModelRps,
+      sessionPathTarget,
+      readModelTarget
+    }) => [
+      [
+        'session path',
+        `${phase} (${duration})`,
+        rpsText(sessionPathRps),
+        rpsText(sessionPathTarget),
+        DESIGN_TARGETS.sharedComponents.sessionPath.source
+      ],
+      ...(readModelTarget === undefined
+        ? []
+        : [
+            [
+              'dashboard read model',
+              `${phase} (${duration})`,
+              rpsText(readModelRps),
+              rpsText(readModelTarget),
+              DESIGN_TARGETS.sharedComponents.readModel.source
+            ]
+          ])
+    ]
+  )
+
+const roundedMs = (value) => (value === undefined ? '' : Math.round(value))
+
+const comparisonRow = (entry) => [
+  entry.scenario,
+  entry.kind,
+  roundedMs(entry.aloneP95Ms),
+  roundedMs(entry.combinedP95Ms),
+  entry.changeShare === null ? '' : signedPercentText(entry.changeShare),
+  measuredText(entry.aloneFailedRate, percentText),
+  measuredText(entry.combinedFailedRate, percentText)
+]
+
+const isolationVerdictText = (row) => {
+  if (row.count === 0) {
+    return NOT_MEASURED
+  }
+
+  return row.within ? 'yes' : 'no'
+}
+
+const isolationRow = (row) => [
+  row.other,
+  `${row.spiking} spike (${row.phase})`,
+  row.kind,
+  row.count,
+  roundedMs(row.p95Ms),
+  roundedMs(row.p99Ms),
+  percentText(row.failedRate),
+  isolationVerdictText(row)
+]
+
+const referenceDataRow = (row) => [
+  row.endpoint,
+  row.path,
+  row.cold.count,
+  roundedMs(row.cold.p95Ms),
+  row.warm.count,
+  roundedMs(row.warm.p95Ms),
+  row.failed,
+  row.firstRead
+]
+
+const combinedTables = (report) => [
+  `<p>${escapeHtml(report.run.profileLine)}</p>`,
+  table(
+    achievedHeading(report.run.steadyPhase),
+    ACHIEVED_COLUMNS,
+    achievedRows(report)
+  ),
+  table(
+    'Shared components',
+    ['Component', 'Phase', 'Achieved RPS', 'Target', 'Source'],
+    sharedRows(report.shared)
+  ),
+  table(
+    'Alone and combined',
+    [
+      'Scenario',
+      'Kind',
+      'Alone P95 ms',
+      'Combined P95 ms',
+      'Change',
+      'Alone failed',
+      'Combined failed'
+    ],
+    report.comparisons.map(comparisonRow)
+  ),
+  table(
+    'Isolation',
+    [
+      'Journey',
+      'During',
+      'Kind',
+      'Requests',
+      'P95 ms',
+      'P99 ms',
+      'Failed',
+      'Within'
+    ],
+    report.isolation.map(isolationRow)
+  ),
+  table(
+    'Reference data',
+    [
+      'Endpoint',
+      'Path',
+      'Cold reads',
+      'Cold P95 ms',
+      'Warm reads',
+      'Warm P95 ms',
+      'Failed reads',
+      'First read'
+    ],
+    report.referenceData.rows.map(referenceDataRow)
+  )
+]
+
 const TABLES = {
   [SHAPES.AVERAGE_LOAD]: averageLoadTables,
   [SHAPES.SPIKE_RECOVERY]: spikeTables,
-  [SHAPES.ENDURANCE]: enduranceTables
+  [SHAPES.ENDURANCE]: enduranceTables,
+  [SHAPES.COMBINED]: combinedTables
 }
 
 /**
