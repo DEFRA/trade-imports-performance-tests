@@ -3,48 +3,63 @@ import { Counter } from 'k6/metrics'
 
 import { DATASTORES, indexesBuiltLine } from '../config/background-volume.js'
 import {
-  LOAD_PROFILES,
+  FAULT_CONTROL_SCENARIO,
+  REFERENCE_DATA_WATCH_SCENARIO,
   REPORTED_PHASES,
   RETURNING_SCENARIOS,
   SCENARIO_LENGTH_PROFILES,
   SHAPES,
   averageLoadProfileLine,
+  combinedProfileLine,
+  confirmsArrivals,
   designTargetScenarios,
   enduranceProfileLine,
   enduranceRunSeconds,
+  eventingWatchScenario,
+  eventingWindow,
+  faultControlScenario,
   isScriptCheck,
   localRunLine,
   phaseSchedule,
+  referenceDataWatchScenario,
   requiredStubProfileFor,
-  resolveLoadProfile,
+  resiliencePhases,
   resolveScenarioLength,
   runLine,
   scenarioSchedules,
-  scenarioSetFor,
   scenarioSetForShape,
   spikeProfileLine,
-  watchesDeadLetters
+  watchesDeadLetters,
+  watchesEventing,
+  watchesReferenceData
 } from '../config/design-target.js'
 import { mixTargetLine } from '../config/request-mix.js'
 import {
   IDENTITY,
   JOURNEYS,
   PERF_ADDRESS,
+  SCENARIOS,
   SETUP_TIMEOUT,
   notificationSplits,
   resolvePassword
 } from '../config/smoke.js'
+import {
+  resilienceProfileLine,
+  resolveResilienceFaults
+} from '../config/resilience.js'
 import { resolveRecordedCeilings } from '../config/stub-ceilings.js'
 import { STUBBED_INTEGRATIONS } from '../config/stub-profiles.js'
 import {
-  asReportingOnly,
   backgroundVolumeReportThresholds,
+  combinedReportThresholds,
   designTargetReportThresholds,
   designTargetThresholds,
   documentScanThresholds,
+  eventingReportThresholds,
   hourlyReportThresholds,
   notificationSplitThresholds,
   reauthenticationReportThresholds,
+  resilienceReportThresholds,
   stubHeadroomReportThresholds,
   stubProfileReportThresholds
 } from '../config/thresholds.js'
@@ -55,15 +70,23 @@ import {
 import {
   resolveEnvironment,
   resolveLocalhostAlias,
-  resolveServiceUrl
+  resolveServiceUrl,
+  resolveToxiproxyUrl
 } from '../config/target.js'
 import { resolveTrafficModel } from '../config/traffic.js'
 import {
   designTargetHtml,
   designTargetReport,
   designTargetText,
-  failedComparisonLines
+  failedComparisonLines,
+  readModelLine
 } from '../lib/design-target-summary.js'
+import { failedResilienceLines } from '../lib/resilience.js'
+import {
+  resilienceHtml,
+  resilienceReport,
+  resilienceText
+} from '../lib/resilience-summary.js'
 import {
   measureBackgroundVolume,
   reportBackgroundVolume,
@@ -71,16 +94,23 @@ import {
 } from './background-volume.js'
 import { readDeadLetterCount, reportDeadLetters } from './dead-letters.js'
 import {
+  readEventingStart,
+  reportEventCounts,
+  reportEventingWatchSetup,
+  watchEventing
+} from './eventing.js'
+import {
   addressBookSession,
   dashboardOnlySession,
-  ensurePerfAddress,
-  iuuJourneySession
+  ensurePerfAddress
 } from './front-door.js'
 import { HIGH_RISK_PLANTS_STEPS } from './high-risk-plants.js'
 import { notificationJourney } from './journeys.js'
 import { LIVE_ANIMALS_STEPS } from './live-animals.js'
-import { usePhaseSchedule } from './phase.js'
+import { markPhase, usePhaseSchedule } from './phase.js'
 import { waitForReadiness } from './readiness.js'
+import { watchReferenceData } from './reference-data.js'
+import { clearEveryFault, controlFaults, prepareFaults } from './resilience.js'
 import { returningVisit } from './returning-session.js'
 import { reportStubHeadroom } from './stub-ceilings.js'
 import {
@@ -104,29 +134,29 @@ const SUMMARY_TREND_STATS = [
 const resolveRun = ({ shape, env }) => {
   const environment = resolveEnvironment(env)
   const scenarioLength = resolveScenarioLength(env, environment)
-  const loadProfile = resolveLoadProfile(env)
   const stubProfile = requiredStubProfileFor(env, environment)
   const model = resolveTrafficModel(
     env,
     SCENARIO_LENGTH_PROFILES[scenarioLength]
   )
-  const scenarioSet = scenarioSetForShape({ shape, loadProfile })
+  const scenarioSet = scenarioSetForShape({ shape })
+  const faults = shape === SHAPES.RESILIENCE ? resolveResilienceFaults(env) : []
   const schedule = phaseSchedule({
     shape,
     model,
-    scenarioNames: Object.keys(scenarioSetFor(loadProfile))
+    scenarioNames: Object.keys(SCENARIOS),
+    faults
   })
 
   return {
     environment,
     scenarioLength,
-    loadProfile,
     stubProfile,
     model,
     scenarioSet,
+    faults,
     schedule,
-    schedules: scenarioSchedules({ shape, schedule, model, scenarioSet }),
-    gating: loadProfile === LOAD_PROFILES.TWO_JOURNEYS
+    schedules: scenarioSchedules({ shape, schedule, model, scenarioSet })
   }
 }
 
@@ -148,25 +178,38 @@ const resolveUrls = (env) => {
   }
 }
 
+const reportedPhasesOf = ({ shape, run }) =>
+  shape === SHAPES.RESILIENCE
+    ? resiliencePhases(run.schedule)
+    : REPORTED_PHASES[shape]
+
 const thresholdsFor = ({ shape, run }) => ({
   ...(shape === SHAPES.AVERAGE_LOAD
     ? hourlyReportThresholds({
         scenarioSet: run.scenarioSet,
-        phases: REPORTED_PHASES[shape]
+        phases: reportedPhasesOf({ shape, run })
       })
     : designTargetReportThresholds({
         scenarioSet: run.scenarioSet,
-        phases: REPORTED_PHASES[shape]
+        phases: reportedPhasesOf({ shape, run })
       })),
-  ...designTargetThresholds({
-    shape,
-    scenarioSet: run.scenarioSet,
-    gating: run.gating
-  }),
+  ...(shape === SHAPES.RESILIENCE
+    ? resilienceReportThresholds({
+        scenarioSet: run.scenarioSet,
+        phases: reportedPhasesOf({ shape, run }),
+        faults: run.faults
+      })
+    : {}),
+  ...(shape === SHAPES.COMBINED
+    ? combinedReportThresholds({
+        scenarioSet: run.scenarioSet,
+        phases: REPORTED_PHASES[shape]
+      })
+    : {}),
+  ...designTargetThresholds({ shape, scenarioSet: run.scenarioSet }),
   ...(shape === SHAPES.ENDURANCE ? reauthenticationReportThresholds() : {}),
-  ...(run.gating
-    ? documentScanThresholds('live-animals')
-    : asReportingOnly(documentScanThresholds('live-animals'))),
+  ...documentScanThresholds('live-animals'),
+  ...eventingReportThresholds(),
   ...notificationSplitThresholds(notificationSplits(run.model)),
   ...backgroundVolumeReportThresholds(DATASTORES),
   ...stubProfileReportThresholds(STUBBED_INTEGRATIONS),
@@ -177,8 +220,8 @@ const thresholdsFor = ({ shape, run }) => ({
  * Builds a design-target run: the options, set-up, tear-down, summary and exec
  * functions a suite file re-exports.
  *
- * The shape (sustained peak, P99 burst, average load, spike and recovery or
- * endurance), the run length and the load profile come from configuration, so
+ * The shape (sustained peak, P99 burst, average load, spike and recovery,
+ * endurance, combined or resilience) and the run length come from configuration, so
  * a suite is the import and the re-exports only.
  * Run it at k6's init stage: it reads the environment and resolves the model.
  *
@@ -189,9 +232,10 @@ const thresholdsFor = ({ shape, run }) => ({
  */
 export const createDesignTargetRun = ({ shape, env }) => {
   const run = resolveRun({ shape, env })
-  const { environment, loadProfile, model, schedule, stubProfile } = run
+  const { environment, model, schedule, stubProfile } = run
   const ceilings = resolveRecordedCeilings(env, environment)
   const localhostAlias = resolveLocalhostAlias(env)
+  const toxiproxyUrl = resolveToxiproxyUrl(env, environment)
   const credentials = { crn: IDENTITY.crn, password: resolvePassword(env) }
   const staleRedirects = new Counter('stale_concurrency_redirects')
   const urls = resolveUrls(env)
@@ -204,20 +248,36 @@ export const createDesignTargetRun = ({ shape, env }) => {
   }
   const settings = {
     shape,
-    loadProfile,
     scenarioLength: run.scenarioLength,
     environment,
     stubProfile,
-    model
+    model,
+    faults: run.faults
   }
 
   const options = {
-    scenarios: designTargetScenarios({
-      shape,
-      model,
-      scenarioSet: run.scenarioSet,
-      schedule
-    }),
+    scenarios: {
+      ...designTargetScenarios({
+        shape,
+        model,
+        scenarioSet: run.scenarioSet,
+        schedule
+      }),
+      ...(watchesEventing(shape)
+        ? { 'eventing-watch': eventingWatchScenario({ schedule }) }
+        : {}),
+      ...(watchesReferenceData(shape)
+        ? {
+            [REFERENCE_DATA_WATCH_SCENARIO]: referenceDataWatchScenario({
+              model,
+              schedule
+            })
+          }
+        : {}),
+      ...(shape === SHAPES.RESILIENCE
+        ? { [FAULT_CONTROL_SCENARIO]: faultControlScenario({ schedule }) }
+        : {})
+    },
     thresholds: thresholdsFor({ shape, run }),
     summaryTrendStats: SUMMARY_TREND_STATS,
     setupTimeout: SETUP_TIMEOUT,
@@ -225,7 +285,6 @@ export const createDesignTargetRun = ({ shape, env }) => {
     tags: {
       environment,
       stub_profile: stubProfile ?? 'as-reported',
-      load_profile: loadProfile,
       scenario_length: run.scenarioLength,
       shape
     }
@@ -234,14 +293,16 @@ export const createDesignTargetRun = ({ shape, env }) => {
   const logRunSettings = () => {
     console.log(runLine(settings))
 
+    if (shape === SHAPES.COMBINED) {
+      console.log(combinedProfileLine({ model, scenarioSet: run.scenarioSet }))
+    }
+
     if (shape === SHAPES.AVERAGE_LOAD) {
       console.log(averageLoadProfileLine(model))
     }
 
     if (shape === SHAPES.SPIKE_RECOVERY) {
-      console.log(
-        spikeProfileLine({ model, loadProfile, scenarioSet: run.scenarioSet })
-      )
+      console.log(spikeProfileLine({ model, scenarioSet: run.scenarioSet }))
     }
 
     if (shape === SHAPES.ENDURANCE) {
@@ -251,6 +312,10 @@ export const createDesignTargetRun = ({ shape, env }) => {
           runSeconds: enduranceRunSeconds(schedule)
         })
       )
+    }
+
+    if (shape === SHAPES.RESILIENCE) {
+      console.log(resilienceProfileLine({ model, faults: run.faults }))
     }
 
     console.log(`Traffic model: ${JSON.stringify(model)}`)
@@ -266,6 +331,10 @@ export const createDesignTargetRun = ({ shape, env }) => {
     if (isScriptCheck(environment)) {
       console.log(localRunLine({ stubProfile }))
     }
+
+    if (watchesEventing(shape)) {
+      reportEventingWatchSetup({ window: eventingWindow({ shape, schedule }) })
+    }
   }
 
   const setup = () => {
@@ -278,6 +347,10 @@ export const createDesignTargetRun = ({ shape, env }) => {
     requireStubProfiles(stubProfiles, stubProfile)
     clearStubAnswered({ urls })
 
+    const faultHosts =
+      shape === SHAPES.RESILIENCE
+        ? prepareFaults({ urls, toxiproxyUrl, environment })
+        : null
     const stubLoadSince = Date.now()
 
     console.log(indexesBuiltLine())
@@ -300,11 +373,19 @@ export const createDesignTargetRun = ({ shape, env }) => {
       requireBackgroundVolume(volume, model.backgroundVolume)
     }
 
+    if (shape === SHAPES.COMBINED) {
+      console.log(readModelLine({ volume }))
+    }
+
     return {
       addressName: PERF_ADDRESS.name,
+      faultHosts,
       stubLoadSince,
       deadLettersAtStart: watchesDeadLetters(shape)
         ? readDeadLetterCount({ urls })
+        : null,
+      eventingStart: confirmsArrivals(shape)
+        ? readEventingStart({ urls })
         : null
     }
   }
@@ -322,11 +403,19 @@ export const createDesignTargetRun = ({ shape, env }) => {
         now: Date.now()
       })
     } finally {
+      if (shape === SHAPES.RESILIENCE) {
+        clearEveryFault({ urls, toxiproxyUrl })
+      }
+
       if (watchesDeadLetters(shape)) {
         reportDeadLetters({
           before: data.deadLettersAtStart,
           after: readDeadLetterCount({ urls })
         })
+      }
+
+      if (data.eventingStart !== null) {
+        reportEventCounts({ urls, start: data.eventingStart })
       }
     }
   }
@@ -352,7 +441,9 @@ export const createDesignTargetRun = ({ shape, env }) => {
     staleRedirects,
     addressName: data.addressName,
     vu: exec.vu.idInTest,
-    iterationInTest: exec.scenario.iterationInTest
+    iterationInTest: exec.scenario.iterationInTest,
+    confirmsEventArrival: confirmsArrivals(shape),
+    insBackendUrl: urls.insBackend
   })
 
   const scheduled = (name, work) => (data) => {
@@ -373,7 +464,36 @@ export const createDesignTargetRun = ({ shape, env }) => {
       })
     )
 
+  const resilienceSummary = (data) => {
+    const report = resilienceReport({
+      metrics: data.metrics,
+      ...settings,
+      schedule,
+      scenarioSet: run.scenarioSet
+    })
+    const files = { stdout: resilienceText(report, data.metrics) }
+    const directory = env.REPORTS_DIR
+
+    if (!directory) {
+      return files
+    }
+
+    files[`${directory}/resilience.json`] = JSON.stringify(report, null, 2)
+    files[`${directory}/resilience.html`] = resilienceHtml(report)
+
+    if (report.failed) {
+      files[`${directory}/relative-thresholds-failed.txt`] =
+        `${failedResilienceLines(report).join('\n')}\n`
+    }
+
+    return files
+  }
+
   const handleSummary = (data) => {
+    if (shape === SHAPES.RESILIENCE) {
+      return resilienceSummary(data)
+    }
+
     const report = designTargetReport({
       metrics: data.metrics,
       ...settings,
@@ -431,15 +551,26 @@ export const createDesignTargetRun = ({ shape, env }) => {
     insAddressBook: scheduled('ins-address-book', () =>
       addressBookSession(frontDoorOptions())
     ),
-    iuuJourneySession: scheduled('iuu-journey-sessions', () =>
-      iuuJourneySession(frontDoorOptions())
-    ),
-    iuuFrontDoor: scheduled('iuu-front-door', () =>
-      dashboardOnlySession(frontDoorOptions())
-    ),
-    iuuAddressBook: scheduled('iuu-address-book', () =>
-      addressBookSession(frontDoorOptions())
-    ),
+    eventingWatch: () =>
+      watchEventing({
+        urls,
+        window: eventingWindow({ shape, schedule })
+      }),
+    referenceDataWatch: () => {
+      usePhaseSchedule(run.schedule)
+      markPhase()
+      watchReferenceData({ urls })
+    },
+    faultControl: (data) =>
+      controlFaults({
+        urls,
+        toxiproxyUrl,
+        schedule,
+        faults: run.faults,
+        model,
+        hosts: data.faultHosts,
+        environment
+      }),
     returningIns: returning('returning-ins'),
     returningAnimals: returning('returning-animals'),
     returningPlants: returning('returning-plants')

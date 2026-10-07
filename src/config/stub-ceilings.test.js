@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest'
 
 import {
   CEILING_GROUPS,
-  SIGN_IN_TARGETS,
+  SIGN_IN_TARGET,
   ceilingScenarios,
   requiredSignInsPerSecond,
   resolveCeilingGroups,
@@ -15,15 +15,7 @@ const model = resolveCeilingModel({})
 
 describe('requiredSignInsPerSecond', () => {
   test('is twice the design target an hour plus the 5 a second spike', () => {
-    expect(
-      requiredSignInsPerSecond(SIGN_IN_TARGETS.twoJourneys).toFixed(2)
-    ).toBe('5.11')
-  })
-
-  test('is 5.43 for the with-IUU target', () => {
-    expect(requiredSignInsPerSecond(SIGN_IN_TARGETS.withIuu).toFixed(2)).toBe(
-      '5.43'
-    )
+    expect(requiredSignInsPerSecond(SIGN_IN_TARGET).toFixed(2)).toBe('5.11')
   })
 })
 
@@ -136,25 +128,22 @@ describe('ceilingScenarios', () => {
     expect(ladders.mdm[0]).toEqual({ scenario: 'ceiling-mdm-0010', rate: 10 })
   })
 
-  test('gives the Defra ID target four scenarios in order', () => {
+  test('gives the Defra ID target two scenarios in order', () => {
     const { scenarios, stepScenarios } = ceilingScenarios(model, [
       'defra-id-target'
     ])
 
     expect(Object.keys(scenarios)).toEqual([
-      'defra-id-warm-up-two-journeys',
-      'defra-id-target-two-journeys',
-      'defra-id-warm-up-with-iuu',
-      'defra-id-target-with-iuu'
+      'defra-id-warm-up-target',
+      'defra-id-target'
     ])
     expect(stepScenarios).toEqual([])
-    expect(scenarios['defra-id-warm-up-two-journeys'].duration).toBe('50s')
-    expect(scenarios['defra-id-warm-up-with-iuu'].duration).toBe('143s')
+    expect(scenarios['defra-id-warm-up-target'].duration).toBe('50s')
   })
 
   test('holds 400 sign-ins an hour, spikes by 5 a second and recovers', () => {
     const { scenarios } = ceilingScenarios(model, ['defra-id-target'])
-    const target = scenarios['defra-id-target-two-journeys']
+    const target = scenarios['defra-id-target']
 
     expect(target).toMatchObject({
       executor: 'ramping-arrival-rate',
@@ -169,11 +158,6 @@ describe('ceilingScenarios', () => {
       { duration: '1s', target: 400 },
       { duration: '60s', target: 400 }
     ])
-    expect(
-      scenarios['defra-id-target-with-iuu'].stages.map(
-        ({ target: rate }) => rate
-      )
-    ).toEqual([1540, 19540, 19540, 1540, 1540])
   })
 
   test('starts each Defra ID target scenario after the one before has finished', () => {
@@ -181,19 +165,17 @@ describe('ceilingScenarios', () => {
 
     expect(Object.values(scenarios).map(({ startTime }) => startTime)).toEqual([
       '0s',
-      '55s',
-      '192s',
-      '340s'
+      '55s'
     ])
   })
 
-  test('warms the Defra ID ladder with 1540 sign-ins kept, then steps by rate x 4 virtual users', () => {
+  test('warms the Defra ID ladder with 400 sign-ins kept, then steps by rate x 4 virtual users', () => {
     const { scenarios, ladders } = ceilingScenarios(model, ['defra-id'])
     const names = Object.keys(scenarios)
 
     expect(names).toHaveLength(10)
     expect(names[0]).toBe('defra-id-warm-up-ladder')
-    expect(scenarios['defra-id-warm-up-ladder'].duration).toBe('193s')
+    expect(scenarios['defra-id-warm-up-ladder'].duration).toBe('50s')
     expect(scenarios['defra-id-warm-up-ladder'].exec).toBe('defraIdSignIn')
     expect(scenarios['ceiling-defra-id-0032']).toMatchObject({
       rate: 32,

@@ -13,7 +13,6 @@ import {
   gracefulStopFor,
   isChosen,
   iterationSeconds,
-  iuuThinkSecondsMean,
   resolveTrafficModel,
   scenarioPagesPerHour,
   scenarioRates,
@@ -55,11 +54,11 @@ describe('TRAFFIC_DEFAULTS', () => {
     ['backgroundVolume.maxCreatedPerRun', 42000],
     ['backgroundVolume.virtualUsers', 10],
     ['backgroundVolume.maxDuration', '24h'],
+    ['peakDay.liveAnimalsNotifications', 546],
+    ['peakDay.highRiskPlantsNotifications', 442],
+    ['peakDay.duration', '12h'],
     ['liveAnimals.documentKilobytes.min', 100],
     ['liveAnimals.documentKilobytes.max', 5000],
-    ['iuu.notificationsPerHour', 229],
-    ['iuu.sessionsPerNotification', 1.5],
-    ['iuu.sessionMinutes', 30],
     ['sustainedPeak.rampDuration', '3h'],
     ['sustainedPeak.holdDuration', '7h'],
     ['p99Burst.peakDuration', '30m'],
@@ -75,13 +74,18 @@ describe('TRAFFIC_DEFAULTS', () => {
     ['spikeRecovery.capacityRps.ins', 5],
     ['spikeRecovery.capacityRps.animals', 5],
     ['spikeRecovery.capacityRps.plants', 5],
-    ['spikeRecovery.capacityRps.iuu', 15],
     ['endurance.holdDuration', '8h'],
     ['endurance.comparisonWindow', '1h'],
     ['endurance.sessionExpiry', 'frontend'],
     ['endurance.sessionLifetime', '4h'],
     ['endurance.visitInterval', '10m'],
-    ['endurance.returningUsersPerFrontend', 1]
+    ['endurance.returningUsersPerFrontend', 1],
+    ['combined.aloneDuration', '30m'],
+    ['combined.combinedDuration', '30m'],
+    ['combined.settleDuration', '5m'],
+    ['combined.sessionPathSpikeRps', 25],
+    ['combined.referenceDataReadInterval', '10s'],
+    ['combined.referenceDataCacheMinutes', 60]
   ])('%s is %s', (path, expected) => {
     expect(pathOf(TRAFFIC_DEFAULTS, path)).toBe(expected)
   })
@@ -196,6 +200,27 @@ describe('BACKGROUND_VOLUME_PROFILE', () => {
     expect(() =>
       resolveTrafficModel({ TRAFFIC_MODEL: text }, BACKGROUND_VOLUME_PROFILE)
     ).toThrow(message)
+  })
+})
+
+describe('peakDay overrides', () => {
+  test('a TRAFFIC_MODEL override replaces the notification count', () => {
+    const model = resolveTrafficModel({
+      TRAFFIC_MODEL: '{"peakDay":{"liveAnimalsNotifications":6}}'
+    })
+
+    expect(model.peakDay.liveAnimalsNotifications).toBe(6)
+    expect(model.peakDay.highRiskPlantsNotifications).toBe(442)
+  })
+
+  test('refuses a notification count that is not a whole number', () => {
+    expect(() =>
+      resolveTrafficModel({
+        TRAFFIC_MODEL: '{"peakDay":{"liveAnimalsNotifications":5.5}}'
+      })
+    ).toThrow(
+      'Traffic model value "peakDay.liveAnimalsNotifications" must be a whole number'
+    )
   })
 })
 
@@ -349,8 +374,8 @@ describe('resolveTrafficModel', () => {
       'Traffic model value "p99Burst.burstDuration" must be a duration such as 2m'
     ],
     [
-      '{"iuu":{"notificationsPerHour":228.6}}',
-      'Traffic model value "iuu.notificationsPerHour" must be a whole number'
+      '{"liveAnimals":{"notificationsPerHour":43.5}}',
+      'Traffic model value "liveAnimals.notificationsPerHour" must be a whole number'
     ]
   ])('rejects %s', (text, message) => {
     expect(() => resolveTrafficModel({ TRAFFIC_MODEL: text })).toThrow(message)
@@ -393,6 +418,36 @@ describe('resolveTrafficModel', () => {
       })
     ).toThrow(
       'Traffic model value "endurance.returningUsersPerFrontend" must be a whole number'
+    )
+  })
+
+  test('rejects a combined alone window under the one-second step rule', () => {
+    expect(() =>
+      resolveTrafficModel({
+        TRAFFIC_MODEL: '{"combined":{"aloneDuration":"1s"}}'
+      })
+    ).toThrow(
+      "TRAFFIC_MODEL combined.aloneDuration must be at least 2s, got '1s'"
+    )
+  })
+
+  test('rejects a fractional MDM cache lifetime', () => {
+    expect(() =>
+      resolveTrafficModel({
+        TRAFFIC_MODEL: '{"combined":{"referenceDataCacheMinutes":1.5}}'
+      })
+    ).toThrow(
+      'Traffic model value "combined.referenceDataCacheMinutes" must be a whole number'
+    )
+  })
+
+  test('rejects a session path spike of 0', () => {
+    expect(() =>
+      resolveTrafficModel({
+        TRAFFIC_MODEL: '{"combined":{"sessionPathSpikeRps":0}}'
+      })
+    ).toThrow(
+      'Traffic model value "combined.sessionPathSpikeRps" must be a positive number'
     )
   })
 
@@ -589,10 +644,7 @@ describe('scenarioRates', () => {
       'live-animals': 44,
       'high-risk-plants': 36,
       'ins-front-door': 80,
-      'ins-address-book': 20,
-      'iuu-journey-sessions': 344,
-      'iuu-front-door': 229,
-      'iuu-address-book': 57
+      'ins-address-book': 20
     })
   })
 
@@ -612,10 +664,7 @@ describe('scenarioPagesPerHour', () => {
       'live-animals': { animals: 1760, ins: 396 },
       'high-risk-plants': { plants: 1800, ins: 324 },
       'ins-front-door': { ins: 640 },
-      'ins-address-book': { ins: 240 },
-      'iuu-journey-sessions': { iuu: 2064 },
-      'iuu-front-door': { iuu: 1832 },
-      'iuu-address-book': { iuu: 684 }
+      'ins-address-book': { ins: 240 }
     })
   })
 })
@@ -627,7 +676,6 @@ describe('iterationSeconds', () => {
     expect(seconds['live-animals']).toBe(2 * 20 * SECONDS_PER_MINUTE)
     expect(seconds['high-risk-plants']).toBe(2 * 25 * SECONDS_PER_MINUTE)
     expect(seconds['ins-front-door']).toBe(5 * SECONDS_PER_MINUTE)
-    expect(seconds['iuu-journey-sessions']).toBe(1800)
   })
 })
 
@@ -654,12 +702,6 @@ describe('durationText', () => {
     [90, '90s']
   ])('writes %d seconds as %s', (seconds, text) => {
     expect(durationText(seconds)).toBe(text)
-  })
-})
-
-describe('iuuThinkSecondsMean', () => {
-  test('spreads the IUU session over its status checks, the sign-in having no wait', () => {
-    expect(iuuThinkSecondsMean(resolveTrafficModel({}))).toBe(360)
   })
 })
 
@@ -744,5 +786,67 @@ describe('arrivalScenarios', () => {
     )
 
     expect(total).toBeLessThanOrEqual(MAX_SMOKE_VUS)
+  })
+})
+
+describe('resilience model', () => {
+  test.each([
+    ['resilience.baselineDuration', '5m'],
+    ['resilience.faultDuration', '2m'],
+    ['resilience.clearedDuration', '2m'],
+    ['resilience.recoveryStep', '30s'],
+    ['resilience.slowDelayMs', 5000],
+    ['resilience.hangMs', 120_000],
+    ['resilience.errorStatus', 503],
+    ['resilience.retryAfterSeconds', 5],
+    ['resilience.slowRate', 1],
+    ['resilience.hangRate', 1],
+    ['resilience.resetRate', 1],
+    ['resilience.throttleRate', 0.5],
+    ['resilience.errorRate', 0.5]
+  ])('defaults %s to %s', (path, expected) => {
+    expect(pathOf(TRAFFIC_DEFAULTS, path)).toBe(expected)
+  })
+
+  test('accepts a compressed resilience run', () => {
+    const model = resolveTrafficModel({
+      TRAFFIC_MODEL:
+        '{"resilience":{"baselineDuration":"1m","faultDuration":"20s","clearedDuration":"30s","recoveryStep":"10s"}}'
+    })
+
+    expect(model.resilience.recoveryStep).toBe('10s')
+  })
+
+  test.each([
+    [
+      '{"resilience":{"recoveryStep":"1s"}}',
+      "TRAFFIC_MODEL resilience.recoveryStep must be at least 2s, got '1s'"
+    ],
+    [
+      '{"resilience":{"clearedDuration":"50s"}}',
+      "TRAFFIC_MODEL resilience.clearedDuration must be a whole number of resilience.recoveryStep, got '50s' and '30s'"
+    ],
+    [
+      '{"resilience":{"faultDuration":"1s"}}',
+      "TRAFFIC_MODEL resilience.faultDuration must be at least 2s, got '1s'"
+    ],
+    [
+      '{"resilience":{"errorStatus":404}}',
+      'TRAFFIC_MODEL resilience.errorStatus must be from 500 to 599, got 404'
+    ],
+    [
+      '{"resilience":{"errorRate":1.5}}',
+      'Traffic model value "resilience.errorRate" must be between 0 and 1'
+    ],
+    [
+      '{"resilience":{"slowDelayMs":2.5}}',
+      'Traffic model value "resilience.slowDelayMs" must be a whole number'
+    ],
+    [
+      '{"resilience":{"recoveryStep":"soon"}}',
+      'Traffic model value "resilience.recoveryStep" must be a duration such as 2m'
+    ]
+  ])('rejects %s', (text, message) => {
+    expect(() => resolveTrafficModel({ TRAFFIC_MODEL: text })).toThrow(message)
   })
 })

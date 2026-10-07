@@ -1,17 +1,20 @@
 import {
+  ALONE_PHASES,
   DESIGN_TARGETS,
   FRONTEND_OF_SCENARIO,
-  IUU_SCENARIOS,
+  ISOLATION_PAIRS,
   JOURNEY_OF,
-  LOAD_PROFILES,
   REPORTED_PHASES,
   RETURNING_SCENARIOS,
   HOUR_PHASES,
   SHAPES,
   averageLoadFactors,
   averageLoadProfileLine,
+  combinedProfileLine,
   enduranceProfileLine,
   enduranceRunSeconds,
+  eventingWatchSeconds,
+  eventingWindow,
   expectedReauthentications,
   hourLabel,
   journeyScenariosIn,
@@ -23,13 +26,23 @@ import {
   spikeProfileLine
 } from '../config/design-target.js'
 import { kindOf } from '../config/endpoints.js'
+import { REFERENCE_DATA_READS } from '../config/reference-data.js'
 import { RE_AUTHENTICATION_TAG } from '../config/request-mix.js'
 import { INTERIM_TARGETS, subMetricKey } from '../config/thresholds.js'
 import {
   SECONDS_PER_HOUR,
+  SECONDS_PER_MINUTE,
   durationSeconds,
   durationText
 } from '../config/traffic.js'
+import {
+  drainLine,
+  eventCountLines,
+  eventCountRows,
+  eventingWatchSummary,
+  smoothingLine
+} from './eventing.js'
+import { expectedExpiries } from './reference-data.js'
 import { thresholdLines, thresholdResults } from './summary-text.js'
 
 const PERCENT = 100
@@ -163,7 +176,15 @@ export const achievedBurst = ({ metrics, seconds }) =>
     ])
   )
 
-const durationOf = (metrics, tags, stat) =>
+/**
+ * Reads one statistic of a sub-metric of `http_req_duration`.
+ *
+ * @param {Record<string, object>} metrics - k6's summary metrics.
+ * @param {Record<string, string>} tags - The tags that select the sub-metric.
+ * @param {string} stat - `count`, `max`, `p(95)` or any other trend statistic.
+ * @returns {number | undefined} The value, or undefined when k6 has none.
+ */
+export const durationOf = (metrics, tags, stat) =>
   valueOf(metrics, subMetricKey('http_req_duration', tags), stat)
 
 /**
@@ -234,7 +255,13 @@ export const p95Comparison = ({
   }
 }
 
-const kindsIn = (endpoints) =>
+/**
+ * The request kinds a scenario's endpoints make, in the order reports list them.
+ *
+ * @param {string[]} endpoints - Endpoint names from the catalogue.
+ * @returns {string[]} `page`, `api` and `upload`, those that apply.
+ */
+export const kindsIn = (endpoints) =>
   KINDS.filter((kind) => endpoints.some((name) => kindOf(name) === kind))
 
 /**
@@ -389,28 +416,18 @@ export const achievedJourneyLine = ({
 }) =>
   `Achieved ${scenario} over the ${phase} (${durationText(seconds)}): ${labelledAgainst('notifications an hour', achieved.notificationsPerHour, target.notificationsPerHour, figureText)}, frontend ${labelledAgainst('RPS', achieved.frontendRps, target.frontendRps, rpsText)}, backend ${labelledAgainst('RPS', achieved.backendRps, target.backendRps, rpsText)} (${BACKEND_NOTE}), ${labelledAgainst('concurrent users', achieved.concurrentUsers, target.concurrentUsers, figureText)} (${target.source})`
 
-const profileLabel = (loadProfile) =>
-  loadProfile === LOAD_PROFILES.WITH_IUU ? 'with IUU' : 'two journeys'
-
 /**
  * States the front door's achieved figures against its volumetrics targets.
  *
  * @param {object} options - The figures.
- * @param {string} options.loadProfile - A value of `LOAD_PROFILES`.
  * @param {string} options.phase - The phase they were worked out over.
  * @param {number} options.seconds - The phase's length.
  * @param {ReturnType<typeof achievedFrontDoor>} options.achieved - What the run achieved.
- * @param {(typeof DESIGN_TARGETS)['frontDoor']['two-journeys']} options.target - The volumetrics figures.
+ * @param {(typeof DESIGN_TARGETS)['frontDoor']} options.target - The volumetrics figures.
  * @returns {string} The line.
  */
-export const achievedFrontDoorLine = ({
-  loadProfile,
-  phase,
-  seconds,
-  achieved,
-  target
-}) =>
-  `Achieved front door (${profileLabel(loadProfile)}) over the ${phase} (${durationText(seconds)}): ${labelledAgainst('sign-ins an hour', achieved.signInsPerHour, target.signInsPerHour, figureText)}, core pages ${labelledAgainst('RPS', achieved.coreRps, target.coreRps, rpsText)}, ${labelledAgainst('concurrent users', achieved.concurrentUsers, target.concurrentUsers, figureText)} (${target.source})`
+export const achievedFrontDoorLine = ({ phase, seconds, achieved, target }) =>
+  `Achieved front door over the ${phase} (${durationText(seconds)}): ${labelledAgainst('sign-ins an hour', achieved.signInsPerHour, target.signInsPerHour, figureText)}, core pages ${labelledAgainst('RPS', achieved.coreRps, target.coreRps, rpsText)}, ${labelledAgainst('concurrent users', achieved.concurrentUsers, target.concurrentUsers, figureText)} (${target.source})`
 
 /**
  * States the dashboard-read share of the request mix against the D7 target.
@@ -499,14 +516,9 @@ export const endpointLine = ({
  *
  * @param {object} options - The verdicts.
  * @param {ReturnType<typeof relativeBurstVerdicts>} options.verdicts - Every pair's verdict.
- * @param {boolean} options.gating - False for the with-IUU profile, which is reported only.
  * @returns {string} The line.
  */
-export const relativeOutcomeLine = ({ verdicts, gating }) => {
-  if (!gating) {
-    return 'Relative thresholds: reported, not gated (with-IUU profile)'
-  }
-
+export const relativeOutcomeLine = ({ verdicts }) => {
   const over = verdicts.filter(({ verdict }) => verdict === 'over')
 
   return over.length === 0
@@ -527,35 +539,26 @@ const pagesOver = (metrics, tags) =>
  * @param {object} options - The spike.
  * @param {Record<string, object>} options.metrics - k6's summary metrics.
  * @param {number} options.seconds - The spike's length.
- * @param {Record<string, unknown>} options.scenarioSet - The scenarios that ran.
- * @returns {{ animals: number, plants: number, ins: number, iuu: number, animalsBackend: number, plantsBackend: number, iuuBackend: number, sessionPath: number, signIns: number }} Page requests a second; `signIns` is a count.
+ * @returns {{ animals: number, plants: number, ins: number, animalsBackend: number, plantsBackend: number, sessionPath: number, signIns: number }} Page requests a second; `signIns` is a count.
  */
-export const achievedSpike = ({ metrics, seconds, scenarioSet }) => {
+export const achievedSpike = ({ metrics, seconds }) => {
   const rate = (tags) =>
     pagesOver(metrics, { ...tags, phase: 'spike' }) / seconds
   const { backendCallsPerPage } = DESIGN_TARGETS
   const animals = rate({ frontend: 'animals' })
   const plants = rate({ frontend: 'plants' })
   const ins = rate({ frontend: 'ins' })
-  const iuu = Object.keys(IUU_SCENARIOS)
-    .filter((scenario) => scenario in scenarioSet)
-    .reduce((total, scenario) => total + rate({ scenario }), 0)
-  const [animalsBackend, plantsBackend, iuuBackend] = [
-    animals,
-    plants,
-    iuu
-  ].map((pages) => pages * backendCallsPerPage)
+  const [animalsBackend, plantsBackend] = [animals, plants].map(
+    (pages) => pages * backendCallsPerPage
+  )
 
   return {
     animals,
     plants,
     ins,
-    iuu,
     animalsBackend,
     plantsBackend,
-    iuuBackend,
-    sessionPath:
-      animals + plants + ins + animalsBackend + plantsBackend + iuuBackend,
+    sessionPath: animals + plants + ins + animalsBackend + plantsBackend,
     signIns: pagesOver(metrics, { traffic_class: 'sign-in', phase: 'spike' })
   }
 }
@@ -567,18 +570,12 @@ export const achievedSpike = ({ metrics, seconds, scenarioSet }) => {
  * @param {string} options.duration - The spike's length as configured, such as `10s`.
  * @param {ReturnType<typeof achievedSpike>} options.achieved - What the run achieved.
  * @param {ReturnType<typeof spikeCapacities>} options.capacities - The stated capacities.
- * @param {string} options.loadProfile - A value of `LOAD_PROFILES`.
  * @returns {string} The line.
  */
-export const spikeLine = ({ duration, achieved, capacities, loadProfile }) => {
-  const withIuu = loadProfile === LOAD_PROFILES.WITH_IUU
-  const insCapacity = withIuu ? capacities.ins + capacities.iuu : capacities.ins
-  const insNote = withIuu
-    ? ` (${rpsText(capacities.ins)} core and ${rpsText(capacities.iuu)} IUU)`
-    : ''
+export const spikeLine = ({ duration, achieved, capacities }) => {
   const { backendCallsPerPage } = DESIGN_TARGETS
 
-  return `Spike (${duration}): animals frontend ${labelledAgainst('RPS', achieved.animals, capacities.animals, rpsText)}, backend ${labelledAgainst('RPS', achieved.animalsBackend, capacities.animals * backendCallsPerPage, rpsText)} (${BACKEND_NOTE}); plants frontend ${labelledAgainst('RPS', achieved.plants, capacities.plants, rpsText)}, backend ${labelledAgainst('RPS', achieved.plantsBackend, capacities.plants * backendCallsPerPage, rpsText)}; INS front door ${labelledAgainst('RPS', achieved.ins, insCapacity, rpsText)}${insNote} including ${achieved.signIns} sign-ins; session path ${labelledAgainst('RPS', achieved.sessionPath, capacities.sessionPath, rpsText)} (derived: every frontend page plus ${backendCallsPerPage} backend call a journey page)`
+  return `Spike (${duration}): animals frontend ${labelledAgainst('RPS', achieved.animals, capacities.animals, rpsText)}, backend ${labelledAgainst('RPS', achieved.animalsBackend, capacities.animals * backendCallsPerPage, rpsText)} (${BACKEND_NOTE}); plants frontend ${labelledAgainst('RPS', achieved.plants, capacities.plants, rpsText)}, backend ${labelledAgainst('RPS', achieved.plantsBackend, capacities.plants * backendCallsPerPage, rpsText)}; INS front door ${labelledAgainst('RPS', achieved.ins, capacities.ins, rpsText)} including ${achieved.signIns} sign-ins; session path ${labelledAgainst('RPS', achieved.sessionPath, capacities.sessionPath, rpsText)} (derived: every frontend page plus ${backendCallsPerPage} backend call a journey page)`
 }
 
 const percentOver = (factor) => `${Math.round((factor - 1) * PERCENT)}%`
@@ -646,14 +643,9 @@ export const driftLine = ({
  * @param {object} options - The rule.
  * @param {string} options.label - `Recovery` or `Drift`.
  * @param {Array<ReturnType<typeof p95Comparison>>} options.comparisons - Every pair's comparison.
- * @param {boolean} options.gating - False for the with-IUU profile, which is reported only.
  * @returns {string} The line.
  */
-export const comparisonOutcomeLine = ({ label, comparisons, gating }) => {
-  if (!gating) {
-    return `${label}: reported, not gated (with-IUU profile)`
-  }
-
+export const comparisonOutcomeLine = ({ label, comparisons }) => {
   const over = comparisons.filter(({ verdict }) => verdict === 'over')
 
   return over.length === 0
@@ -758,10 +750,10 @@ export const transportErrorCount = (metrics) =>
 export const transportErrorLine = (metrics) =>
   `Transport errors (refused, reset or timed out): ${transportErrorCount(metrics)}`
 
-const burstTargets = (loadProfile) => ({
+const burstTargets = () => ({
   animals: DESIGN_TARGETS['live-animals'].burstRps,
   plants: DESIGN_TARGETS['high-risk-plants'].burstRps,
-  ins: DESIGN_TARGETS.frontDoor[loadProfile].burstRps
+  ins: DESIGN_TARGETS.frontDoor.burstRps
 })
 
 const burstSeconds = (schedule) => phaseSeconds(schedule, 'burst')
@@ -791,17 +783,10 @@ export const hourTarget = (target, factor) =>
  * @param {Record<string, object>} options.metrics - k6's summary metrics.
  * @param {ReadonlyArray<object>} options.schedule - The run's phase schedule.
  * @param {object} options.model - A resolved traffic model.
- * @param {string} options.loadProfile - A value of `LOAD_PROFILES`.
  * @param {Record<string, { endpoints: string[] }>} options.scenarioSet - Scenarios shaped like `SCENARIOS`.
  * @returns {Array<{ hour: number, phase: string, label: string, segment: string, share: number, factor: number, seconds: number, journeys: Record<string, { achieved: object, target: object }>, frontDoor: { achieved: object, target: object } }>} One row per hour, hour 00 first.
  */
-export const averageLoadHours = ({
-  metrics,
-  schedule,
-  model,
-  loadProfile,
-  scenarioSet
-}) => {
+export const averageLoadHours = ({ metrics, schedule, model, scenarioSet }) => {
   const factors = averageLoadFactors(model)
 
   return HOUR_PHASES.map((phase, hour) => {
@@ -827,7 +812,7 @@ export const averageLoadHours = ({
       ),
       frontDoor: {
         achieved: achievedFrontDoor({ metrics, phase, seconds }),
-        target: hourTarget(DESIGN_TARGETS.frontDoor[loadProfile], factor)
+        target: hourTarget(DESIGN_TARGETS.frontDoor, factor)
       }
     }
   })
@@ -842,12 +827,11 @@ const hourJourneyText = (scenario, { achieved, target }) =>
  *
  * @param {object} options - The hour.
  * @param {ReturnType<typeof averageLoadHours>[number]} options.row - The hour's row.
- * @param {string} options.loadProfile - A value of `LOAD_PROFILES`.
  * @returns {string} The line.
  */
-export const hourLine = ({ row, loadProfile }) => {
+export const hourLine = ({ row }) => {
   const { achieved, target } = row.frontDoor
-  const frontDoorText = `front door (${profileLabel(loadProfile)}) ${labelledAgainst('sign-ins an hour', achieved.signInsPerHour, target.signInsPerHour, figureText)}, core pages ${labelledAgainst('RPS', achieved.coreRps, target.coreRps, rpsText)}, ${labelledAgainst('concurrent users', achieved.concurrentUsers, target.concurrentUsers, figureText)}`
+  const frontDoorText = `front door ${labelledAgainst('sign-ins an hour', achieved.signInsPerHour, target.signInsPerHour, figureText)}, core pages ${labelledAgainst('RPS', achieved.coreRps, target.coreRps, rpsText)}, ${labelledAgainst('concurrent users', achieved.concurrentUsers, target.concurrentUsers, figureText)}`
 
   return `Hour ${row.label} (${row.segment}, ${percentText(row.share)} of a weekday, ${durationText(row.seconds)}): ${[
     ...Object.entries(row.journeys).map(([scenario, figures]) =>
@@ -859,7 +843,6 @@ export const hourLine = ({ row, loadProfile }) => {
 
 const runDescription = ({
   shape,
-  loadProfile,
   scenarioLength,
   environment,
   stubProfile,
@@ -867,22 +850,19 @@ const runDescription = ({
 }) => ({
   line: runLine({
     shape,
-    loadProfile,
     scenarioLength,
     environment,
     stubProfile,
     model
   }),
   shape,
-  loadProfile,
   scenarioLength,
   environment,
-  stubProfile: stubProfile ?? 'as-reported',
-  gating: loadProfile === LOAD_PROFILES.TWO_JOURNEYS
+  stubProfile: stubProfile ?? 'as-reported'
 })
 
 const averageLoadReport = (options) => {
-  const { metrics, loadProfile, schedule, scenarioSet, model } = options
+  const { metrics, schedule, scenarioSet, model } = options
 
   return {
     run: {
@@ -895,7 +875,6 @@ const averageLoadReport = (options) => {
       metrics,
       schedule,
       model,
-      loadProfile,
       scenarioSet
     }),
     relative: [],
@@ -905,13 +884,7 @@ const averageLoadReport = (options) => {
   }
 }
 
-const achievedOver = ({
-  metrics,
-  phase,
-  seconds,
-  scenarioSet,
-  loadProfile
-}) => ({
+const achievedOver = ({ metrics, phase, seconds, scenarioSet }) => ({
   journeys: Object.fromEntries(
     journeyScenariosIn(scenarioSet).map((scenario) => [
       scenario,
@@ -923,16 +896,29 @@ const achievedOver = ({
   ),
   frontDoor: {
     achieved: achievedFrontDoor({ metrics, phase, seconds }),
-    target: DESIGN_TARGETS.frontDoor[loadProfile]
+    target: DESIGN_TARGETS.frontDoor
   }
 })
 
+const eventingReport = ({ metrics, shape, schedule }) => {
+  const { phase, startSeconds, endSeconds } = eventingWindow({
+    shape,
+    schedule
+  })
+
+  return {
+    phase,
+    windowSeconds: endSeconds - startSeconds,
+    watchSeconds: eventingWatchSeconds({ schedule }) - endSeconds,
+    ...eventingWatchSummary(metrics, phase)
+  }
+}
+
 const peakReport = (options) => {
-  const { metrics, shape, loadProfile, schedule, scenarioSet, model } = options
+  const { metrics, shape, schedule, scenarioSet, model } = options
   const [steady] = REPORTED_PHASES[shape]
   const seconds = phaseSeconds(schedule, steady)
   const run = runDescription(options)
-  const { gating } = run
   const isBurst = shape === SHAPES.P99_BURST
   const verdicts = isBurst
     ? relativeBurstVerdicts({ metrics, scenarioSet })
@@ -949,8 +935,7 @@ const peakReport = (options) => {
       metrics,
       phase: steady,
       seconds,
-      scenarioSet,
-      loadProfile
+      scenarioSet
     }),
     ...(isBurst
       ? {
@@ -961,14 +946,15 @@ const peakReport = (options) => {
               metrics,
               seconds: burstSeconds(schedule)
             }),
-            targets: burstTargets(loadProfile)
-          }
+            targets: burstTargets()
+          },
+          eventing: eventingReport({ metrics, shape, schedule })
         }
       : {}),
     relative: verdicts,
     endpoints: endpointRows({ metrics, scenarioSet, phase: steady }),
     thresholds: thresholdResults(metrics),
-    relativeFailed: gating && verdicts.some(({ verdict }) => verdict === 'over')
+    relativeFailed: verdicts.some(({ verdict }) => verdict === 'over')
   }
 }
 
@@ -976,7 +962,7 @@ const anyOver = (comparisons) =>
   comparisons.some(({ verdict }) => verdict === 'over')
 
 const spikeReport = (options) => {
-  const { metrics, shape, loadProfile, schedule, scenarioSet, model } = options
+  const { metrics, shape, schedule, scenarioSet, model } = options
   const [baseline] = REPORTED_PHASES[shape]
   const run = runDescription(options)
   const { recoveredDuration, spikeDuration } = model.spikeRecovery
@@ -993,7 +979,7 @@ const spikeReport = (options) => {
   return {
     run: {
       ...run,
-      profileLine: spikeProfileLine({ model, loadProfile, scenarioSet }),
+      profileLine: spikeProfileLine({ model, scenarioSet }),
       steadyPhase: baseline,
       steadySeconds: phaseSeconds(schedule, baseline),
       schedule
@@ -1002,29 +988,28 @@ const spikeReport = (options) => {
       metrics,
       phase: baseline,
       seconds: phaseSeconds(schedule, baseline),
-      scenarioSet,
-      loadProfile
+      scenarioSet
     }),
     spike: {
       duration: spikeDuration,
       seconds: phaseSeconds(schedule, 'spike'),
       achieved: achievedSpike({
         metrics,
-        seconds: phaseSeconds(schedule, 'spike'),
-        scenarioSet
+        seconds: phaseSeconds(schedule, 'spike')
       }),
-      capacities: spikeCapacities({ model, loadProfile })
+      capacities: spikeCapacities({ model })
     },
     relative: comparisons,
     cascade: { signInFailureRates: signInFailureRates(metrics) },
+    eventing: eventingReport({ metrics, shape, schedule }),
     endpoints: endpointRows({ metrics, scenarioSet, phase: baseline }),
     thresholds: thresholdResults(metrics),
-    relativeFailed: run.gating && anyOver(comparisons)
+    relativeFailed: anyOver(comparisons)
   }
 }
 
 const enduranceReport = (options) => {
-  const { metrics, shape, loadProfile, schedule, scenarioSet, model } = options
+  const { metrics, shape, schedule, scenarioSet, model } = options
   const run = runDescription(options)
   const runSeconds = enduranceRunSeconds(schedule)
   const { endurance: enduranceLimits } = INTERIM_TARGETS
@@ -1052,7 +1037,7 @@ const enduranceReport = (options) => {
       return {
         phase,
         seconds,
-        ...achievedOver({ metrics, phase, seconds, scenarioSet, loadProfile })
+        ...achievedOver({ metrics, phase, seconds, scenarioSet })
       }
     }),
     relative: comparisons,
@@ -1060,14 +1045,414 @@ const enduranceReport = (options) => {
     transportErrors: transportErrorCount(metrics),
     endpoints: endpointRows({ metrics, scenarioSet }),
     thresholds: thresholdResults(metrics),
-    relativeFailed: run.gating && anyOver(comparisons)
+    relativeFailed: anyOver(comparisons)
+  }
+}
+
+const SHARED_PHASES = Object.freeze(['combined', 'burst', 'session-spike'])
+
+const sharedRow = ({ metrics, schedule, model, phase }) => {
+  const seconds = phaseSeconds(schedule, phase)
+  const { sessionPath, readModel } = DESIGN_TARGETS.sharedComponents
+  const rows = {
+    combined: {
+      duration: model.combined.combinedDuration,
+      sessionPathTarget: sessionPath.sustainedRps,
+      readModelTarget: readModel.sustainedRps
+    },
+    burst: {
+      duration: model.p99Burst.burstDuration,
+      sessionPathTarget: sessionPath.burstRps,
+      readModelTarget: readModel.burstRps
+    },
+    'session-spike': {
+      duration: model.spikeRecovery.spikeDuration,
+      sessionPathTarget: model.combined.sessionPathSpikeRps,
+      readModelTarget: undefined
+    }
+  }
+  const frontendPages = FRONTENDS.reduce(
+    (total, frontend) => total + pagesOver(metrics, { frontend, phase }),
+    0
+  )
+
+  return {
+    phase,
+    seconds,
+    ...rows[phase],
+    sessionPathRps: frontendPages / seconds,
+    readModelRps:
+      countOf(metrics, subMetricKey('read_model_reads', { phase })) / seconds
+  }
+}
+
+/**
+ * Works out the load the shared components carried in the combined run's
+ * sustained, burst and session-spike phases.
+ *
+ * The session path is the frontends' own session stores, one resolution a page
+ * request, so its rate is the three frontends' page requests a second. The
+ * read model's rate is the INS dashboard views a second, each one a read.
+ *
+ * @param {object} options - The run.
+ * @param {Record<string, object>} options.metrics - k6's summary metrics.
+ * @param {ReadonlyArray<object>} options.schedule - The run's phase schedule.
+ * @param {object} options.model - A resolved traffic model.
+ * @returns {Record<string, { phase: string, seconds: number, duration: string, sessionPathRps: number, readModelRps: number, sessionPathTarget: number, readModelTarget: number | undefined }>} A row for each of `combined`, `burst` and `session-spike`. Rates are zero, never NaN, where there are no samples.
+ */
+export const achievedSharedComponents = ({ metrics, schedule, model }) =>
+  Object.fromEntries(
+    SHARED_PHASES.map((phase) => [
+      phase,
+      sharedRow({ metrics, schedule, model, phase })
+    ])
+  )
+
+/**
+ * States the session path's achieved load against its three figures.
+ *
+ * @param {object} options - The figures.
+ * @param {ReturnType<typeof achievedSharedComponents>} options.shared - The shared components' rows.
+ * @returns {string} The line.
+ */
+export const sessionPathLine = ({ shared }) => {
+  const { combined, burst } = shared
+  const spike = shared['session-spike']
+
+  return `Session path (each frontend's own session store, one resolution a page request): ${rpsText(combined.sessionPathRps)} RPS over the combined (${combined.duration}) against ${rpsText(combined.sessionPathTarget)} sustained (NFR-DEP-05); ${rpsText(burst.sessionPathRps)} RPS in the burst (${burst.duration}) against ${rpsText(burst.sessionPathTarget)} (NFR-VOL-CORE-06); ${rpsText(spike.sessionPathRps)} RPS in the session spike (${spike.duration}) against ${rpsText(spike.sessionPathTarget)} (§9.4); no backend resolves a session today (c-008), so the frontends carry §9.4's backend share`
+}
+
+/**
+ * States the dashboard read model's achieved reads against its two figures.
+ *
+ * @param {object} options - The figures.
+ * @param {ReturnType<typeof achievedSharedComponents>} options.shared - The shared components' rows.
+ * @returns {string} The line.
+ */
+export const readModelReadsLine = ({ shared }) => {
+  const { combined, burst } = shared
+
+  return `Dashboard read model (one read an INS dashboard view): ${rpsText(combined.readModelRps)} reads a second over the combined (${combined.duration}) against ${rpsText(combined.readModelTarget)} (§9.4 SYN-21); ${rpsText(burst.readModelRps)} in the burst (${burst.duration}) against ${rpsText(burst.readModelTarget)}`
+}
+
+/**
+ * States how long the read model's consumer took to take in live animals' events.
+ *
+ * @param {Record<string, object>} metrics - k6's summary metrics.
+ * @returns {string} The line.
+ */
+export const arrivalLagLine = (metrics) => {
+  const key = subMetricKey('event_arrival_seconds', {
+    scenario: 'live-animals'
+  })
+
+  if (countOf(metrics, key) === 0) {
+    return 'Read model consumer: no live-animals arrival was measured'
+  }
+
+  return `Read model consumer: live-animals events arrived P95 ${figureText(valueOf(metrics, key, 'p(95)'))}s, max ${figureText(valueOf(metrics, key, 'max'))}s after the outbox read (event_arrival_seconds)`
+}
+
+const failedRateOf = (metrics, tags) =>
+  valueOf(metrics, subMetricKey('http_req_failed', tags), 'rate')
+
+/**
+ * Compares each journey's response times and failures run alone with run
+ * combined, for each request kind it makes.
+ *
+ * @param {object} options - The run.
+ * @param {Record<string, object>} options.metrics - k6's summary metrics.
+ * @param {Record<string, { endpoints: string[] }>} options.scenarioSet - Scenarios shaped like `SCENARIOS`.
+ * @returns {Array<{ scenario: string, kind: string, aloneP95Ms: number | undefined, combinedP95Ms: number | undefined, aloneCount: number, combinedCount: number, aloneFailedRate: number | undefined, combinedFailedRate: number | undefined, changeShare: number | null }>} One per journey and kind. `changeShare` is the combined P95 over the alone P95, less 1; null when either is missing.
+ */
+export const aloneCombinedComparisons = ({ metrics, scenarioSet }) =>
+  journeyScenariosIn(scenarioSet).flatMap((scenario) =>
+    kindsIn(scenarioSet[scenario].endpoints).map((kind) => {
+      const alone = { scenario, kind, phase: ALONE_PHASES[scenario] }
+      const combined = { scenario, kind, phase: 'combined' }
+      const aloneCount = durationOf(metrics, alone, 'count') ?? 0
+      const combinedCount = durationOf(metrics, combined, 'count') ?? 0
+      const aloneP95Ms =
+        aloneCount === 0 ? undefined : durationOf(metrics, alone, 'p(95)')
+      const combinedP95Ms =
+        combinedCount === 0 ? undefined : durationOf(metrics, combined, 'p(95)')
+
+      return {
+        scenario,
+        kind,
+        aloneP95Ms,
+        combinedP95Ms,
+        aloneCount,
+        combinedCount,
+        aloneFailedRate: failedRateOf(metrics, {
+          scenario,
+          phase: alone.phase
+        }),
+        combinedFailedRate: failedRateOf(metrics, {
+          scenario,
+          phase: combined.phase
+        }),
+        changeShare:
+          aloneP95Ms === undefined || combinedP95Ms === undefined
+            ? null
+            : combinedP95Ms / aloneP95Ms - 1
+      }
+    })
+  )
+
+const NOT_MEASURED = 'not measured'
+
+const measuredText = (value, format) =>
+  value === undefined ? NOT_MEASURED : format(value)
+
+const signedPercentText = (share) =>
+  `${share < 0 ? '-' : '+'}${Math.abs(Math.round(share * PERCENT))}%`
+
+/**
+ * States one journey and request kind's figures run alone and combined.
+ *
+ * @param {ReturnType<typeof aloneCombinedComparisons>[number]} comparison - The comparison.
+ * @returns {string} The line.
+ */
+export const aloneCombinedLine = ({
+  scenario,
+  kind,
+  aloneP95Ms,
+  combinedP95Ms,
+  aloneCount,
+  combinedCount,
+  aloneFailedRate,
+  combinedFailedRate,
+  changeShare
+}) =>
+  `Alone and combined ${scenario} ${kind}: P95 ${measuredText(aloneP95Ms, millisecondsText)} alone (${aloneCount} requests), ${measuredText(combinedP95Ms, millisecondsText)} combined (${combinedCount} requests), ${changeShare === null ? NOT_MEASURED : signedPercentText(changeShare)}; failed ${measuredText(aloneFailedRate, percentText)} alone, ${measuredText(combinedFailedRate, percentText)} combined`
+
+const holdsOrUnmeasured = (value, limit) =>
+  value === undefined || limitHolds(value, limit)
+
+/**
+ * Judges each journey, for each request kind, while the other journey spikes
+ * and the minute after.
+ *
+ * @param {object} options - The run.
+ * @param {Record<string, object>} options.metrics - k6's summary metrics.
+ * @param {Record<string, { endpoints: string[] }>} options.scenarioSet - Scenarios shaped like `SCENARIOS`.
+ * @returns {Array<{ spiking: string, other: string, phase: string, kind: string, count: number, measured: boolean, p95Ms: number | undefined, p99Ms: number | undefined, p95LimitMs: number | undefined, p99LimitMs: number | undefined, failedRate: number, within: boolean }>} One per pair, phase and kind; a row with no requests is not measured and not within.
+ */
+export const isolationRows = ({ metrics, scenarioSet }) =>
+  ISOLATION_PAIRS.flatMap(({ spiking, other, phases }) =>
+    phases.flatMap((phase) =>
+      kindsIn(scenarioSet[other].endpoints).map((kind) => {
+        const tags = { scenario: other, kind, phase }
+        const { p95Ms: p95LimitMs, p99Ms: p99LimitMs } = INTERIM_TARGETS[kind]
+        const p95Ms = durationOf(metrics, tags, 'p(95)')
+        const p99Ms = durationOf(metrics, tags, 'p(99)')
+        const failedRate =
+          failedRateOf(metrics, { scenario: other, phase }) ?? 0
+        const count = durationOf(metrics, tags, 'count') ?? 0
+
+        return {
+          spiking,
+          other,
+          phase,
+          kind,
+          count,
+          measured: count > 0,
+          p95Ms,
+          p99Ms,
+          p95LimitMs,
+          p99LimitMs,
+          failedRate,
+          within:
+            count > 0 &&
+            holdsOrUnmeasured(p95Ms, p95LimitMs) &&
+            holdsOrUnmeasured(p99Ms, p99LimitMs) &&
+            failedRate < INTERIM_TARGETS.maxFailureRate
+        }
+      })
+    )
+  )
+
+const againstLimitText = (value, limit) =>
+  limit === undefined
+    ? millisecondsText(value)
+    : `${millisecondsText(value)} against ${millisecondsText(limit)}`
+
+/**
+ * States how one journey and request kind fared while the other journey spiked.
+ *
+ * @param {ReturnType<typeof isolationRows>[number]} row - The row.
+ * @returns {string} The line.
+ */
+export const isolationLine = ({
+  spiking,
+  other,
+  phase,
+  kind,
+  count,
+  p95Ms,
+  p99Ms,
+  p95LimitMs,
+  p99LimitMs,
+  failedRate,
+  within
+}) => {
+  const subject = `Isolation ${other} ${kind} during the ${spiking} spike (${phase})`
+
+  if (count === 0) {
+    return `${subject}: no requests`
+  }
+
+  return `${subject}: ${count} requests, P95 ${againstLimitText(p95Ms, p95LimitMs)}, P99 ${againstLimitText(p99Ms, p99LimitMs)}, failed ${percentText(failedRate)} against ${percentText(INTERIM_TARGETS.maxFailureRate)}: ${within ? 'within' : 'OVER'}`
+}
+
+const cacheFigures = (metrics, endpoint, cache) => {
+  const key = subMetricKey('reference_data_duration', { endpoint, cache })
+
+  return {
+    count: countOf(metrics, key),
+    p95Ms: valueOf(metrics, key, 'p(95)'),
+    maxMs: valueOf(metrics, key, 'max')
+  }
+}
+
+const FIRST_READ_CLASSES = Object.freeze({ 0: 'warm', 1: 'cold' })
+
+/**
+ * Collects reference-data's cold and warm response times, per endpoint read.
+ *
+ * @param {Record<string, object>} metrics - k6's summary metrics.
+ * @returns {Array<{ endpoint: string, path: string, readBy: string, forcedMiss: boolean, cold: { count: number, p95Ms: number | undefined, maxMs: number | undefined }, warm: { count: number, p95Ms: number | undefined, maxMs: number | undefined }, unclassified: { count: number }, failed: number, firstRead: 'cold' | 'warm' | 'not measured' }>} One row per read.
+ */
+export const referenceDataRows = (metrics) =>
+  REFERENCE_DATA_READS.map(({ endpoint, path, readBy, forcedMiss }) => ({
+    endpoint,
+    path,
+    readBy,
+    forcedMiss,
+    cold: cacheFigures(metrics, endpoint, 'cold'),
+    warm: cacheFigures(metrics, endpoint, 'warm'),
+    unclassified: {
+      count: cacheFigures(metrics, endpoint, 'unclassified').count
+    },
+    failed: countOf(
+      metrics,
+      subMetricKey('reference_data_failed_reads', { endpoint })
+    ),
+    firstRead:
+      FIRST_READ_CLASSES[
+        valueOf(
+          metrics,
+          subMetricKey('reference_data_first_read', { endpoint }),
+          'value'
+        )
+      ] ?? NOT_MEASURED
+  }))
+
+const readsText = (label, { count, p95Ms, maxMs }, note = '') =>
+  count === 0
+    ? `${label} 0 reads${note}`
+    : `${label} ${count} ${count === 1 ? 'read' : 'reads'}${note}, P95 ${millisecondsText(p95Ms)}, max ${millisecondsText(maxMs)}`
+
+/**
+ * States reference-data's cold and warm response times for one read.
+ *
+ * @param {ReturnType<typeof referenceDataRows>[number]} row - The row.
+ * @returns {string} The line.
+ */
+export const referenceDataLine = ({
+  endpoint,
+  path,
+  forcedMiss,
+  cold,
+  warm,
+  unclassified,
+  failed,
+  firstRead
+}) =>
+  `Reference data ${endpoint} (${path}): ${readsText('cold', cold, ' (MDM called)')}; ${readsText('warm', warm)}${unclassified.count > 0 ? `; ${unclassified.count} unclassified (the stub did not report its MDM count)` : ''}${failed > 0 ? `; ${failed} failed reads (not timed)` : ''}${forcedMiss ? '; a forced miss, cold on every read' : `; first read in the run ${firstRead}`}`
+
+/**
+ * States how long reference-data keeps MDM answers, and what that means for the watch.
+ *
+ * @param {object} options - The watch.
+ * @param {object} options.model - A resolved traffic model.
+ * @param {number} options.watchSeconds - How long the watch ran.
+ * @returns {string} The line.
+ */
+export const referenceDataCacheLine = ({ model, watchSeconds }) =>
+  `Reference data cache: reference-data keeps MDM answers ${model.combined.referenceDataCacheMinutes} minutes (cache.mdm.ttl-minutes), so a ${durationText(Math.floor(watchSeconds / SECONDS_PER_MINUTE) * SECONDS_PER_MINUTE)} watch should see about ${expectedExpiries({ watchSeconds, cacheMinutes: model.combined.referenceDataCacheMinutes })} cold reads for each key it reads, and one more for each key not yet cached when the run started`
+
+/**
+ * States how many notifications the dashboard read model held at the start of
+ * a combined run, and why that is one journey's.
+ *
+ * @param {object} options - The reading.
+ * @param {Record<string, number>} options.volume - The count in each datastore.
+ * @returns {string} The line.
+ */
+export const readModelLine = ({ volume }) =>
+  `Read model at start: ${volume['dashboard-read-model']} notifications; it holds live animals' only, because high-risk plants publishes no events today (pbe-022); the journeys' backends hold ${volume['live-animals']} live-animals and ${volume['high-risk-plants']} high-risk-plants notifications`
+
+const combinedReport = (options) => {
+  const { metrics, shape, schedule, scenarioSet, model } = options
+  const [steady] = REPORTED_PHASES[shape]
+  const steadySeconds = phaseSeconds(schedule, steady)
+  const watchSeconds = schedule.find(
+    ({ phase }) => phase === 'plants-alone'
+  ).endSeconds
+
+  return {
+    run: {
+      ...runDescription(options),
+      profileLine: combinedProfileLine({ model, scenarioSet }),
+      steadyPhase: steady,
+      steadySeconds,
+      schedule
+    },
+    achieved: achievedOver({
+      metrics,
+      phase: steady,
+      seconds: steadySeconds,
+      scenarioSet
+    }),
+    alone: Object.fromEntries(
+      journeyScenariosIn(scenarioSet).map((scenario) => {
+        const phase = ALONE_PHASES[scenario]
+        const seconds = phaseSeconds(schedule, phase)
+
+        return [
+          scenario,
+          {
+            phase,
+            seconds,
+            achieved: achievedJourney({ metrics, scenario, phase, seconds }),
+            target: DESIGN_TARGETS[scenario]
+          }
+        ]
+      })
+    ),
+    shared: achievedSharedComponents({ metrics, schedule, model }),
+    comparisons: aloneCombinedComparisons({ metrics, scenarioSet }),
+    isolation: isolationRows({ metrics, scenarioSet }),
+    referenceData: {
+      rows: referenceDataRows(metrics),
+      watchSeconds,
+      cacheMinutes: model.combined.referenceDataCacheMinutes
+    },
+    eventCounts: eventCountRows(metrics),
+    relative: [],
+    endpoints: endpointRows({ metrics, scenarioSet, phase: steady }),
+    thresholds: thresholdResults(metrics),
+    relativeFailed: false
   }
 }
 
 const REPORTS = {
   [SHAPES.AVERAGE_LOAD]: averageLoadReport,
   [SHAPES.SPIKE_RECOVERY]: spikeReport,
-  [SHAPES.ENDURANCE]: enduranceReport
+  [SHAPES.ENDURANCE]: enduranceReport,
+  [SHAPES.COMBINED]: combinedReport
 }
 
 /**
@@ -1075,12 +1460,13 @@ const REPORTS = {
  * achieved against the volumetrics figures, the burst verdicts and every
  * endpoint's response times, tagged by journey, scenario and kind. The
  * average-load run reports each hour of its weekday against that hour's target
- * instead.
+ * instead. The combined run reports the shared components, the alone-and-combined
+ * comparison, isolation while the other journey spikes, and reference data's cold
+ * and warm response times.
  *
  * @param {object} options - The run.
  * @param {Record<string, object>} options.metrics - k6's summary metrics.
  * @param {string} options.shape - A value of `SHAPES`.
- * @param {string} options.loadProfile - A value of `LOAD_PROFILES`.
  * @param {string} options.scenarioLength - A value of `SCENARIO_LENGTHS`.
  * @param {string} options.environment - The environment the run was in.
  * @param {string | undefined} options.stubProfile - The stub profile the run required, if any.
@@ -1104,15 +1490,14 @@ const journeyLines = ({ achieved, run }) =>
     seconds: run.steadySeconds
   })
 
-const frontDoorLineOver = ({ achieved, loadProfile, phase, seconds }) =>
+const frontDoorLineOver = ({ achieved, phase, seconds }) =>
   achievedFrontDoorLine({
-    loadProfile,
     phase,
     seconds,
     ...achieved.frontDoor
   })
 
-const burstLines = ({ burst, relative, run }) =>
+const burstLines = ({ burst, relative }) =>
   burst === undefined
     ? []
     : [
@@ -1123,16 +1508,30 @@ const burstLines = ({ burst, relative, run }) =>
           targets: burst.targets
         }),
         ...relative.map(relativeLine),
-        relativeOutcomeLine({ verdicts: relative, gating: run.gating })
+        relativeOutcomeLine({ verdicts: relative })
+      ]
+
+const eventingLines = ({ eventing }) =>
+  eventing === undefined
+    ? []
+    : [
+        smoothingLine({
+          phase: eventing.phase,
+          windowSeconds: eventing.windowSeconds,
+          eventing
+        }),
+        drainLine({
+          phase: eventing.phase,
+          watchSeconds: eventing.watchSeconds,
+          eventing
+        })
       ]
 
 const averageLoadText = (report, metrics) =>
   `${[
     report.run.line,
     report.run.profileLine,
-    ...report.hours.map((row) =>
-      hourLine({ row, loadProfile: report.run.loadProfile })
-    ),
+    ...report.hours.map((row) => hourLine({ row })),
     ...report.endpoints.map(endpointLine),
     ...thresholdLines(metrics)
   ].join('\n')}\n`
@@ -1142,7 +1541,6 @@ const peakText = (report, metrics) =>
     report.run.line,
     ...journeyLines(report),
     achievedFrontDoorLine({
-      loadProfile: report.run.loadProfile,
       phase: report.run.steadyPhase,
       seconds: report.run.steadySeconds,
       ...report.achieved.frontDoor
@@ -1152,6 +1550,7 @@ const peakText = (report, metrics) =>
       share: report.achieved.frontDoor.achieved.dashboardReadShare
     }),
     ...burstLines(report),
+    ...eventingLines(report),
     ...report.endpoints.map(endpointLine),
     ...thresholdLines(metrics)
   ].join('\n')}\n`
@@ -1162,7 +1561,6 @@ const spikeText = (report, metrics) =>
     report.run.profileLine,
     ...journeyLines(report),
     achievedFrontDoorLine({
-      loadProfile: report.run.loadProfile,
       phase: report.run.steadyPhase,
       seconds: report.run.steadySeconds,
       ...report.achieved.frontDoor
@@ -1174,16 +1572,15 @@ const spikeText = (report, metrics) =>
     spikeLine({
       duration: report.spike.duration,
       achieved: report.spike.achieved,
-      capacities: report.spike.capacities,
-      loadProfile: report.run.loadProfile
+      capacities: report.spike.capacities
     }),
     ...report.relative.map(recoveryLine),
     comparisonOutcomeLine({
       label: 'Recovery',
-      comparisons: report.relative,
-      gating: report.run.gating
+      comparisons: report.relative
     }),
     signInCascadeLine(metrics),
+    ...eventingLines(report),
     ...report.endpoints.map(endpointLine),
     ...thresholdLines(metrics)
   ].join('\n')}\n`
@@ -1200,7 +1597,6 @@ const enduranceText = (report, metrics) =>
       }),
       frontDoorLineOver({
         achieved: window,
-        loadProfile: report.run.loadProfile,
         phase: window.phase,
         seconds: window.seconds
       })
@@ -1208,8 +1604,7 @@ const enduranceText = (report, metrics) =>
     ...report.relative.map(driftLine),
     comparisonOutcomeLine({
       label: 'Drift',
-      comparisons: report.relative,
-      gating: report.run.gating
+      comparisons: report.relative
     }),
     ...reauthenticationLines({
       entries: report.reauthentication,
@@ -1221,10 +1616,50 @@ const enduranceText = (report, metrics) =>
     ...thresholdLines(metrics)
   ].join('\n')}\n`
 
+const combinedText = (report, metrics) =>
+  `${[
+    report.run.line,
+    report.run.profileLine,
+    ...journeyLines(report),
+    achievedFrontDoorLine({
+      phase: report.run.steadyPhase,
+      seconds: report.run.steadySeconds,
+      ...report.achieved.frontDoor
+    }),
+    requestMixLine({
+      phase: report.run.steadyPhase,
+      share: report.achieved.frontDoor.achieved.dashboardReadShare
+    }),
+    ...Object.entries(report.alone).map(([scenario, figures]) =>
+      achievedJourneyLine({ scenario, ...figures })
+    ),
+    sessionPathLine({ shared: report.shared }),
+    readModelReadsLine({ shared: report.shared }),
+    ...eventCountLines({
+      rows: report.eventCounts,
+      environment: report.run.environment
+    }),
+    arrivalLagLine(metrics),
+    ...report.referenceData.rows.map(referenceDataLine),
+    referenceDataCacheLine({
+      model: {
+        combined: {
+          referenceDataCacheMinutes: report.referenceData.cacheMinutes
+        }
+      },
+      watchSeconds: report.referenceData.watchSeconds
+    }),
+    ...report.comparisons.map(aloneCombinedLine),
+    ...report.isolation.map(isolationLine),
+    ...report.endpoints.map(endpointLine),
+    ...thresholdLines(metrics)
+  ].join('\n')}\n`
+
 const TEXTS = {
   [SHAPES.AVERAGE_LOAD]: averageLoadText,
   [SHAPES.SPIKE_RECOVERY]: spikeText,
-  [SHAPES.ENDURANCE]: enduranceText
+  [SHAPES.ENDURANCE]: enduranceText,
+  [SHAPES.COMBINED]: combinedText
 }
 
 /**
@@ -1245,10 +1680,24 @@ const HTML_ESCAPES = {
   "'": '&#39;'
 }
 
-const escapeHtml = (value) =>
+/**
+ * Escapes a value for HTML text.
+ *
+ * @param {unknown} value - Any value.
+ * @returns {string} The value as text with `&`, `<`, `>` and quotes escaped.
+ */
+export const escapeHtml = (value) =>
   String(value).replace(/[&<>"']/g, (character) => HTML_ESCAPES[character])
 
-const table = (heading, columns, rows) =>
+/**
+ * Writes a heading and a table of rows as HTML, every cell escaped.
+ *
+ * @param {string} heading - The table's heading.
+ * @param {string[]} columns - The column names.
+ * @param {Array<Array<unknown>>} rows - The rows of cells.
+ * @returns {string} The HTML.
+ */
+export const table = (heading, columns, rows) =>
   `<h2>${escapeHtml(heading)}</h2>\n<table style="border-collapse:collapse">\n<tr>${columns
     .map(
       (column) =>
@@ -1326,6 +1775,25 @@ const ACHIEVED_COLUMNS = [
   'Target'
 ]
 
+const drainCell = ({ drainSeconds, watchSeconds }) =>
+  drainSeconds === null ? `did not drain within ${watchSeconds}s` : drainSeconds
+
+const eventingTable = ({ eventing }) =>
+  table(
+    'Eventing',
+    ['Measure', 'Value'],
+    [
+      [
+        `Notifications submitted in the ${eventing.phase}`,
+        eventing.submittedInWindow
+      ],
+      [`Backlog depth before the ${eventing.phase}`, eventing.preBurstDepth],
+      ['Peak backlog depth', eventing.peakDepth],
+      ['Peak events forwarded in one second', eventing.peakPerSecond],
+      ['Drain time in seconds', drainCell(eventing)]
+    ]
+  )
+
 const peakTables = (report) => [
   table(
     achievedHeading(report.run.steadyPhase),
@@ -1333,7 +1801,8 @@ const peakTables = (report) => [
     achievedRows(report)
   ),
   burstTable(report),
-  relativeTable(report)
+  relativeTable(report),
+  ...(report.eventing === undefined ? [] : [eventingTable(report)])
 ]
 
 const hourRow = (row) => [
@@ -1398,8 +1867,7 @@ const comparisonTable = ({ heading, beforeLabel, afterLabel, comparisons }) =>
     ])
   )
 
-const spikeRows = ({ achieved, capacities, loadProfile }) => {
-  const withIuu = loadProfile === LOAD_PROFILES.WITH_IUU
+const spikeRows = ({ achieved, capacities }) => {
   const { backendCallsPerPage } = DESIGN_TARGETS
 
   return [
@@ -1415,11 +1883,7 @@ const spikeRows = ({ achieved, capacities, loadProfile }) => {
       achieved.plantsBackend,
       capacities.plants * backendCallsPerPage
     ],
-    [
-      'INS front door',
-      achieved.ins,
-      withIuu ? capacities.ins + capacities.iuu : capacities.ins
-    ],
+    ['INS front door', achieved.ins, capacities.ins],
     ['session path (derived)', achieved.sessionPath, capacities.sessionPath]
   ].map(([component, rate, capacity]) => [
     component,
@@ -1438,14 +1902,15 @@ const spikeTables = (report) => [
   table(
     `Spike (${report.spike.duration})`,
     ['Component', 'RPS', 'Capacity'],
-    spikeRows({ ...report.spike, loadProfile: report.run.loadProfile })
+    spikeRows(report.spike)
   ),
   comparisonTable({
     heading: 'Recovery P95',
     beforeLabel: 'Baseline',
     afterLabel: 'Recovered',
     comparisons: report.relative
-  })
+  }),
+  eventingTable(report)
 ]
 
 const enduranceTables = (report) => [
@@ -1499,10 +1964,139 @@ const endpointsTable = (report) =>
     ])
   )
 
+const sharedRows = (shared) =>
+  Object.values(shared).flatMap(
+    ({
+      phase,
+      duration,
+      sessionPathRps,
+      readModelRps,
+      sessionPathTarget,
+      readModelTarget
+    }) => [
+      [
+        'session path',
+        `${phase} (${duration})`,
+        rpsText(sessionPathRps),
+        rpsText(sessionPathTarget),
+        DESIGN_TARGETS.sharedComponents.sessionPath.source
+      ],
+      ...(readModelTarget === undefined
+        ? []
+        : [
+            [
+              'dashboard read model',
+              `${phase} (${duration})`,
+              rpsText(readModelRps),
+              rpsText(readModelTarget),
+              DESIGN_TARGETS.sharedComponents.readModel.source
+            ]
+          ])
+    ]
+  )
+
+const roundedMs = (value) => (value === undefined ? '' : Math.round(value))
+
+const comparisonRow = (entry) => [
+  entry.scenario,
+  entry.kind,
+  roundedMs(entry.aloneP95Ms),
+  roundedMs(entry.combinedP95Ms),
+  entry.changeShare === null ? '' : signedPercentText(entry.changeShare),
+  measuredText(entry.aloneFailedRate, percentText),
+  measuredText(entry.combinedFailedRate, percentText)
+]
+
+const isolationVerdictText = (row) => {
+  if (row.count === 0) {
+    return NOT_MEASURED
+  }
+
+  return row.within ? 'yes' : 'no'
+}
+
+const isolationRow = (row) => [
+  row.other,
+  `${row.spiking} spike (${row.phase})`,
+  row.kind,
+  row.count,
+  roundedMs(row.p95Ms),
+  roundedMs(row.p99Ms),
+  percentText(row.failedRate),
+  isolationVerdictText(row)
+]
+
+const referenceDataRow = (row) => [
+  row.endpoint,
+  row.path,
+  row.cold.count,
+  roundedMs(row.cold.p95Ms),
+  row.warm.count,
+  roundedMs(row.warm.p95Ms),
+  row.failed,
+  row.firstRead
+]
+
+const combinedTables = (report) => [
+  `<p>${escapeHtml(report.run.profileLine)}</p>`,
+  table(
+    achievedHeading(report.run.steadyPhase),
+    ACHIEVED_COLUMNS,
+    achievedRows(report)
+  ),
+  table(
+    'Shared components',
+    ['Component', 'Phase', 'Achieved RPS', 'Target', 'Source'],
+    sharedRows(report.shared)
+  ),
+  table(
+    'Alone and combined',
+    [
+      'Scenario',
+      'Kind',
+      'Alone P95 ms',
+      'Combined P95 ms',
+      'Change',
+      'Alone failed',
+      'Combined failed'
+    ],
+    report.comparisons.map(comparisonRow)
+  ),
+  table(
+    'Isolation',
+    [
+      'Journey',
+      'During',
+      'Kind',
+      'Requests',
+      'P95 ms',
+      'P99 ms',
+      'Failed',
+      'Within'
+    ],
+    report.isolation.map(isolationRow)
+  ),
+  table(
+    'Reference data',
+    [
+      'Endpoint',
+      'Path',
+      'Cold reads',
+      'Cold P95 ms',
+      'Warm reads',
+      'Warm P95 ms',
+      'Failed reads',
+      'First read'
+    ],
+    report.referenceData.rows.map(referenceDataRow)
+  )
+]
+
 const TABLES = {
   [SHAPES.AVERAGE_LOAD]: averageLoadTables,
   [SHAPES.SPIKE_RECOVERY]: spikeTables,
-  [SHAPES.ENDURANCE]: enduranceTables
+  [SHAPES.ENDURANCE]: enduranceTables,
+  [SHAPES.COMBINED]: combinedTables
 }
 
 /**

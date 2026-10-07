@@ -1,21 +1,29 @@
 import { describe, expect, test } from 'vitest'
 
 import { DATASTORES } from './background-volume.js'
-import { HOUR_PHASES } from './design-target.js'
+import { HOUR_PHASES, SHAPES, scenarioSetForShape } from './design-target.js'
+import { SCHEMA_VERSIONS } from './eventing.js'
+import { STUB_HOSTED_INTEGRATIONS } from './resilience.js'
 import { STUBBED_INTEGRATIONS } from './stub-profiles.js'
 import {
   INTERIM_TARGETS,
   asReportingOnly,
   backgroundVolumeReportThresholds,
   backgroundVolumeThresholds,
+  combinedReportThresholds,
   designTargetReportThresholds,
   designTargetThresholds,
   documentScanThresholds,
+  eventArrivalThresholds,
+  eventingReportThresholds,
   hourlyReportThresholds,
   notificationSplitThresholds,
+  peakDayThresholds,
   reauthenticationReportThresholds,
+  resilienceReportThresholds,
   runEnvironmentReportThresholds,
   scenarioThresholds,
+  serviceBusThresholds,
   signInTargetThresholds,
   smokeThresholds,
   stubCeilingStepThresholds,
@@ -326,43 +334,21 @@ describe('stubCeilingStepThresholds', () => {
 })
 
 describe('signInTargetThresholds', () => {
-  const keys = signInTargetThresholds({
-    gating: ['defra-id-target-two-journeys'],
-    reporting: ['defra-id-target-with-iuu']
+  const keys = signInTargetThresholds(['defra-id-target'])
+
+  test('gates the target on failures, checks and dropped iterations', () => {
+    expect(keys['http_req_failed{scenario:defra-id-target}']).toEqual([
+      'rate<0.01'
+    ])
+    expect(keys['checks{scenario:defra-id-target}']).toEqual(['rate>0.99'])
+    expect(keys['dropped_iterations{scenario:defra-id-target}']).toEqual([
+      'count<1'
+    ])
   })
 
-  test('gates the two-journey target on failures, checks and dropped iterations', () => {
+  test('reports the p95 of the profiled requests', () => {
     expect(
-      keys['http_req_failed{scenario:defra-id-target-two-journeys}']
-    ).toEqual(['rate<0.01'])
-    expect(keys['checks{scenario:defra-id-target-two-journeys}']).toEqual([
-      'rate>0.99'
-    ])
-    expect(
-      keys['dropped_iterations{scenario:defra-id-target-two-journeys}']
-    ).toEqual(['count<1'])
-  })
-
-  test('only reports the with-IUU target', () => {
-    expect(keys['http_req_failed{scenario:defra-id-target-with-iuu}']).toEqual([
-      'rate>=0'
-    ])
-    expect(keys['checks{scenario:defra-id-target-with-iuu}']).toEqual([
-      'rate>=0'
-    ])
-    expect(
-      keys['dropped_iterations{scenario:defra-id-target-with-iuu}']
-    ).toEqual(['count>=0'])
-  })
-
-  test('reports the p95 of the profiled requests of both', () => {
-    expect(
-      keys[
-        'http_req_duration{scenario:defra-id-target-two-journeys,profiled:yes}'
-      ]
-    ).toEqual(['p(95)>=0'])
-    expect(
-      keys['http_req_duration{scenario:defra-id-target-with-iuu,profiled:yes}']
+      keys['http_req_duration{scenario:defra-id-target,profiled:yes}']
     ).toEqual(['p(95)>=0'])
   })
 })
@@ -468,8 +454,7 @@ describe('designTargetThresholds', () => {
   test('judges sustained-peak response times in the hold phase without aborting, and still aborts on failed requests', () => {
     const set = designTargetThresholds({
       shape: 'sustained-peak',
-      scenarioSet,
-      gating: true
+      scenarioSet
     })
     const key = `http_req_duration{scenario:${SCENARIO},endpoint:ins-dashboard,phase:hold}`
 
@@ -483,8 +468,7 @@ describe('designTargetThresholds', () => {
   test('judges sustained-peak failures, checks and dropped iterations over the whole scenario', () => {
     const set = designTargetThresholds({
       shape: 'sustained-peak',
-      scenarioSet,
-      gating: true
+      scenarioSet
     })
 
     expect(Object.keys(set)).toEqual(
@@ -499,8 +483,7 @@ describe('designTargetThresholds', () => {
   test('gates the burst run on 5xx in the burst minute, checks and dropped iterations', () => {
     const set = designTargetThresholds({
       shape: 'p99-burst',
-      scenarioSet,
-      gating: true
+      scenarioSet
     })
 
     expect(set[`server_errors{scenario:${SCENARIO},phase:burst}`]).toEqual([
@@ -513,8 +496,7 @@ describe('designTargetThresholds', () => {
   test('only reports the burst run peak-phase response times, and never aborts', () => {
     const set = designTargetThresholds({
       shape: 'p99-burst',
-      scenarioSet,
-      gating: true
+      scenarioSet
     })
     const key = `http_req_duration{scenario:${SCENARIO},endpoint:ins-dashboard,phase:peak}`
 
@@ -528,8 +510,7 @@ describe('designTargetThresholds', () => {
   test('judges average-load response times, failed requests and checks over the whole run, without aborting', () => {
     const set = designTargetThresholds({
       shape: 'average-load',
-      scenarioSet,
-      gating: true
+      scenarioSet
     })
     const key = `http_req_duration{scenario:${SCENARIO},endpoint:ins-dashboard}`
 
@@ -543,22 +524,6 @@ describe('designTargetThresholds', () => {
       expect(limits.every((limit) => typeof limit === 'string')).toBe(true)
     }
   })
-
-  test.each(['sustained-peak', 'p99-burst', 'average-load'])(
-    'can never fail %s when it is not gating',
-    (shape) => {
-      const set = designTargetThresholds({
-        shape,
-        scenarioSet,
-        gating: false
-      })
-
-      for (const limits of Object.values(set)) {
-        expect(limits).toHaveLength(1)
-        expect(limits[0].endsWith('>=0')).toBe(true)
-      }
-    }
-  )
 })
 
 describe('hourlyReportThresholds', () => {
@@ -571,8 +536,8 @@ describe('hourlyReportThresholds', () => {
     phases: HOUR_PHASES
   })
 
-  test('holds the ten keys of each hour', () => {
-    expect(Object.keys(set)).toHaveLength(240)
+  test('holds the eleven keys of each hour', () => {
+    expect(Object.keys(set)).toHaveLength(264)
   })
 
   test('holds each hour for each journey and for the front door', () => {
@@ -657,8 +622,7 @@ describe('designTargetThresholds for spike and recovery', () => {
   const scenarioSet = { [SCENARIO]: { endpoints: ENDPOINTS } }
   const set = designTargetThresholds({
     shape: 'spike-recovery',
-    scenarioSet,
-    gating: true
+    scenarioSet
   })
 
   test('judges response times in the baseline phase, without aborting', () => {
@@ -697,19 +661,6 @@ describe('designTargetThresholds for spike and recovery', () => {
       )
     ).toEqual([])
   })
-
-  test('can never fail when it is not gating', () => {
-    const reporting = designTargetThresholds({
-      shape: 'spike-recovery',
-      scenarioSet,
-      gating: false
-    })
-
-    for (const limits of Object.values(reporting)) {
-      expect(limits).toHaveLength(1)
-      expect(limits[0].endsWith('>=0')).toBe(true)
-    }
-  })
 })
 
 describe('designTargetThresholds for endurance', () => {
@@ -720,8 +671,7 @@ describe('designTargetThresholds for endurance', () => {
   }
   const set = designTargetThresholds({
     shape: 'endurance',
-    scenarioSet,
-    gating: true
+    scenarioSet
   })
 
   test('fails the run on a transport error in any scenario', () => {
@@ -753,19 +703,6 @@ describe('designTargetThresholds for endurance', () => {
     ])
     expect(Object.keys(set).some((key) => key.includes('phase:'))).toBe(false)
   })
-
-  test('can never fail when it is not gating', () => {
-    const reporting = designTargetThresholds({
-      shape: 'endurance',
-      scenarioSet,
-      gating: false
-    })
-
-    for (const limits of Object.values(reporting)) {
-      expect(limits).toHaveLength(1)
-      expect(limits[0].endsWith('>=0')).toBe(true)
-    }
-  })
 })
 
 describe('reauthenticationReportThresholds', () => {
@@ -795,6 +732,386 @@ describe('INTERIM_TARGETS for spike and endurance', () => {
     })
     expect(INTERIM_TARGETS.endurance).toEqual({
       p95FactorOverFirstHour: 1.2,
+      minSamples: 10
+    })
+  })
+})
+
+describe('eventArrivalThresholds', () => {
+  test('requires every live-animals notification to arrive, and names no other journey', () => {
+    expect(
+      eventArrivalThresholds({
+        'ins-front-door': {},
+        'live-animals': {},
+        'high-risk-plants': {}
+      })
+    ).toEqual({ 'event_arrivals{scenario:live-animals}': ['rate==1'] })
+  })
+
+  test('has no threshold for a set with no publishing journey', () => {
+    expect(eventArrivalThresholds({ 'high-risk-plants': {} })).toEqual({})
+  })
+})
+
+describe('serviceBusThresholds', () => {
+  test('gates the v0.1.0 count at one or more in local, and reports v0.2.0', () => {
+    expect(serviceBusThresholds('local')).toEqual({
+      'service_bus_forwarded{schema_version:0.1.0}': ['value>=1'],
+      'service_bus_forwarded{schema_version:0.2.0}': ['value>=0']
+    })
+  })
+
+  test('only reports both counts outside local', () => {
+    expect(serviceBusThresholds('test')).toEqual({
+      'service_bus_forwarded{schema_version:0.1.0}': ['value>=0'],
+      'service_bus_forwarded{schema_version:0.2.0}': ['value>=0']
+    })
+  })
+})
+
+describe('eventingReportThresholds', () => {
+  const set = eventingReportThresholds()
+
+  test('names the submissions of both journeys, both kinds', () => {
+    for (const scenario of ['live-animals', 'high-risk-plants']) {
+      for (const submission of ['first', 'amendment']) {
+        expect(
+          set[
+            `notifications_submitted{scenario:${scenario},submission:${submission}}`
+          ]
+        ).toEqual(['count>=0'])
+      }
+    }
+  })
+
+  test('names events published and arrival times for live animals alone', () => {
+    expect(set['external_events_published{scenario:live-animals}']).toEqual([
+      'count>=0'
+    ])
+    expect(set['event_arrival_seconds{scenario:live-animals}']).toEqual([
+      'p(95)>=0'
+    ])
+    expect(
+      Object.keys(set).filter((key) => key.includes('high-risk-plants'))
+    ).toEqual([
+      'notifications_submitted{scenario:high-risk-plants,submission:first}',
+      'notifications_submitted{scenario:high-risk-plants,submission:amendment}'
+    ])
+  })
+
+  test('names the watch gauges and the outbound counter', () => {
+    expect(set.eventing_backlog_depth).toEqual(['value>=0'])
+    expect(set.eventing_backlog_pre_burst_depth).toEqual(['value>=0'])
+    expect(set.eventing_backlog_peak_depth).toEqual(['value>=0'])
+    expect(set.eventing_backlog_drain_seconds).toEqual(['value>=0'])
+    expect(set.eventing_backlog_drained).toEqual(['rate>=0'])
+    expect(set.service_bus_peak_per_second).toEqual(['value>=0'])
+    expect(set.service_bus_forwarded_messages).toEqual(['count>=0'])
+  })
+
+  test('keeps the forwarded count of every schema version', () => {
+    for (const version of SCHEMA_VERSIONS) {
+      expect(Object.keys(set)).toContain(
+        subMetricKey('service_bus_forwarded', { schema_version: version })
+      )
+    }
+  })
+
+  test('leaves the smoke gate on the first version when the gate is spread after it', () => {
+    const smoke = {
+      ...eventingReportThresholds(),
+      ...serviceBusThresholds('local')
+    }
+
+    expect(
+      smoke[
+        subMetricKey('service_bus_forwarded', {
+          schema_version: SCHEMA_VERSIONS[0]
+        })
+      ]
+    ).toEqual(['value>=1'])
+  })
+
+  test('can never fail: every limit is always true', () => {
+    for (const limits of Object.values(set)) {
+      expect(limits).toHaveLength(1)
+      expect(limits[0].endsWith('>=0')).toBe(true)
+    }
+  })
+})
+
+describe('peakDayThresholds', () => {
+  const set = peakDayThresholds({ 'live-animals': {}, 'high-risk-plants': {} })
+
+  test('judges each journey at the end of the run, with no abort', () => {
+    for (const scenario of ['live-animals', 'high-risk-plants']) {
+      expect(set[`http_req_failed{scenario:${scenario}}`]).toEqual([
+        'rate<0.01'
+      ])
+      expect(set[`checks{scenario:${scenario}}`]).toEqual(['rate>0.99'])
+      expect(set[`dropped_iterations{scenario:${scenario}}`]).toEqual([
+        'count<1'
+      ])
+    }
+  })
+
+  test('gates only live animals on arrival', () => {
+    expect(set['event_arrivals{scenario:live-animals}']).toEqual(['rate==1'])
+    expect(
+      Object.keys(set).filter((key) => key.startsWith('event_arrivals'))
+    ).toEqual(['event_arrivals{scenario:live-animals}'])
+  })
+})
+
+describe('the combined run', () => {
+  const scenarioSet = {
+    'live-animals': {
+      endpoints: ['animals-dashboard', 'animals-backend-list']
+    },
+    'high-risk-plants': {
+      endpoints: ['plants-dashboard', 'plants-backend-list']
+    }
+  }
+  const set = designTargetThresholds({ shape: 'combined', scenarioSet })
+  const isRaisedPhaseDuration = (key) =>
+    key.startsWith('http_req_duration') &&
+    (key.includes('phase:session-spike') || key.includes('phase:burst'))
+
+  describe('designTargetThresholds', () => {
+    test('judges each scenario in the combined phase with the plain limits', () => {
+      expect(
+        set[
+          'http_req_duration{scenario:live-animals,endpoint:animals-dashboard,phase:combined}'
+        ]
+      ).toEqual(['p(95)<2000', 'p(99)<5000'])
+    })
+
+    test('judges whole-run health at the end without aborting', () => {
+      expect(set['http_req_failed{scenario:live-animals}']).toEqual([
+        'rate<0.01'
+      ])
+    })
+
+    test.each([
+      ['high-risk-plants', 'plants-dashboard', 'animals-spike'],
+      ['high-risk-plants', 'plants-dashboard', 'animals-spike-recovery'],
+      ['live-animals', 'animals-dashboard', 'plants-spike'],
+      ['live-animals', 'animals-dashboard', 'plants-spike-recovery']
+    ])(
+      'holds %s %s to the page limits during %s',
+      (scenario, endpoint, phase) => {
+        expect(
+          set[
+            `http_req_duration{scenario:${scenario},endpoint:${endpoint},phase:${phase}}`
+          ]
+        ).toEqual(['p(95)<2000', 'p(99)<5000'])
+      }
+    )
+
+    test('holds the other journey under 1% failed while a journey spikes', () => {
+      expect(
+        set['http_req_failed{scenario:live-animals,phase:plants-spike}']
+      ).toEqual(['rate<0.01'])
+      expect(
+        set[
+          'http_req_failed{scenario:high-risk-plants,phase:animals-spike-recovery}'
+        ]
+      ).toEqual(['rate<0.01'])
+    })
+
+    test('requires every live-animals event to reach the read model', () => {
+      expect(set['event_arrivals{scenario:live-animals}']).toEqual(['rate==1'])
+      expect(set['event_arrivals{scenario:high-risk-plants}']).toBeUndefined()
+    })
+
+    test('fails on dead-letter growth', () => {
+      expect(set['downstream_dead_letters{downstream:service-bus}']).toEqual([
+        'value<1'
+      ])
+    })
+
+    test('holds warm reference-data reads to the interim API limits, but not the forced miss', () => {
+      expect(
+        set[
+          'reference_data_duration{endpoint:reference-data-countries-sps,cache:warm}'
+        ]
+      ).toEqual(['p(95)<200', 'p(99)<1200'])
+      expect(
+        set[
+          'reference_data_duration{endpoint:reference-data-countries-uncached,cache:warm}'
+        ]
+      ).toBeUndefined()
+    })
+
+    test('never judges response times in the burst or the session spike', () => {
+      expect(Object.keys(set).filter(isRaisedPhaseDuration)).toEqual([])
+    })
+
+    test('judges the reference-data watch on its checks and failed requests at the end of the run, and on any failed read', () => {
+      expect(set['checks{scenario:reference-data-watch}']).toEqual([
+        'rate>0.99'
+      ])
+      expect(set['http_req_failed{scenario:reference-data-watch}']).toEqual([
+        'rate<0.01'
+      ])
+      expect(set.reference_data_failed_reads).toEqual(['count<1'])
+    })
+  })
+
+  describe('combinedReportThresholds', () => {
+    const report = combinedReportThresholds({
+      scenarioSet,
+      phases: ['combined', 'plants-alone']
+    })
+
+    test.each([
+      ['read_model_reads{phase:combined}', ['count>=0']],
+      [
+        'http_req_failed{scenario:high-risk-plants,phase:plants-alone}',
+        ['rate>=0']
+      ],
+      [
+        'reference_data_duration{endpoint:reference-data-countries,cache:cold}',
+        ['p(95)>=0']
+      ],
+      [
+        'reference_data_first_read{endpoint:reference-data-ports-of-entry}',
+        ['value>=0']
+      ],
+      [
+        'reference_data_failed_reads{endpoint:reference-data-countries}',
+        ['count>=0']
+      ]
+    ])('reports %s and can never fail', (key, limits) => {
+      expect(report[key]).toEqual(limits)
+    })
+  })
+})
+
+describe('resilience thresholds', () => {
+  const scenarioSet = scenarioSetForShape({ shape: SHAPES.RESILIENCE })
+  const faults = [
+    { id: 'mdm-error', integration: 'mdm' },
+    { id: 'azure-service-bus-reset', integration: 'azure-service-bus' }
+  ]
+  const phases = ['baseline', 'fault-mdm-error', 'cleared-mdm-error-1']
+
+  test('gates only the baseline phase of the four scenarios', () => {
+    const gating = designTargetThresholds({
+      shape: SHAPES.RESILIENCE,
+      scenarioSet
+    })
+
+    expect(Object.keys(gating).length).toBeGreaterThan(0)
+
+    for (const key of Object.keys(gating)) {
+      expect(key).toContain('phase:baseline')
+      expect(key).not.toContain('fault-')
+      expect(key).not.toContain('cleared-')
+    }
+
+    expect(
+      Object.keys(gating).filter((key) => key.startsWith('http_req_failed'))
+    ).toHaveLength(Object.keys(scenarioSet).length)
+  })
+
+  test('limits baseline failures to under 1% and never aborts', () => {
+    const gating = designTargetThresholds({
+      shape: SHAPES.RESILIENCE,
+      scenarioSet
+    })
+    const failed =
+      gating['http_req_failed{scenario:live-animals,phase:baseline}']
+
+    expect(failed).toEqual(['rate<0.01'])
+
+    for (const limits of Object.values(gating)) {
+      for (const limit of limits) {
+        expect(typeof limit).toBe('string')
+      }
+    }
+  })
+
+  test('puts every report key in reporting-only form', () => {
+    const report = resilienceReportThresholds({ scenarioSet, phases, faults })
+
+    expect(
+      report['stub_requests{integration:mdm,phase:fault-mdm-error}']
+    ).toEqual(['count>=0'])
+    expect(
+      report['stub_faults_injected{integration:defra-id,phase:baseline}']
+    ).toEqual(['count>=0'])
+    expect(report['fault_injection_applied{fault:mdm-error}']).toEqual([
+      'value>=0'
+    ])
+    expect(
+      report[
+        'resilience_backlog_drained_seconds{fault:azure-service-bus-reset}'
+      ]
+    ).toEqual(['value>=0'])
+    expect(
+      report['resilience_backlog_drained_seconds{fault:mdm-error}']
+    ).toBeUndefined()
+
+    for (const limits of Object.values(report)) {
+      expect(limits.every((limit) => /(>=0)$/.test(limit))).toBe(true)
+    }
+  })
+
+  test("reports each synchronous fault's own transport errors and each Service Bus fault's unread backlog", () => {
+    const report = resilienceReportThresholds({
+      scenarioSet,
+      phases,
+      faults: [...faults, { id: 'defra-id-slow', integration: 'defra-id' }]
+    })
+
+    expect(
+      report[
+        'transport_errors{scenario:reference-data-watch,phase:fault-mdm-error}'
+      ]
+    ).toEqual(['count>=0'])
+    expect(
+      report['transport_errors{endpoint:sign-in,phase:fault-defra-id-slow}']
+    ).toEqual(['count>=0'])
+    expect(
+      report['resilience_backlog_unread{fault:azure-service-bus-reset}']
+    ).toEqual(['value>=0'])
+    expect(report['resilience_backlog_unread{fault:mdm-error}']).toBeUndefined()
+  })
+
+  test('reports the stub counters of every stub-hosted integration in every phase', () => {
+    const report = resilienceReportThresholds({ scenarioSet, phases, faults })
+
+    for (const integration of STUB_HOSTED_INTEGRATIONS) {
+      for (const phase of phases) {
+        expect(
+          report[`stub_requests{integration:${integration},phase:${phase}}`]
+        ).toEqual(['count>=0'])
+      }
+    }
+  })
+
+  test('reports the caller evidence in every phase', () => {
+    const report = resilienceReportThresholds({ scenarioSet, phases, faults })
+
+    for (const phase of phases) {
+      expect(
+        report[
+          `http_req_duration{scenario:reference-data-watch,kind:api,phase:${phase}}`
+        ]
+      ).toBeDefined()
+      expect(
+        report[`http_req_failed{endpoint:sign-in,phase:${phase}}`]
+      ).toBeDefined()
+      expect(report[`transport_errors{phase:${phase}}`]).toEqual(['count>=0'])
+    }
+  })
+
+  test('names the interim verdict limits', () => {
+    expect(INTERIM_TARGETS.resilience).toEqual({
+      maxWaitMs: 30_000,
+      maxRetryAmplification: 4,
+      p95FactorOverBaseline: 1.1,
       minSamples: 10
     })
   })

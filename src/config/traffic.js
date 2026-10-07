@@ -21,11 +21,12 @@ const GBN_PP_ANNUAL_NOTIFICATIONS = 34_000
 const INTERIM_ADDRESS_BOOK_ENTRIES = 500
 const BACKGROUND_VIRTUAL_USERS = 10
 const BACKGROUND_MAX_DURATION = '24h'
+// Volumetrics §6.4 NFR-VOL-AG-06 / §7.4 NFR-VOL-PP-06: the peak-day volume.
+const NFR_VOL_AG_06_PEAK_DAY_NOTIFICATIONS = 546
+const NFR_VOL_PP_06_PEAK_DAY_NOTIFICATIONS = 442
+// Interim: 12 hours puts both journeys within 4% of their design peak-hour rate.
+const PEAK_DAY_DURATION = '12h'
 
-// Peak hour 114.3 notifications (volumetrics section 8.2) times A3's factor of 2, rounded up.
-const IUU_NOTIFICATIONS_PER_HOUR = 229
-const IUU2_SESSION_MINUTES = 30
-const IUU3_SESSIONS_PER_NOTIFICATION = A2_SESSIONS_PER_NOTIFICATION
 // DR-EUDP-005 'Scenario shapes' row 1: ramp over 3 hours, hold over the 7-hour 09:00 to 16:00 window.
 const T1_RAMP_DURATION = '3h'
 const T1_HOLD_DURATION = '7h'
@@ -51,9 +52,8 @@ const SPIKE_DURATION = '10s'
 const SPIKE_RECOVERY_DURATION = '60s'
 // Interim: the window judged once the minute c-004 allows has passed.
 const SPIKE_RECOVERED_DURATION = '2m'
-// Volumetrics section 4.2 Spike capacities rows 1 and 2: proposals pending open item 2.
+// Volumetrics section 4.2 Spike capacities row 1: a proposal pending open item 2.
 const FRONTEND_SPIKE_CAPACITY_RPS = 5
-const IUU_SPIKE_CAPACITY_RPS = 15
 // DR-EUDP-005 'Scenario shapes' row 4: eight hours at the design-target peak.
 const ENDURANCE_HOLD_DURATION = '8h'
 // c-004 default: the final hour's P95 against the first hour's.
@@ -64,13 +64,46 @@ const FRONTEND_SESSION_LIFETIME = '4h'
 const RETURNING_VISIT_INTERVAL = '10m'
 const RETURNING_USERS_PER_FRONTEND = 1
 const SESSION_EXPIRIES = ['frontend', 'client']
+// Interim: as long as the burst's peak (DR-EUDP-005 'Scenario shapes' row 2), so each journey is measured alone for a steady window.
+const COMBINED_ALONE_DURATION = '30m'
+// DR-EUDP-005 'Scenario shapes' row 2: 30 minutes at peak.
+const COMBINED_DURATION = '30m'
+// Interim: the pause that lets a spike's queues drain before the next phase.
+const COMBINED_SETTLE_DURATION = '5m'
+// Volumetrics section 9.4 Session API spike capacity (NFR-DEP-05).
+const SESSION_PATH_SPIKE_RPS = 25
+// Interim: how often the reference-data watch reads each endpoint.
+const REFERENCE_DATA_READ_INTERVAL = '10s'
+// trade-imports-reference-data cache.mdm.ttl-minutes default (CACHE_MDM_TTL_MINUTES).
+const MDM_CACHE_MINUTES = 60
+// DR-EUDP-005 'Scenario shapes' row 3: the spike run's five minutes at peak, reused as the resilience run's healthy baseline.
+const RESILIENCE_BASELINE_DURATION = '5m'
+// Interim: long enough for a caller's timeout, retries and breaker to show, short enough that 18 faults fit one run.
+const RESILIENCE_FAULT_DURATION = '2m'
+// Interim: four recovery steps of the spike run's 60 seconds c-004 allows, doubled so a slow recovery is seen.
+const RESILIENCE_CLEARED_DURATION = '2m'
+// Interim: half of c-004's 60 second recovery allowance, so recovery time is reported to 30 seconds.
+const RESILIENCE_RECOVERY_STEP = '30s'
+// Interim: five times the interim p99 target of 1,000 ms.
+const RESILIENCE_SLOW_DELAY_MS = 5000
+// Interim: twice k6's 60 second request timeout, so an unbounded wait cannot hide inside k6's own timeout.
+const RESILIENCE_HANG_MS = 120_000
+const RESILIENCE_ERROR_STATUS = 503
+const RESILIENCE_RETRY_AFTER_SECONDS = 5
+// Interim: slow, hang and reset hit every request, so the whole window is faulted.
+const RESILIENCE_ALWAYS_RATE = 1
+// Interim: "errors at a chosen rate": half the requests are throttled or fail.
+const RESILIENCE_SOMETIMES_RATE = 0.5
+// The status range of a 5xx error.
+const MIN_ERROR_STATUS = 500
+const MAX_ERROR_STATUS = 599
 
 export const ADDRESS_BOOK_SESSION_PAGES = 12
-const SECONDS_PER_MINUTE = 60
+export const SECONDS_PER_MINUTE = 60
 const SIGN_IN_PAGES_WITHOUT_WAIT = 1
 export const SECONDS_PER_HOUR = 3600
 const GRACEFUL_STOP_FACTOR = 2
-const MAX_VUS_FACTOR = 2
+export const MAX_VUS_FACTOR = 2
 const DURATION_FORMAT = /^\d+[smh]$/
 // The burst stage list spends one second ramping to the burst rate, then holds it.
 const MIN_BURST_SECONDS = 2
@@ -144,11 +177,6 @@ export const TRAFFIC_DEFAULTS = freezeDeep({
     addressBookSessionsPerNotification:
       INTERIM_ADDRESS_BOOK_SESSIONS_PER_NOTIFICATION
   },
-  iuu: {
-    notificationsPerHour: IUU_NOTIFICATIONS_PER_HOUR,
-    sessionsPerNotification: IUU3_SESSIONS_PER_NOTIFICATION,
-    sessionMinutes: IUU2_SESSION_MINUTES
-  },
   sustainedPeak: {
     rampDuration: T1_RAMP_DURATION,
     holdDuration: T1_HOLD_DURATION
@@ -172,8 +200,7 @@ export const TRAFFIC_DEFAULTS = freezeDeep({
     capacityRps: {
       ins: FRONTEND_SPIKE_CAPACITY_RPS,
       animals: FRONTEND_SPIKE_CAPACITY_RPS,
-      plants: FRONTEND_SPIKE_CAPACITY_RPS,
-      iuu: IUU_SPIKE_CAPACITY_RPS
+      plants: FRONTEND_SPIKE_CAPACITY_RPS
     }
   },
   endurance: {
@@ -184,6 +211,29 @@ export const TRAFFIC_DEFAULTS = freezeDeep({
     visitInterval: RETURNING_VISIT_INTERVAL,
     returningUsersPerFrontend: RETURNING_USERS_PER_FRONTEND
   },
+  combined: {
+    aloneDuration: COMBINED_ALONE_DURATION,
+    combinedDuration: COMBINED_DURATION,
+    settleDuration: COMBINED_SETTLE_DURATION,
+    sessionPathSpikeRps: SESSION_PATH_SPIKE_RPS,
+    referenceDataReadInterval: REFERENCE_DATA_READ_INTERVAL,
+    referenceDataCacheMinutes: MDM_CACHE_MINUTES
+  },
+  resilience: {
+    baselineDuration: RESILIENCE_BASELINE_DURATION,
+    faultDuration: RESILIENCE_FAULT_DURATION,
+    clearedDuration: RESILIENCE_CLEARED_DURATION,
+    recoveryStep: RESILIENCE_RECOVERY_STEP,
+    slowDelayMs: RESILIENCE_SLOW_DELAY_MS,
+    hangMs: RESILIENCE_HANG_MS,
+    errorStatus: RESILIENCE_ERROR_STATUS,
+    retryAfterSeconds: RESILIENCE_RETRY_AFTER_SECONDS,
+    slowRate: RESILIENCE_ALWAYS_RATE,
+    hangRate: RESILIENCE_ALWAYS_RATE,
+    resetRate: RESILIENCE_ALWAYS_RATE,
+    throttleRate: RESILIENCE_SOMETIMES_RATE,
+    errorRate: RESILIENCE_SOMETIMES_RATE
+  },
   mix: { dashboardReadShareTarget: D7_DASHBOARD_READ_SHARE },
   backgroundVolume: {
     liveAnimalsNotifications: GBN_AG_ANNUAL_NOTIFICATIONS,
@@ -192,6 +242,11 @@ export const TRAFFIC_DEFAULTS = freezeDeep({
     maxCreatedPerRun: GBN_AG_ANNUAL_NOTIFICATIONS,
     virtualUsers: BACKGROUND_VIRTUAL_USERS,
     maxDuration: BACKGROUND_MAX_DURATION
+  },
+  peakDay: {
+    liveAnimalsNotifications: NFR_VOL_AG_06_PEAK_DAY_NOTIFICATIONS,
+    highRiskPlantsNotifications: NFR_VOL_PP_06_PEAK_DAY_NOTIFICATIONS,
+    duration: PEAK_DAY_DURATION
   },
   duration: DEFAULT_DURATION
 })
@@ -251,7 +306,12 @@ const WHOLE_NUMBER_KEYS = new Set([
   'addressBookEntries',
   'maxCreatedPerRun',
   'virtualUsers',
-  'returningUsersPerFrontend'
+  'returningUsersPerFrontend',
+  'referenceDataCacheMinutes',
+  'slowDelayMs',
+  'hangMs',
+  'errorStatus',
+  'retryAfterSeconds'
 ])
 const DURATION_KEYS = new Set([
   'duration',
@@ -267,14 +327,26 @@ const DURATION_KEYS = new Set([
   'recoveredDuration',
   'comparisonWindow',
   'sessionLifetime',
-  'visitInterval'
+  'visitInterval',
+  'aloneDuration',
+  'combinedDuration',
+  'settleDuration',
+  'referenceDataReadInterval',
+  'faultDuration',
+  'clearedDuration',
+  'recoveryStep'
 ])
 const CHOICE_KEYS = { sessionExpiry: SESSION_EXPIRIES }
 const SHARE_KEYS = new Set([
   'amendShare',
   'cancelAmendShare',
   'dashboardReadShareTarget',
-  'worstCaseSearchShare'
+  'worstCaseSearchShare',
+  'slowRate',
+  'hangRate',
+  'resetRate',
+  'throttleRate',
+  'errorRate'
 ])
 const COUNT_DISTRIBUTION_MINIMUMS = {
   documentsPerNotification: 0,
@@ -502,6 +574,22 @@ const failIfSpikeTooShort = (spikeDuration) => {
   }
 }
 
+const COMBINED_PHASE_KEYS = [
+  'aloneDuration',
+  'combinedDuration',
+  'settleDuration'
+]
+
+const failIfCombinedPhaseTooShort = (combined) => {
+  COMBINED_PHASE_KEYS.forEach((key) => {
+    if (durationSeconds(combined[key]) < MIN_BURST_SECONDS) {
+      throw new Error(
+        `TRAFFIC_MODEL combined.${key} must be at least ${MIN_BURST_SECONDS}s, got '${combined[key]}'`
+      )
+    }
+  })
+}
+
 const failIfWindowsOverlap = ({ holdDuration, comparisonWindow }) => {
   if (
     durationSeconds(comparisonWindow) * HALF_DENOMINATOR >
@@ -509,6 +597,37 @@ const failIfWindowsOverlap = ({ holdDuration, comparisonWindow }) => {
   ) {
     throw new Error(
       `TRAFFIC_MODEL endurance.comparisonWindow must be at most half of endurance.holdDuration, got '${comparisonWindow}' and '${holdDuration}'`
+    )
+  }
+}
+
+const failIfResilienceInvalid = ({
+  faultDuration,
+  clearedDuration,
+  recoveryStep,
+  errorStatus
+}) => {
+  if (durationSeconds(faultDuration) < MIN_BURST_SECONDS) {
+    throw new Error(
+      `TRAFFIC_MODEL resilience.faultDuration must be at least ${MIN_BURST_SECONDS}s, got '${faultDuration}'`
+    )
+  }
+
+  if (durationSeconds(recoveryStep) < MIN_BURST_SECONDS) {
+    throw new Error(
+      `TRAFFIC_MODEL resilience.recoveryStep must be at least ${MIN_BURST_SECONDS}s, got '${recoveryStep}'`
+    )
+  }
+
+  if (durationSeconds(clearedDuration) % durationSeconds(recoveryStep) !== 0) {
+    throw new Error(
+      `TRAFFIC_MODEL resilience.clearedDuration must be a whole number of resilience.recoveryStep, got '${clearedDuration}' and '${recoveryStep}'`
+    )
+  }
+
+  if (errorStatus < MIN_ERROR_STATUS || errorStatus > MAX_ERROR_STATUS) {
+    throw new Error(
+      `TRAFFIC_MODEL resilience.errorStatus must be from ${MIN_ERROR_STATUS} to ${MAX_ERROR_STATUS}, got ${errorStatus}`
     )
   }
 }
@@ -537,6 +656,8 @@ export const resolveTrafficModel = (env, profile = {}) => {
     holdDuration: model.endurance.holdDuration,
     comparisonWindow: model.endurance.comparisonWindow
   })
+  failIfCombinedPhaseTooShort(model.combined)
+  failIfResilienceInvalid(model.resilience)
 
   return freezeDeep(model)
 }
@@ -567,18 +688,6 @@ export const thinkSecondsMean = (journeyModel, frontDoor) =>
 export const frontDoorThinkSecondsMean = (frontDoor) =>
   (frontDoor.dashboardOnlySessionMinutes * SECONDS_PER_MINUTE) /
   frontDoor.pagesPerDashboardOnlySession
-
-/**
- * The mean wait between two front-door pages of a synthetic IUU journey
- * session, which holds its sign-in and status checks across the IUU session
- * length. The sign-in has no wait.
- *
- * @param {{ iuu: { sessionMinutes: number }, frontDoor: { corePagesPerJourneySession: number } }} model - A resolved traffic model.
- * @returns {number} Seconds.
- */
-export const iuuThinkSecondsMean = (model) =>
-  (model.iuu.sessionMinutes * SECONDS_PER_MINUTE) /
-  (model.frontDoor.corePagesPerJourneySession - SIGN_IN_PAGES_WITHOUT_WAIT)
 
 const DURATION_UNIT_SECONDS = {
   s: 1,
@@ -664,9 +773,6 @@ const rateFromJourneys = (perNotification, { liveAnimals, highRiskPlants }) =>
   perNotification *
   (liveAnimals.notificationsPerHour + highRiskPlants.notificationsPerHour)
 
-const rateFromIuu = (perNotification, { iuu }) =>
-  Math.max(1, Math.round(perNotification * iuu.notificationsPerHour))
-
 /**
  * The arrival rate of each scenario, in iterations an hour.
  *
@@ -693,15 +799,6 @@ export const scenarioRates = (model) => ({
         model
       )
     )
-  ),
-  'iuu-journey-sessions': rateFromIuu(model.iuu.sessionsPerNotification, model),
-  'iuu-front-door': rateFromIuu(
-    model.frontDoor.dashboardOnlySessionsPerNotification,
-    model
-  ),
-  'iuu-address-book': rateFromIuu(
-    model.frontDoor.addressBookSessionsPerNotification,
-    model
   )
 })
 
@@ -715,8 +812,7 @@ const journeyPagesPerHour = ({ rate, journeyModel, frontend, model }) => ({
 
 /**
  * The page requests an hour each scenario puts on each frontend at its steady
- * rate. The IUU scenarios' pages are counted as `iuu`, though they land on the
- * INS host, because they count against IUU's own capacity (c-007).
+ * rate.
  *
  * @param {object} model - A resolved traffic model.
  * @returns {Record<string, Record<string, number>>} Pages an hour by scenario name, then by frontend.
@@ -724,7 +820,6 @@ const journeyPagesPerHour = ({ rate, journeyModel, frontend, model }) => ({
 export const scenarioPagesPerHour = (model) => {
   const rates = scenarioRates(model)
   const { frontDoor } = model
-  const iuuSessionPages = frontDoor.corePagesPerJourneySession
 
   return {
     'live-animals': journeyPagesPerHour({
@@ -744,15 +839,6 @@ export const scenarioPagesPerHour = (model) => {
     },
     'ins-address-book': {
       ins: rates['ins-address-book'] * ADDRESS_BOOK_SESSION_PAGES
-    },
-    'iuu-journey-sessions': {
-      iuu: rates['iuu-journey-sessions'] * iuuSessionPages
-    },
-    'iuu-front-door': {
-      iuu: rates['iuu-front-door'] * frontDoor.pagesPerDashboardOnlySession
-    },
-    'iuu-address-book': {
-      iuu: rates['iuu-address-book'] * ADDRESS_BOOK_SESSION_PAGES
     }
   }
 }
@@ -775,11 +861,6 @@ export const iterationSeconds = (model) => ({
   'ins-front-door':
     model.frontDoor.dashboardOnlySessionMinutes * SECONDS_PER_MINUTE,
   'ins-address-book':
-    ADDRESS_BOOK_SESSION_PAGES * frontDoorThinkSecondsMean(model.frontDoor),
-  'iuu-journey-sessions': model.iuu.sessionMinutes * SECONDS_PER_MINUTE,
-  'iuu-front-door':
-    model.frontDoor.dashboardOnlySessionMinutes * SECONDS_PER_MINUTE,
-  'iuu-address-book':
     ADDRESS_BOOK_SESSION_PAGES * frontDoorThinkSecondsMean(model.frontDoor)
 })
 

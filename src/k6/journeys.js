@@ -2,6 +2,7 @@ import { check } from 'k6'
 import exec from 'k6/execution'
 import http from 'k6/http'
 
+import { publishesEvents } from '../config/eventing.js'
 import { sharedEndpoints } from '../config/journey-endpoints.js'
 import { TRAFFIC_CLASSES } from '../config/request-mix.js'
 import {
@@ -14,6 +15,7 @@ import { replaceBodyFrom } from '../lib/capture.js'
 import { journeyIdFrom } from '../lib/redirects.js'
 import { chunkEvenly, reEditPlan } from '../lib/traffic-shape.js'
 import { createBrowserSession } from './browser-session.js'
+import { confirmEventArrival } from './eventing.js'
 import {
   openInsDashboard,
   SIGN_IN_AND_DASHBOARD_PAGES,
@@ -24,7 +26,8 @@ import {
   createWalker,
   recordNotificationPages,
   recordNotificationStarted,
-  recordSession
+  recordSession,
+  recordSubmission
 } from './pages.js'
 import { markPhase } from './phase.js'
 import { recordServerError, recordTransportError } from './server-errors.js'
@@ -245,7 +248,7 @@ const reEditUntilTarget = (run, context) => {
   return runSteps(context, steps, undefined)
 }
 
-const submitFromReview = (run, context, checkName) => {
+const submitFromReview = (run, context, checkName, submission) => {
   const { walker } = context
   const view = walker.open(
     pagePath(context, 'notification-view'),
@@ -268,6 +271,13 @@ const submitFromReview = (run, context, checkName) => {
       page.status === HTTP_OK &&
       page.url.endsWith('/confirmation')
   })
+
+  if (
+    confirmation.status === HTTP_OK &&
+    confirmation.url.endsWith('/confirmation')
+  ) {
+    recordSubmission(submission)
+  }
 
   return confirmation
 }
@@ -345,7 +355,7 @@ const amend = (run, walker, crumb) => {
     return
   }
 
-  submitFromReview(run, context, 'amendment resubmitted')
+  submitFromReview(run, context, 'amendment resubmitted', 'amendment')
 }
 
 const amendPagesFor = (amends, cancels) => {
@@ -369,7 +379,8 @@ const finishNotification = (run, context) => {
   const confirmation = submitFromReview(
     run,
     context,
-    'submitted through the declaration page'
+    'submitted through the declaration page',
+    'first'
   )
 
   if (confirmation.status !== HTTP_OK) {
@@ -462,6 +473,7 @@ const prepareRun = (options) => {
         ? 0
         : thinkSecondsMean(journeyModel, model.frontDoor),
     replaysCapturedSave: options.replaysCapturedSave ?? true,
+    confirmsEventArrival: options.confirmsEventArrival ?? false,
     counter: { count: 0 },
     id: '',
     amends,
@@ -502,6 +514,8 @@ const prepareRun = (options) => {
  * @param {number} options.iterationInTest - The iteration number across the whole scenario.
  * @param {boolean} [options.paced] - False waits no think time, for set-up runs that measure nothing. Defaults to true.
  * @param {boolean} [options.replaysCapturedSave] - False skips the backend replay of the first save. Defaults to true.
+ * @param {boolean} [options.confirmsEventArrival] - True proves, once the notification is finished, that its events reached the dashboard read model. Only a journey that publishes events is proved. Defaults to false.
+ * @param {string} [options.insBackendUrl] - The INS backend's base URL, which holds the read model. Needed when `confirmsEventArrival` is true.
  */
 export const notificationJourney = (options) => {
   const run = prepareRun(options)
@@ -524,6 +538,14 @@ export const notificationJourney = (options) => {
     if (!finished) {
       return
     }
+  }
+
+  if (run.confirmsEventArrival && publishesEvents(run.journey)) {
+    confirmEventArrival({
+      backendUrl: run.urls.backend,
+      insBackendUrl: options.insBackendUrl,
+      referenceNumber: run.id
+    })
   }
 
   recordNotificationPages(run.counter.count)

@@ -72,8 +72,9 @@ services:
       TRAFFIC_MODEL: '${TRAFFIC_MODEL:-}'
       STUB_PROFILE: '${STUB_PROFILE:-zero-delay}'
       STUB_CEILINGS: '${STUB_CEILINGS:-}'
-      LOAD_PROFILE: '${LOAD_PROFILE:-}'
       SCENARIO_LENGTH: '${SCENARIO_LENGTH:-}'
+      RESILIENCE_FAULTS: '${RESILIENCE_FAULTS:-}'
+      TOXIPROXY_URL: '${TOXIPROXY_URL:-}'
       REPORTS_DIR: /opt/perftest/reports
 
   k6-cdp:
@@ -96,6 +97,8 @@ services:
       TRAFFIC_MODEL: '${TRAFFIC_MODEL:-}'
       STUB_PROFILE: '${STUB_PROFILE:-}'
       STUB_CEILINGS: '${STUB_CEILINGS:-}'
+      RESILIENCE_FAULTS: '${RESILIENCE_FAULTS:-}'
+      TOXIPROXY_URL: '${TOXIPROXY_URL:-}'
       REPORTS_DIR: /opt/perftest/reports
 
   defra-id-stub-ceiling:
