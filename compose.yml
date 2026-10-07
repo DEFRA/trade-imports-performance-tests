@@ -46,7 +46,7 @@ services:
     environment:
       ENVIRONMENT: local
       LOCALHOST_ALIAS: host.docker.internal
-      AUTH_PASSWORD: '${AUTH_PASSWORD:-Password123}'
+      AUTH_PASSWORD: '${LOCAL_AUTH_PASSWORD:-Password123}'
       TRAFFIC_MODEL: '${TRAFFIC_MODEL:-}'
       STUB_PROFILE: '${STUB_PROFILE:-zero-delay}'
       STUB_CEILINGS: '${STUB_CEILINGS:-}'
@@ -68,7 +68,7 @@ services:
     environment:
       ENVIRONMENT: local
       LOCALHOST_ALIAS: host.docker.internal
-      AUTH_PASSWORD: '${AUTH_PASSWORD:-Password123}'
+      AUTH_PASSWORD: '${LOCAL_AUTH_PASSWORD:-Password123}'
       TRAFFIC_MODEL: '${TRAFFIC_MODEL:-}'
       STUB_PROFILE: '${STUB_PROFILE:-zero-delay}'
       STUB_CEILINGS: '${STUB_CEILINGS:-}'
@@ -93,7 +93,7 @@ services:
       ENVIRONMENT: '${ENVIRONMENT:-dev}'
       CDP_LOCAL: '${CDP_LOCAL:-}'
       DEVELOPER_API_KEY: '${DEVELOPER_API_KEY:-}'
-      AUTH_PASSWORD: '${AUTH_PASSWORD:-Password123}'
+      AUTH_PASSWORD: '${CDP_AUTH_PASSWORD:-${AUTH_PASSWORD:-Password123}}'
       TRAFFIC_MODEL: '${TRAFFIC_MODEL:-}'
       STUB_PROFILE: '${STUB_PROFILE:-}'
       STUB_CEILINGS: '${STUB_CEILINGS:-}'
@@ -107,7 +107,7 @@ services:
       - stub-ceiling
     environment:
       PORT: '3007'
-      AUTH_PASSWORD: '${AUTH_PASSWORD:-Password123}'
+      AUTH_PASSWORD: '${LOCAL_AUTH_PASSWORD:-Password123}'
       SECURE_COOKIE: 'false'
       STUB_LATENCY_PROFILE: '${STUB_PROFILE:-zero-delay}'
     healthcheck:
@@ -137,7 +137,7 @@ services:
     environment:
       ENVIRONMENT: local
       LOCALHOST_ALIAS: host.docker.internal
-      AUTH_PASSWORD: '${AUTH_PASSWORD:-Password123}'
+      AUTH_PASSWORD: '${LOCAL_AUTH_PASSWORD:-Password123}'
       STUB_PROFILE: '${STUB_PROFILE:-zero-delay}'
       STUB_CEILING_GROUPS: '${STUB_CEILING_GROUPS:-}'
       STUB_CEILING_MODEL: '${STUB_CEILING_MODEL:-}'
