@@ -8,7 +8,7 @@
     "node": ">=24",
     "npm": ">=11.6.2"
   },
-  "packageManager": "npm@11.6.2",
+  "packageManager": "npm@11.19.0",
   "scripts": {
     "format": "prettier --write \"**/*.{js,md,json,yml,yaml}\"",
     "format:check": "prettier --check \"**/*.{js,md,json,yml,yaml}\"",
@@ -41,14 +41,16 @@
     "k6:inspect:combined": "docker compose run --rm k6-local inspect --include-system-env-vars --execution-requirements src/suites/combined.k6.js",
     "k6:inspect:resilience": "docker compose run --rm k6-local inspect --include-system-env-vars --execution-requirements src/suites/resilience.k6.js",
     "k6:image": "docker compose up --build --exit-code-from development development",
-    "k6:down": "docker compose --profile local --profile workspace --profile stub-ceiling --profile design-target --profile cdp down"
+    "k6:down": "docker compose --profile local --profile workspace --profile stub-ceiling --profile design-target --profile cdp down",
+    "security-audit": "audit-ci --config audit-ci.jsonc"
   },
   "author": "Defra DDTS",
   "license": "OGL-UK-3.0",
   "devDependencies": {
-    "eslint": "9.39.2",
-    "neostandard": "0.13.0",
-    "prettier": "3.8.2",
-    "vitest": "4.1.8"
+    "audit-ci": "7.1.0",
+    "eslint": "10.12.0",
+    "neostandard": "0.14.0-next.1",
+    "prettier": "^3.9.9",
+    "vitest": "5.0.3"
   }
 }
