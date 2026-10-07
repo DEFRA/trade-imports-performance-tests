@@ -20,6 +20,7 @@ import {
 } from '../config/stub-profiles.js'
 import {
   backgroundVolumeReportThresholds,
+  callCountThresholds,
   documentScanThresholds,
   eventArrivalThresholds,
   eventingReportThresholds,
@@ -50,6 +51,7 @@ import {
   measureBackgroundVolume,
   reportBackgroundVolume
 } from '../k6/background-volume.js'
+import { clearCallCounts, reportCallCounts } from '../k6/call-counts.js'
 import { readEventingStart, reportEventCounts } from '../k6/eventing.js'
 import { HIGH_RISK_PLANTS_STEPS } from '../k6/high-risk-plants.js'
 import { notificationJourney } from '../k6/journeys.js'
@@ -103,6 +105,7 @@ export const options = {
     ...backgroundVolumeReportThresholds(DATASTORES),
     ...stubProfileReportThresholds(STUBBED_INTEGRATIONS),
     ...stubHeadroomReportThresholds(STUBBED_INTEGRATIONS),
+    ...callCountThresholds(environment),
     ...runEnvironmentReportThresholds(environment)
   },
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'],
@@ -150,6 +153,8 @@ export function setup() {
     'start'
   )
 
+  clearCallCounts({ urls })
+
   return {
     addressName: PERF_ADDRESS.name,
     stubLoadSince,
@@ -159,6 +164,8 @@ export function setup() {
 
 export function teardown(data) {
   try {
+    reportCallCounts({ urls })
+
     const entries = readStubProfiles({ urls })
 
     reportStubProfiles(entries, 'end', new Date())

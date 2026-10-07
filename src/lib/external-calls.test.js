@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
 
+import { PAGE_REQUEST_SERVICES } from '../config/call-ratios.js'
 import { EXTERNAL_CALLS } from '../config/external-calls.js'
 import { STUBBED_INTEGRATIONS } from '../config/stub-profiles.js'
 import {
@@ -7,6 +8,7 @@ import {
   externalCallLines,
   externalCallReport,
   metricDataRequest,
+  pageRequestCountsFromResults,
   stubProfilesFromSummary
 } from './external-calls.js'
 
@@ -108,6 +110,84 @@ describe('metricDataRequest', () => {
     expect(() => request({ runStartedAt: ENDED, runEndedAt: STARTED })).toThrow(
       'RUN_ENDED_AT must not be before RUN_STARTED_AT'
     )
+  })
+
+  test('asks for no page request counts unless it is given frontends', () => {
+    expect(
+      request().MetricDataQueries.some(({ Id }) => Id.startsWith('p'))
+    ).toBe(false)
+  })
+
+  test('asks for the backend calls, their sample count and the session resolutions of each frontend', () => {
+    const { MetricDataQueries } = request({
+      pageRequestServices: PAGE_REQUEST_SERVICES
+    })
+    const pageQueries = MetricDataQueries.filter(({ Id }) => Id.startsWith('p'))
+
+    expect(MetricDataQueries).toHaveLength(86)
+    expect(pageQueries.map(({ Id }) => Id)).toEqual([
+      'p0_backend_sum',
+      'p0_backend_count',
+      'p0_session_sum',
+      'p1_backend_sum',
+      'p1_backend_count',
+      'p1_session_sum'
+    ])
+    expect(pageQueries[0]).toEqual({
+      Id: 'p0_backend_sum',
+      ReturnData: true,
+      MetricStat: {
+        Metric: {
+          Namespace: 'trade-imports-animals-frontend',
+          MetricName: 'BackendCalls',
+          Dimensions: [{ Name: 'RequestKind', Value: 'page' }]
+        },
+        Period: 480,
+        Stat: 'Sum'
+      }
+    })
+    expect(pageQueries[1].MetricStat.Stat).toBe('SampleCount')
+    expect(pageQueries[2].MetricStat.Metric.MetricName).toBe(
+      'SessionResolutions'
+    )
+    expect(pageQueries[3].MetricStat.Metric.Namespace).toBe(
+      'trade-imports-plants-frontend'
+    )
+  })
+})
+
+describe('pageRequestCountsFromResults', () => {
+  const results = {
+    MetricDataResults: [
+      { Id: 'p0_backend_sum', Values: [138] },
+      { Id: 'p0_backend_count', Values: [100] },
+      { Id: 'p0_session_sum', Values: [197] }
+    ]
+  }
+
+  test('maps a frontend that published to its counts', () => {
+    expect(
+      pageRequestCountsFromResults(results, PAGE_REQUEST_SERVICES)[
+        'live-animals'
+      ]
+    ).toEqual({ pageRequests: 100, backendCalls: 138, sessionResolutions: 197 })
+  })
+
+  test('gives null to a frontend that published nothing', () => {
+    expect(
+      pageRequestCountsFromResults(results, PAGE_REQUEST_SERVICES)[
+        'high-risk-plants'
+      ]
+    ).toBeNull()
+  })
+
+  test('gives null for every journey when CloudWatch could not be read', () => {
+    expect(
+      pageRequestCountsFromResults(
+        { unavailableReason: 'no CloudWatch' },
+        PAGE_REQUEST_SERVICES
+      )
+    ).toEqual({ 'live-animals': null, 'high-risk-plants': null })
   })
 })
 

@@ -51,6 +51,7 @@ import { resolveRecordedCeilings } from '../config/stub-ceilings.js'
 import { STUBBED_INTEGRATIONS } from '../config/stub-profiles.js'
 import {
   backgroundVolumeReportThresholds,
+  callCountThresholds,
   combinedReportThresholds,
   designTargetReportThresholds,
   designTargetThresholds,
@@ -92,6 +93,7 @@ import {
   reportBackgroundVolume,
   requireBackgroundVolume
 } from './background-volume.js'
+import { clearCallCounts, reportCallCounts } from './call-counts.js'
 import { readDeadLetterCount, reportDeadLetters } from './dead-letters.js'
 import {
   readEventingStart,
@@ -213,7 +215,8 @@ const thresholdsFor = ({ shape, run }) => ({
   ...notificationSplitThresholds(notificationSplits(run.model)),
   ...backgroundVolumeReportThresholds(DATASTORES),
   ...stubProfileReportThresholds(STUBBED_INTEGRATIONS),
-  ...stubHeadroomReportThresholds(STUBBED_INTEGRATIONS)
+  ...stubHeadroomReportThresholds(STUBBED_INTEGRATIONS),
+  ...callCountThresholds(run.environment)
 })
 
 /**
@@ -377,6 +380,8 @@ export const createDesignTargetRun = ({ shape, env }) => {
       console.log(readModelLine({ volume }))
     }
 
+    clearCallCounts({ urls })
+
     return {
       addressName: PERF_ADDRESS.name,
       faultHosts,
@@ -392,6 +397,8 @@ export const createDesignTargetRun = ({ shape, env }) => {
 
   const teardown = (data) => {
     try {
+      reportCallCounts({ urls })
+
       const entries = readStubProfiles({ urls })
 
       reportStubProfiles(entries, 'end', new Date())
