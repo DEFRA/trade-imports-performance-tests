@@ -1,4 +1,10 @@
 import {
+  CALL_COUNT_JOURNEYS,
+  CALL_COUNT_MEASURES,
+  CALL_RATIOS
+} from './call-ratios.js'
+import { EXTERNAL_CALLS } from './external-calls.js'
+import {
   ISOLATION_PAIRS,
   PHASES,
   REFERENCE_DATA_WATCH_SCENARIO,
@@ -451,6 +457,42 @@ export const serviceBusThresholds = (environment) =>
         : ['value>=0']
     ])
   )
+
+const isDefraIdCallOf = (service) => (call) =>
+  call.service === service && call.dependency === 'defra-id'
+
+const callCountKeys = ([journey, { service }]) => [
+  ...CALL_COUNT_MEASURES.map((measure) =>
+    subMetricKey('call_count', { journey, measure })
+  ),
+  ...CALL_RATIOS.map((ratio) => subMetricKey('call_ratio', { journey, ratio })),
+  ...EXTERNAL_CALLS.filter(isDefraIdCallOf(service)).map(
+    ({ dependency, operation }) =>
+      subMetricKey('call_count_external', { journey, dependency, operation })
+  )
+]
+
+/**
+ * Builds the thresholds on the call counts each journey frontend serves.
+ *
+ * Only `call_counts_measured` gates, and only in `local`: each journey
+ * must have had its counts read back, which proves the frontend's counters are
+ * live. Elsewhere it is reported, because a CDP frontend answers 404 by design
+ * and the report reads the same counts from CloudWatch. Every count and ratio
+ * is reported, never gated, because no figure is agreed for them.
+ *
+ * @param {string} environment - The environment the run targets.
+ * @returns {Record<string, string[]>} k6 thresholds.
+ */
+export const callCountThresholds = (environment) => ({
+  ...reportingOnly(Object.entries(CALL_COUNT_JOURNEYS).flatMap(callCountKeys)),
+  ...Object.fromEntries(
+    Object.keys(CALL_COUNT_JOURNEYS).map((journey) => [
+      subMetricKey('call_counts_measured', { journey }),
+      environment === 'local' ? ['value>=1'] : ['value>=0']
+    ])
+  )
+})
 
 const submissionKeys = () =>
   Object.keys(JOURNEYS).flatMap((scenario) =>

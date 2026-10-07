@@ -1,3 +1,4 @@
+import { PAGE_REQUEST_METRICS } from '../config/call-ratios.js'
 import { EXTERNAL_CALL_STATISTICS } from '../config/external-calls.js'
 import { PROFILES, QUANTILES } from '../config/stub-profiles.js'
 import { subMetricKey } from '../config/thresholds.js'
@@ -21,6 +22,41 @@ const parsedTime = (name, value) => {
 
 const queryId = (index, key) => `c${index}_${key.toLowerCase()}`
 
+const pageRequestQueryId = (index, key) => `p${index}_${key}`
+
+const PAGE_REQUEST_STATISTICS = Object.freeze([
+  {
+    key: 'backend_sum',
+    metric: PAGE_REQUEST_METRICS.backendCalls,
+    stat: 'Sum'
+  },
+  {
+    key: 'backend_count',
+    metric: PAGE_REQUEST_METRICS.backendCalls,
+    stat: 'SampleCount'
+  },
+  {
+    key: 'session_sum',
+    metric: PAGE_REQUEST_METRICS.sessionResolutions,
+    stat: 'Sum'
+  }
+])
+
+const pageRequestQueries = ({ service }, index, period) =>
+  PAGE_REQUEST_STATISTICS.map(({ key, metric, stat }) => ({
+    Id: pageRequestQueryId(index, key),
+    ReturnData: true,
+    MetricStat: {
+      Metric: {
+        Namespace: service,
+        MetricName: metric,
+        Dimensions: [PAGE_REQUEST_METRICS.dimension]
+      },
+      Period: period,
+      Stat: stat
+    }
+  }))
+
 /**
  * Builds the CloudWatch `GetMetricData` request for a run's external calls.
  *
@@ -32,13 +68,15 @@ const queryId = (index, key) => `c${index}_${key.toLowerCase()}`
  * @param {Array<{ service: string, dependency: string, operation: string }>} options.externalCalls - The calls to read.
  * @param {string} options.runStartedAt - The run's start, as an ISO date-time.
  * @param {string} options.runEndedAt - The run's end, as an ISO date-time.
+ * @param {Array<{ journey: string, service: string }>} [options.pageRequestServices] - The frontends whose per-page-request counts to read too.
  * @returns {{ StartTime: string, EndTime: string, ScanBy: string, MetricDataQueries: object[] }} The request, in the shape `aws cloudwatch get-metric-data --cli-input-json` reads.
  * @throws {Error} When a time is missing or unparseable, or the end is before the start.
  */
 export const metricDataRequest = ({
   externalCalls,
   runStartedAt,
-  runEndedAt
+  runEndedAt,
+  pageRequestServices = []
 }) => {
   const startedAt = parsedTime('RUN_STARTED_AT', runStartedAt)
   const endedAt = parsedTime('RUN_ENDED_AT', runEndedAt)
@@ -59,8 +97,8 @@ export const metricDataRequest = ({
     StartTime: new Date(start).toISOString(),
     EndTime: new Date(end).toISOString(),
     ScanBy: 'TimestampAscending',
-    MetricDataQueries: externalCalls.flatMap(
-      ({ service, dependency, operation }, index) =>
+    MetricDataQueries: [
+      ...externalCalls.flatMap(({ service, dependency, operation }, index) =>
         EXTERNAL_CALL_STATISTICS.map(({ key, metric, stat }) => ({
           Id: queryId(index, key),
           ReturnData: true,
@@ -77,11 +115,22 @@ export const metricDataRequest = ({
             Stat: stat
           }
         }))
-    )
+      ),
+      ...pageRequestServices.flatMap((pageRequestService, index) =>
+        pageRequestQueries(pageRequestService, index, period)
+      )
+    ]
   }
 }
 
-const metricValue = (summaryExport, key) => {
+/**
+ * Reads a figure out of a run's k6 summary export.
+ *
+ * @param {{ metrics?: Record<string, { value?: number, values?: { value?: number } }> } | undefined} summaryExport - The parsed `--summary-export` file.
+ * @param {string} key - The metric or sub-metric key.
+ * @returns {number | null} The gauge's value, or null when the run did not report it.
+ */
+export const summaryMetricValue = (summaryExport, key) => {
   const entry = summaryExport?.metrics?.[key]
 
   return entry?.value ?? entry?.values?.value ?? null
@@ -91,7 +140,7 @@ const latenciesFrom = (summaryExport, integration, source) =>
   Object.fromEntries(
     QUANTILES.map((quantile) => [
       `${quantile}Ms`,
-      metricValue(
+      summaryMetricValue(
         summaryExport,
         subMetricKey('stub_latency', { integration, source, quantile })
       )
@@ -101,7 +150,7 @@ const latenciesFrom = (summaryExport, integration, source) =>
 const profileOf = (summaryExport, integration) =>
   PROFILES.find(
     (profile) =>
-      metricValue(
+      summaryMetricValue(
         summaryExport,
         subMetricKey('stub_profile', { integration, profile })
       ) === 1
@@ -125,7 +174,7 @@ export const stubProfilesFromSummary = (summaryExport, integrations) =>
         return []
       }
 
-      const answeredCount = metricValue(
+      const answeredCount = summaryMetricValue(
         summaryExport,
         subMetricKey('stub_latency_answered_count', { integration })
       )
@@ -152,6 +201,50 @@ const resultValue = (metricResults, id) => {
 
   return result?.Values?.[0] ?? null
 }
+
+const pageRequestCountsOf = (metricResults, index) => {
+  const pageRequests = resultValue(
+    metricResults,
+    pageRequestQueryId(index, 'backend_count')
+  )
+
+  return pageRequests
+    ? {
+        pageRequests,
+        backendCalls:
+          resultValue(
+            metricResults,
+            pageRequestQueryId(index, 'backend_sum')
+          ) ?? 0,
+        sessionResolutions:
+          resultValue(
+            metricResults,
+            pageRequestQueryId(index, 'session_sum')
+          ) ?? 0
+      }
+    : null
+}
+
+/**
+ * Reads each journey frontend's page requests, backend calls and session
+ * resolutions over the run window from CloudWatch's answer.
+ *
+ * @param {{ MetricDataResults?: Array<{ Id: string, Values?: number[] }> } | undefined} metricResults - CloudWatch's answer, or undefined when it could not be read.
+ * @param {Array<{ journey: string }>} pageRequestServices - The frontends the request asked about, in the order it asked.
+ * @returns {Record<string, { pageRequests: number, backendCalls: number, sessionResolutions: number } | null>} Each journey's counts, or null when its frontend published none.
+ */
+export const pageRequestCountsFromResults = (
+  metricResults,
+  pageRequestServices
+) =>
+  Object.fromEntries(
+    pageRequestServices.map(({ journey }, index) => [
+      journey,
+      Array.isArray(metricResults?.MetricDataResults)
+        ? pageRequestCountsOf(metricResults, index)
+        : null
+    ])
+  )
 
 const rowOf = ({ externalCall, index, metricResults, stubProfiles }) => {
   const { service, dependency, operation, interfaceId } = externalCall
