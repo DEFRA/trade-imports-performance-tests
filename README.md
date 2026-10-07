@@ -153,7 +153,7 @@ The same smoke suite runs in CDP `dev` and `test`, chosen by `ENVIRONMENT` alone
 
 To run it after each deploy to `dev`, set an automatic test run in the CDP Portal, on the `trade-imports-performance-tests` test suite page, for environment `dev`. Trigger it on deployments of `trade-imports-ins-frontend`, `trade-imports-animals-frontend`, `trade-imports-plants-frontend`, `trade-imports-animals-backend`, `trade-imports-plants-backend` and `trade-imports-reference-data`. This is Portal configuration, not code.
 
-To run the smoke suite from a laptop instead, see [Run from a laptop against CDP](#run-from-a-laptop-against-cdp).
+To run the smoke suite from a laptop against `dev` or `test` instead, see [Run from a laptop against CDP](#run-from-a-laptop-against-cdp).
 
 ## Run from a laptop against CDP
 
@@ -170,19 +170,22 @@ Put these variables in a `.env` file in the repo root. `ENVIRONMENT` can be set 
 Run it, then take the Compose project down:
 
 ```bash
-npm run k6:cdp
+npm run k6:cdp:test   # or k6:cdp:dev
 npm run k6:down
 ```
+
+`k6:cdp:dev` and `k6:cdp:test` fix `ENVIRONMENT` whatever `.env` says. `npm run k6:cdp` uses `ENVIRONMENT` from `.env` or the shell, and defaults to `dev`.
+
+`.env` holds one `DEVELOPER_API_KEY` at a time. It must be the key for the environment you run against: a dev key sent to test (or the other way round) is refused by the gateway, and every backend call fails.
 
 Any other variable (`TRAFFIC_MODEL`, `STUB_PROFILE`, `AUTH_PASSWORD`) can be set in `.env` or in the shell. A shell variable wins over `.env`.
 
 - Unless `STUB_PROFILE` is set, a laptop run requires no stub profile and only reports the profiles that run.
-
 - Without `DEVELOPER_API_KEY`, the run stops at once with `DEVELOPER_API_KEY is not set`, naming the variable.
 - The key goes only to gateway addresses. It is never printed, logged or written to `./reports`. Do not run `docker compose config` or `k6 inspect --include-system-env-vars` against `k6-cdp`: both print the environment.
 - The run writes the same report files as the image to `./reports` and uploads nothing.
-- The log includes `Backend calls: through CDP's protected gateway …`, and the summary names the environment in `run_environment{environment:dev}`.
-- Runs against `dev` create `PERF-` notifications there.
+- The log includes `Backend calls: through CDP's protected gateway …`, and the summary names the environment in `run_environment{environment:<env>}`, for example `run_environment{environment:test}`.
+- Runs against `dev` or `test` create `PERF-` notifications there.
 
 ## Smoke run on pull requests
 

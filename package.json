@@ -29,6 +29,8 @@
     "test:docker-compose:resilience": "docker compose run --rm k6-design-target src/suites/resilience.k6.js",
     "k6:local": "docker compose run --rm k6-local",
     "k6:cdp": "docker compose run --rm k6-cdp",
+    "k6:cdp:dev": "docker compose run --rm -e ENVIRONMENT=dev k6-cdp",
+    "k6:cdp:test": "docker compose run --rm -e ENVIRONMENT=test k6-cdp",
     "k6:inspect": "docker compose run --rm k6-local inspect --include-system-env-vars --execution-requirements src/suites/smoke.k6.js",
     "k6:inspect:background-volume": "docker compose run --rm k6-local inspect --include-system-env-vars --execution-requirements src/suites/background-volume.k6.js",
     "k6:inspect:stub-ceilings": "docker compose run --rm k6-local inspect --include-system-env-vars --execution-requirements src/suites/breakpoint-stubs.k6.js",
