@@ -10,6 +10,7 @@ import {
   asReportingOnly,
   backgroundVolumeReportThresholds,
   backgroundVolumeThresholds,
+  callCountThresholds,
   combinedReportThresholds,
   designTargetReportThresholds,
   designTargetThresholds,
@@ -766,6 +767,67 @@ describe('serviceBusThresholds', () => {
       'service_bus_forwarded{schema_version:0.1.0}': ['value>=0'],
       'service_bus_forwarded{schema_version:0.2.0}': ['value>=0']
     })
+  })
+})
+
+describe('callCountThresholds', () => {
+  const JOURNEY_NAMES = ['live-animals', 'high-risk-plants']
+  const gated = (set) =>
+    Object.entries(set).filter(([, limits]) => limits[0] !== 'value>=0')
+
+  test('gates both journeys counters at one or more in local', () => {
+    const set = callCountThresholds('local')
+
+    for (const journey of JOURNEY_NAMES) {
+      expect(set[`call_counts_measured{journey:${journey}}`]).toEqual([
+        'value>=1'
+      ])
+    }
+  })
+
+  test('only reports the counters outside local', () => {
+    const set = callCountThresholds('dev')
+
+    for (const journey of JOURNEY_NAMES) {
+      expect(set[`call_counts_measured{journey:${journey}}`]).toEqual([
+        'value>=0'
+      ])
+    }
+  })
+
+  test('gates nothing but the counters in local', () => {
+    expect(gated(callCountThresholds('local')).map(([key]) => key)).toEqual(
+      JOURNEY_NAMES.map((journey) => `call_counts_measured{journey:${journey}}`)
+    )
+  })
+
+  test('reports each measure, each ratio and the four Defra ID operations of each journey', () => {
+    const keys = Object.keys(callCountThresholds('local'))
+
+    for (const journey of JOURNEY_NAMES) {
+      for (const measure of [
+        'page-requests',
+        'backend-calls',
+        'session-resolutions'
+      ]) {
+        expect(keys).toContain(
+          `call_count{journey:${journey},measure:${measure}}`
+        )
+      }
+
+      for (const ratio of [
+        'backend-calls-per-page',
+        'session-resolutions-per-page'
+      ]) {
+        expect(keys).toContain(`call_ratio{journey:${journey},ratio:${ratio}}`)
+      }
+
+      expect(
+        keys.filter((key) =>
+          key.startsWith(`call_count_external{journey:${journey},`)
+        )
+      ).toHaveLength(4)
+    }
   })
 })
 

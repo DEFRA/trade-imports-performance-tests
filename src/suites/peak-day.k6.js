@@ -34,6 +34,7 @@ import {
 } from '../config/test-data.js'
 import {
   backgroundVolumeReportThresholds,
+  callCountThresholds,
   eventingReportThresholds,
   peakDayThresholds,
   runEnvironmentReportThresholds,
@@ -47,6 +48,7 @@ import {
   reportBackgroundVolume,
   requireBackgroundVolume
 } from '../k6/background-volume.js'
+import { clearCallCounts, reportCallCounts } from '../k6/call-counts.js'
 import { readEventingStart, reportEventCounts } from '../k6/eventing.js'
 import { ensurePerfAddress } from '../k6/front-door.js'
 import { HIGH_RISK_PLANTS_STEPS } from '../k6/high-risk-plants.js'
@@ -103,6 +105,7 @@ export const options = {
     ...backgroundVolumeReportThresholds(DATASTORES),
     ...stubProfileReportThresholds(STUBBED_INTEGRATIONS),
     ...stubHeadroomReportThresholds(STUBBED_INTEGRATIONS),
+    ...callCountThresholds(environment),
     ...runEnvironmentReportThresholds(environment)
   },
   setupTimeout: SETUP_TIMEOUT,
@@ -158,6 +161,8 @@ export function setup() {
     requireBackgroundVolume(volume, model.backgroundVolume)
   }
 
+  clearCallCounts({ urls })
+
   return {
     addressName: PERF_ADDRESS.name,
     stubLoadSince,
@@ -167,6 +172,8 @@ export function setup() {
 
 export function teardown(data) {
   try {
+    reportCallCounts({ urls })
+
     const entries = readStubProfiles({ urls })
 
     reportStubProfiles(entries, 'end', new Date())
