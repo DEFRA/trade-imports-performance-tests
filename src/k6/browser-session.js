@@ -23,9 +23,9 @@ const HTTP_REDIRECT_MAX = 399
 const isRedirect = (status) =>
   status >= HTTP_REDIRECT_MIN && status <= HTTP_REDIRECT_MAX
 
-const recorded = (response) => {
+const recorded = (response, endpoint) => {
   recordServerError(response)
-  recordTransportError(response)
+  recordTransportError(response, { endpoint })
 
   return response
 }
@@ -183,7 +183,8 @@ export const createBrowserSession = ({
         url,
         encodeForm(fields),
         paramsFor(endpoint, { 'content-type': FORM_ENCODED })
-      )
+      ),
+      endpoint
     )
 
   const follow = (first, firstUrl, endpoint) => {
@@ -206,7 +207,7 @@ export const createBrowserSession = ({
 
       const hopEndpoint = endpointForHop(url, endpoint)
 
-      response = recorded(http.get(url, paramsFor(hopEndpoint)))
+      response = recorded(http.get(url, paramsFor(hopEndpoint)), hopEndpoint)
       hops += 1
       passedThroughSignIn =
         passedThroughSignIn || hopEndpoint === SIGN_IN_ENDPOINT
@@ -231,7 +232,11 @@ export const createBrowserSession = ({
   const open = (path, endpoint) => {
     const url = `${baseUrl}${path}`
 
-    return follow(recorded(http.get(url, paramsFor(endpoint))), url, endpoint)
+    return follow(
+      recorded(http.get(url, paramsFor(endpoint)), endpoint),
+      url,
+      endpoint
+    )
   }
 
   const post = (path, fields, endpoint) => {
@@ -258,7 +263,10 @@ export const createBrowserSession = ({
     )
 
     return follow(
-      recorded(http.post(url, { ...fields, file }, paramsFor(endpoint))),
+      recorded(
+        http.post(url, { ...fields, file }, paramsFor(endpoint)),
+        endpoint
+      ),
       url,
       endpoint
     )
@@ -269,7 +277,8 @@ export const createBrowserSession = ({
       http.get(
         `${baseUrl}${path}`,
         paramsFor(endpoint, { accept: 'application/json' })
-      )
+      ),
+      endpoint
     )
 
     if (response.status !== HTTP_OK) {

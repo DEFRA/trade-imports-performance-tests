@@ -26,9 +26,10 @@ export const recordServerError = (response) => {
  * endurance run reads this count as its sign of exhaustion.
  *
  * @param {{ status: number }} response - A k6 response.
+ * @param {Record<string, string>} [tags] - Tags to add to the count, such as the request's `endpoint`, so a report can tell whose requests failed.
  */
-export const recordTransportError = (response) => {
+export const recordTransportError = (response, tags = {}) => {
   if (response.status === FAILED_BELOW_HTTP) {
-    transportErrors.add(1)
+    transportErrors.add(1, tags)
   }
 }

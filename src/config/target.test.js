@@ -7,6 +7,7 @@ import {
   resolveEnvironment,
   resolveLocalhostAlias,
   resolveServiceUrl,
+  resolveToxiproxyUrl,
   serviceUrlVariable
 } from './target.js'
 
@@ -335,5 +336,36 @@ describe('backendRouteLine', () => {
     expect(backendRouteLine({ ENVIRONMENT: 'local', CDP_LOCAL: 'true' })).toBe(
       "Backend calls: the workspace Docker stack's ports"
     )
+  })
+})
+
+describe('resolveToxiproxyUrl', () => {
+  test('uses TOXIPROXY_URL without a trailing slash', () => {
+    expect(
+      resolveToxiproxyUrl(
+        { TOXIPROXY_URL: ' http://toxiproxy:8474/ ' },
+        'perf-test'
+      )
+    ).toBe('http://toxiproxy:8474')
+  })
+
+  test('defaults to the workspace stack toxiproxy on the localhost alias in local', () => {
+    expect(
+      resolveToxiproxyUrl({ LOCALHOST_ALIAS: 'host.docker.internal' }, 'local')
+    ).toBe('http://host.docker.internal:8474')
+  })
+
+  test('defaults to localhost in local without an alias', () => {
+    expect(resolveToxiproxyUrl({}, 'local')).toBe('http://localhost:8474')
+  })
+
+  test('has none outside local unless set', () => {
+    expect(resolveToxiproxyUrl({}, 'dev')).toBeNull()
+  })
+
+  test('lets TOXIPROXY_URL override the local default', () => {
+    expect(
+      resolveToxiproxyUrl({ TOXIPROXY_URL: 'http://elsewhere:9000' }, 'local')
+    ).toBe('http://elsewhere:9000')
   })
 })
