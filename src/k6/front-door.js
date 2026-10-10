@@ -5,6 +5,7 @@ import { ADDRESS_BOOK_LOAD_NAME_PREFIX, PERF_ADDRESS } from '../config/smoke.js'
 import { WORST_CASE_SEARCH_LENGTH } from '../config/test-data.js'
 import { frontDoorThinkSecondsMean, isChosen } from '../config/traffic.js'
 import { addressIdFrom, worstCaseSearchTerm } from '../lib/address-book.js'
+import { describeMissedPage } from '../lib/missed-page.js'
 import { createBrowserSession } from './browser-session.js'
 import { createWalker, recordSession } from './pages.js'
 import { READINESS_TAGS, ignoreStaleRedirects } from './readiness.js'
@@ -37,6 +38,9 @@ const valuesOf = (page) =>
       .map(({ name, value }) => [name, value])
   )
 
+const isSignedInDashboard = (page) =>
+  page.status === HTTP_OK && page.heading === 'Dashboard'
+
 /**
  * Opens the INS dashboard, which signs the session in on the way.
  *
@@ -53,10 +57,12 @@ export const openInsDashboard = (walker) => {
     walker.record(TRAFFIC_CLASSES.SIGN_IN)
   }
 
-  check(page, {
-    'INS dashboard opens signed in': (dashboardPage) =>
-      dashboardPage.status === HTTP_OK && dashboardPage.heading === 'Dashboard'
+  const opened = check(page, {
+    'INS dashboard opens signed in': isSignedInDashboard
   })
+  if (!opened) {
+    console.warn(describeMissedPage('INS dashboard', page))
+  }
   check(walker.session, {
     'sign-in went through Defra ID': (session) =>
       session.signedInThroughIdentityProvider()
