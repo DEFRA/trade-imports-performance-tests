@@ -254,11 +254,16 @@ const submitFromReview = (run, context, checkName, submission) => {
     pagePath(context, 'notification-view'),
     run.shared.notificationView
   )
-  const declaration = walker.reach(
-    undefined,
-    pagePath(context, 'declaration'),
-    run.shared.declaration
-  )
+  // Where the review's Continue posts straight to the declaration (animals),
+  // that post is the only way onto it; a review form with no action is reached
+  // the way it always was.
+  const declaration = view.formAction
+    ? walker.submit(view, {}, run.shared.declaration, { toAction: true })
+    : walker.reach(
+        undefined,
+        pagePath(context, 'declaration'),
+        run.shared.declaration
+      )
   const confirmation = walker.submit(
     declaration,
     { declaration: 'confirmed' },
