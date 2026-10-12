@@ -136,8 +136,8 @@ export const createWalker = ({
   const post = (path, fields, endpoint) =>
     settle(session.post(path, fields, endpoint))
 
-  const submit = (page, answers, endpoint) =>
-    settle(session.submitForm(page, answers, endpoint))
+  const submit = (page, answers, endpoint, options) =>
+    settle(session.submitForm(page, answers, endpoint, options))
 
   const upload = (page, answers, file, endpoint, onLanded) => {
     const landed = session.submitMultipart(page, answers, file, endpoint)

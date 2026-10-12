@@ -111,6 +111,13 @@ const formInputsOfPage = (html) => {
   return chosen ? formInputsOf(chosen) : []
 }
 
+// Only a root-relative action is honoured; anything else posts back to the page.
+const formActionOfPage = (html) => {
+  const action = chosenPostForm(html)?.attr('action')
+
+  return action?.startsWith('/') ? action : undefined
+}
+
 const toPage = (response, url, outcome) => {
   const html = response.status === HTTP_OK ? response.html() : undefined
 
@@ -123,6 +130,7 @@ const toPage = (response, url, outcome) => {
     heading: html?.find('h1').first().text().trim() ?? '',
     hiddenFields: html ? hiddenFieldsOfPage(html) : {},
     formInputs: html ? formInputsOfPage(html) : [],
+    formAction: html ? formActionOfPage(html) : undefined,
     ...outcome
   }
 }
@@ -245,9 +253,11 @@ export const createBrowserSession = ({
     return follow(postForm(url, fields, endpoint), url, endpoint)
   }
 
-  const submitForm = (page, answers, endpoint) =>
+  const submitForm = (page, answers, endpoint, { toAction = false } = {}) =>
     post(
-      page.url.slice(originOf(page.url).length),
+      toAction && page.formAction
+        ? page.formAction
+        : page.url.slice(originOf(page.url).length),
       formFields(
         { ...prefilledFields(page.formInputs), ...page.hiddenFields },
         answers
