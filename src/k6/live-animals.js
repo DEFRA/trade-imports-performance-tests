@@ -168,6 +168,15 @@ export const LIVE_ANIMALS_STEPS = Object.freeze({
     reachAndSubmit('origin', 'origin', ENDPOINTS.origin, originAnswers),
     commodities,
     reachAndSubmit(
+      'import-reason',
+      'import-reason',
+      ENDPOINTS['import-reason'],
+      () => ({
+        reasonForImport: 'internalMarket',
+        purposeInInternalMarket: 'breeding'
+      })
+    ),
+    reachAndSubmit(
       'consignment-details',
       'consignment-details',
       ENDPOINTS['consignment-details'],
@@ -178,15 +187,6 @@ export const LIVE_ANIMALS_STEPS = Object.freeze({
       'commodities/identification',
       ENDPOINTS.identification,
       (context, page) => blankFieldAnswers(page.formInputs, identityOf(context))
-    ),
-    reachAndSubmit(
-      'import-reason',
-      'import-reason',
-      ENDPOINTS['import-reason'],
-      () => ({
-        reasonForImport: 'internalMarket',
-        purposeInInternalMarket: 'breeding'
-      })
     ),
     reachAndSubmit(
       'additional-details',
