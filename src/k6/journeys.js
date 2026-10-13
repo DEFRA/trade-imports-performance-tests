@@ -254,11 +254,10 @@ const submitFromReview = (run, context, checkName, submission) => {
     pagePath(context, 'notification-view'),
     run.shared.notificationView
   )
-  const declaration = walker.reach(
-    undefined,
-    pagePath(context, 'declaration'),
-    run.shared.declaration
-  )
+  const declarationPath = pagePath(context, 'declaration')
+  const declaration = view.hiddenFields.step
+    ? walker.post(declarationPath, view.hiddenFields, run.shared.declaration)
+    : walker.reach(undefined, declarationPath, run.shared.declaration)
   const confirmation = walker.submit(
     declaration,
     { declaration: 'confirmed' },
