@@ -21,9 +21,9 @@ export const STEP_ENDPOINTS = Object.freeze({
   'live-animals': Object.freeze({
     origin: page(ANIMALS, 'origin'),
     commodities: picker(ANIMALS, 'commodities'),
+    'import-reason': page(ANIMALS, 'import-reason'),
     'consignment-details': page(ANIMALS, 'consignment-details'),
     identification: page(ANIMALS, 'identification'),
-    'import-reason': page(ANIMALS, 'import-reason'),
     'additional-details': page(ANIMALS, 'additional-details'),
     documents: {
       ...page(ANIMALS, 'documents'),
