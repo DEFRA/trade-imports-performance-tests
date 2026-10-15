@@ -5,6 +5,7 @@ import { ADDRESS_BOOK_LOAD_NAME_PREFIX, PERF_ADDRESS } from '../config/smoke.js'
 import { WORST_CASE_SEARCH_LENGTH } from '../config/test-data.js'
 import { frontDoorThinkSecondsMean, isChosen } from '../config/traffic.js'
 import { addressIdFrom, worstCaseSearchTerm } from '../lib/address-book.js'
+import { openAddForm } from './add-form.js'
 import { createBrowserSession } from './browser-session.js'
 import { createWalker, recordSession } from './pages.js'
 import { READINESS_TAGS, ignoreStaleRedirects } from './readiness.js'
@@ -131,7 +132,7 @@ export const dashboardOnlySession = (options) => {
 const addAnswers = (address, name) => ({ ...address, name })
 
 const addAddress = (walker, name) => {
-  const form = walker.open(`${ADDRESS_BOOK}/add`, 'ins-address-add')
+  const form = openAddForm(walker.open, walker.submit, 'ins-address-add')
 
   return walker.submit(
     form,
@@ -272,7 +273,7 @@ export const ensurePerfAddress = ({
     return
   }
 
-  const form = session.open(`${ADDRESS_BOOK}/add`, 'ins-address-add')
+  const form = openAddForm(session.open, session.submitForm, 'ins-address-add')
 
   session.submitForm(
     form,

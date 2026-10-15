@@ -9,6 +9,7 @@ import {
   shortfallMessage,
   volumeLine
 } from '../lib/background-volume.js'
+import { openAddForm } from './add-form.js'
 import { createBrowserSession } from './browser-session.js'
 import { READINESS_TAGS, ignoreStaleRedirects } from './readiness.js'
 import { serviceHttp } from './service-http.js'
@@ -159,7 +160,7 @@ export const addBackgroundAddress = ({
     credentials,
     staleRedirects
   })
-  const form = session.open(`${ADDRESS_BOOK}/add`, 'ins-address-add')
+  const form = openAddForm(session.open, session.submitForm, 'ins-address-add')
   const saved = session.submitForm(
     form,
     {
