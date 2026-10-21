@@ -111,3 +111,91 @@ describe('createBrowserSession sign-in counting', () => {
     expect(session.signIns()).toBe(0)
   })
 })
+
+describe('createBrowserSession multipart submits', () => {
+  const DOCUMENTS_PATH =
+    '/live-animals/notifications/n-1/accompanying-documents'
+
+  const documentsPage = (uploadAction) => ({
+    url: `${APP}${DOCUMENTS_PATH}`,
+    formInputs: [],
+    hiddenFields: { crumb: 'c-1' },
+    uploadAction
+  })
+
+  const file = { data: new Uint8Array([1]).buffer, filename: 'cert.pdf' }
+
+  beforeEach(() => {
+    httpMock.get.mockReset()
+    httpMock.post.mockReset()
+  })
+
+  test('posts the file to the target the file-carrying button names', () => {
+    httpMock.post.mockReturnValueOnce(redirectTo(`${APP}${DOCUMENTS_PATH}`))
+    httpMock.get.mockReturnValueOnce(answer(200))
+
+    const session = newSession()
+
+    session.submitMultipart(
+      documentsPage('/upload-and-scan/upload-1'),
+      { action: 'add' },
+      file,
+      'animals-documents-upload'
+    )
+
+    expect(httpMock.post.mock.calls[0][0]).toBe(
+      `${APP}/upload-and-scan/upload-1`
+    )
+  })
+
+  test('sends the typed fields and the file together to that target', () => {
+    httpMock.post.mockReturnValueOnce(answer(200))
+
+    const session = newSession()
+
+    session.submitMultipart(
+      documentsPage('/upload-and-scan/upload-1'),
+      { action: 'add' },
+      file,
+      'animals-documents-upload'
+    )
+
+    expect(httpMock.post.mock.calls[0][1]).toEqual({
+      crumb: 'c-1',
+      action: 'add',
+      file
+    })
+  })
+
+  test('follows the upload service back to the page it returns to', () => {
+    httpMock.post.mockReturnValueOnce(redirectTo(`${APP}${DOCUMENTS_PATH}`))
+    httpMock.get.mockReturnValueOnce(answer(200))
+
+    const session = newSession()
+
+    const landed = session.submitMultipart(
+      documentsPage('/upload-and-scan/upload-1'),
+      { action: 'add' },
+      file,
+      'animals-documents-upload'
+    )
+
+    expect(httpMock.get.mock.calls[0][0]).toBe(`${APP}${DOCUMENTS_PATH}`)
+    expect(landed.status).toBe(200)
+  })
+
+  test('posts to the page itself when no button names a target', () => {
+    httpMock.post.mockReturnValueOnce(answer(200))
+
+    const session = newSession()
+
+    session.submitMultipart(
+      documentsPage(undefined),
+      { action: 'add' },
+      file,
+      'animals-documents-upload'
+    )
+
+    expect(httpMock.post.mock.calls[0][0]).toBe(`${APP}${DOCUMENTS_PATH}`)
+  })
+})
