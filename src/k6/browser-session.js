@@ -111,19 +111,17 @@ const formInputsOfPage = (html) => {
   return chosen ? formInputsOf(chosen) : []
 }
 
-/**
- * Where a file-carrying submit posts, which is not always where its form does.
- *
- * A submit button can name a target of its own, and the documents page uses
- * that to send the file straight to the upload service while every other
- * action on the same form posts back to the page. A browser honours the
- * button's target over the form's, so a multipart submit from here does too.
- *
- * @param {object} html - The page's parsed HTML.
- * @returns {string|undefined} The path to post the file to, if a button names one.
- */
-const uploadActionOfPage = (html) =>
-  chosenPostForm(html)?.find('[formaction]').attr('formaction')
+// Only the submit that carries the file names a multipart target, so the pair
+// of attributes is what identifies it among a form's other formaction buttons.
+const FILE_CARRYING_SUBMIT = '[formenctype="multipart/form-data"][formaction]'
+
+const uploadActionOfPage = (html) => {
+  const chosen = chosenPostForm(html)
+
+  return chosen
+    ? chosen.find(FILE_CARRYING_SUBMIT).attr('formaction')
+    : undefined
+}
 
 const toPage = (response, url, outcome) => {
   const html = response.status === HTTP_OK ? response.html() : undefined
