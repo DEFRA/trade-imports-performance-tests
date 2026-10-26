@@ -118,8 +118,11 @@ const uploadOne = (context, page, number) => {
 /**
  * The live-animals documents step: uploads the notification's documents, then continues.
  *
- * Each document goes through the frontend to the real cdp-uploader and its
- * virus scan. The step then polls the frontend's status route, as the page's
+ * Each document goes straight to the real cdp-uploader and its virus scan,
+ * which is where the page's own file-carrying button posts, so the bytes never
+ * pass through the frontend. The upload service returns the browser to the
+ * page, which takes the document on from there. The step then polls the
+ * frontend's status route, as the page's
  * script does every 3 seconds, until nothing is pending, and records how long
  * the scan took in `document_scan_duration`. With no documents the step only
  * opens the page and continues.

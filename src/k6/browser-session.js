@@ -111,6 +111,18 @@ const formInputsOfPage = (html) => {
   return chosen ? formInputsOf(chosen) : []
 }
 
+// Only the submit that carries the file names a multipart target, so the pair
+// of attributes is what identifies it among a form's other formaction buttons.
+const FILE_CARRYING_SUBMIT = '[formenctype="multipart/form-data"][formaction]'
+
+const uploadActionOfPage = (html) => {
+  const chosen = chosenPostForm(html)
+
+  return chosen
+    ? chosen.find(FILE_CARRYING_SUBMIT).attr('formaction')
+    : undefined
+}
+
 const toPage = (response, url, outcome) => {
   const html = response.status === HTTP_OK ? response.html() : undefined
 
@@ -123,6 +135,7 @@ const toPage = (response, url, outcome) => {
     heading: html?.find('h1').first().text().trim() ?? '',
     hiddenFields: html ? hiddenFieldsOfPage(html) : {},
     formInputs: html ? formInputsOfPage(html) : [],
+    uploadAction: html ? uploadActionOfPage(html) : undefined,
     ...outcome
   }
 }
@@ -142,7 +155,7 @@ const toPage = (response, url, outcome) => {
  * @param {{ add: (value: number) => void }} options.staleRedirects - Counts handled stale-concurrency redirects.
  * @param {object} [options.jar] - A cookie jar to share with another session, as one browser does across frontends.
  * @param {Record<string, string>} [options.extraTags] - Tags added to every request, overriding the defaults.
- * @returns {{ open: Function, post: Function, submitForm: Function, submitMultipart: Function, getJson: Function, signedInThroughIdentityProvider: () => boolean, signIns: () => number }} The session. `submitMultipart` posts a form with one file; `getJson` reads a JSON route, returning undefined unless it answers 200 with JSON; `signIns` counts the redirect chains that went through a sign-in, and once it is above 0 every later sign-in hop is tagged `auth: re-authentication`.
+ * @returns {{ open: Function, post: Function, submitForm: Function, submitMultipart: Function, getJson: Function, signedInThroughIdentityProvider: () => boolean, signIns: () => number }} The session. `submitMultipart` posts a form with one file, to the target the file-carrying button names where it names one and to the page otherwise; `getJson` reads a JSON route, returning undefined unless it answers 200 with JSON; `signIns` counts the redirect chains that went through a sign-in, and once it is above 0 every later sign-in hop is tagged `auth: re-authentication`.
  */
 export const createBrowserSession = ({
   baseUrl,
@@ -256,7 +269,7 @@ export const createBrowserSession = ({
     )
 
   const submitMultipart = (page, answers, file, endpoint) => {
-    const url = `${baseUrl}${page.url.slice(originOf(page.url).length)}`
+    const url = `${baseUrl}${page.uploadAction ?? page.url.slice(originOf(page.url).length)}`
     const fields = formFields(
       { ...prefilledFields(page.formInputs), ...page.hiddenFields },
       answers
