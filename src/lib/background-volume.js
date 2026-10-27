@@ -4,10 +4,6 @@ export const DATASTORES = Object.freeze([
   'dashboard-read-model',
   'address-book'
 ])
-const CREATED_DATASTORES = DATASTORES.filter(
-  (datastore) => datastore !== 'dashboard-read-model'
-)
-const ADDRESS_LABEL = /^Showing \d+-\d+ of (\d+)$/
 
 /**
  * Works out how many notifications or addresses a run still has to create.
@@ -23,13 +19,14 @@ export const toCreate = (target, existing, cap) =>
 /**
  * Reads the number of addresses from the address-book list's results label.
  *
- * A blank label counts as empty only on the address-book list page, so a
- * sign-in or error page is never read as an empty book.
+ * 'Showing 0 of 0' reads as 0 and 'Showing <from>-<to> of <total>' as the
+ * total. Any other text, blank included, is unreadable, as is any heading
+ * other than 'Address book'.
  *
  * @param {object} page - What the page shows.
  * @param {string | undefined} page.heading - The page's heading.
- * @param {string} page.labelText - The text of the label, empty when the book is empty.
- * @returns {number | undefined} The total, 0 for a blank label on the list page, or undefined when the page is not the list or the text is not a results label.
+ * @param {string} page.labelText - The text of the results label.
+ * @returns {number | undefined} The total, 0 for 'Showing 0 of 0', or undefined when the heading is not 'Address book' or the text is not a results label.
  */
 export const addressCountFrom = ({ heading, labelText }) => {
   if (heading !== 'Address book') {
@@ -38,11 +35,11 @@ export const addressCountFrom = ({ heading, labelText }) => {
 
   const text = labelText.trim()
 
-  if (text === '') {
+  if (text === 'Showing 0 of 0') {
     return 0
   }
 
-  const total = ADDRESS_LABEL.exec(text)?.[1]
+  const total = /^Showing \d+-\d+ of (\d+)$/.exec(text)?.[1]
 
   return total === undefined ? undefined : Number(total)
 }
@@ -84,9 +81,11 @@ export const volumeLine = (moment, volume, targets) =>
  * @returns {string} The line to log.
  */
 export const createdLine = (before, after) =>
-  `Created this run: ${CREATED_DATASTORES.map(
-    (datastore) => `${datastore} ${after[datastore] - before[datastore]}`
-  ).join(', ')}`
+  `Created this run: ${DATASTORES.filter(
+    (datastore) => datastore !== 'dashboard-read-model'
+  )
+    .map((datastore) => `${datastore} ${after[datastore] - before[datastore]}`)
+    .join(', ')}`
 
 /**
  * Names every datastore that holds less than its target.

@@ -2,7 +2,6 @@ import { describe, expect, test } from 'vitest'
 
 import {
   addressCountFrom,
-  DATASTORES,
   backgroundAddressName,
   createdLine,
   shortfallMessage,
@@ -22,16 +21,6 @@ const VOLUME = {
   'dashboard-read-model': 12,
   'address-book': 3
 }
-
-describe('volumeLine', () => {
-  test('names the datastores in DATASTORES order', () => {
-    const line = volumeLine('start', VOLUME, {})
-    const positions = DATASTORES.map((datastore) => line.indexOf(datastore))
-
-    expect(positions.every((position) => position >= 0)).toBe(true)
-    expect(positions).toEqual([...positions].sort((a, b) => a - b))
-  })
-})
 
 describe('toCreate', () => {
   test('creates the difference when under target', () => {
@@ -65,10 +54,15 @@ describe('addressCountFrom', () => {
     expect(addressCountFrom(listPage('\n  Showing 26-30 of 30\n'))).toBe(30)
   })
 
+  test('is 0 for the empty results label', () => {
+    expect(addressCountFrom(listPage('Showing 0 of 0'))).toBe(0)
+    expect(addressCountFrom(listPage('\n  Showing 0 of 0\n'))).toBe(0)
+  })
+
   test.each(['', '   \n '])(
-    'is 0 for the blank label %j on the address-book list',
+    'is undefined for the blank label %j on the address-book list',
     (text) => {
-      expect(addressCountFrom(listPage(text))).toBe(0)
+      expect(addressCountFrom(listPage(text))).toBeUndefined()
     }
   )
 
@@ -77,9 +71,14 @@ describe('addressCountFrom', () => {
   })
 
   test.each(['Sign in', 'Sorry, there is a problem', undefined])(
-    'is undefined for a blank label on the page headed %j',
+    'is undefined for a results label on the page headed %j',
     (heading) => {
-      expect(addressCountFrom({ heading, labelText: '' })).toBeUndefined()
+      expect(
+        addressCountFrom({ heading, labelText: 'Showing 1-25 of 530' })
+      ).toBeUndefined()
+      expect(
+        addressCountFrom({ heading, labelText: 'Showing 0 of 0' })
+      ).toBeUndefined()
     }
   )
 })
