@@ -239,7 +239,7 @@ The targets are one year at the 2025 baseline: 42,000 live-animals notifications
 
 The animals backend, plants backend, INS backend and address book each set `spring.data.mongodb.auto-index-creation: true` in `src/main/resources/application.yml` and create no index any other way. Each builds its indexes at start-up, before it answers a read. That is why a run counts its indexes as built once every service has answered.
 
-Everything is created through the frontends' own save routes, as the one stubbed user. Each notification is one run of the same journey driver as journey traffic, with the same commodity types, commodity lines, origins, species, amendment shares and cancelled shares, so the volume is varied as journey traffic is. Each address goes through the INS add-address form.
+Everything is created through the frontends' own save routes, as the one stubbed user. Each notification is one run of the same journey driver as journey traffic, with the same commodity types, commodity lines, origins, species, amendment shares and cancelled shares, so the volume is varied as journey traffic is. Each address goes through the INS add-address form and is named `Background Address <n>`, numbered across the whole background volume, so it never matches the `Perf Test Holding` address the pickers use or the addresses the address-book sessions add.
 
 Run it once per environment:
 
@@ -255,7 +255,7 @@ npm run test:docker-compose:background-volume   # workspace Docker stack
 - Where a CDP environment's notification expiry sweep is on, the sweep removes background notifications and the volume shrinks. The next background run tops it up.
 - The dashboard read model holds only what the journeys publish. Live animals publishes events and high-risk plants does not yet (pbe-022), so the read model will hold fewer than the sum of the two targets. Each run reports the real figure and claims no target for it.
 
-Every run states the volume it started with: `Background volume at start: live-animals 12 of 42000, high-risk-plants 9 of 34000, dashboard-read-model 12, address-book 3 of 500`. It also records each count in the `background_volume` metric. The background run also logs `Background volume at end: ...` and `Created this run: ...`.
+Every run states the volume it started with: `Background volume at start: live-animals 12 of 42000, high-risk-plants 9 of 34000, dashboard-read-model 12, address-book 3 of 500`. It also records each count in the `background_volume` metric. The background run also logs `Background volume at end: ...` and `Created this run: ...`. `Created this run` leaves out the dashboard read model, because the run does not write to it: the read model fills from the journeys' events, after the run.
 
 Before any measurement, a run waits for the animals backend, the plants backend, the INS backend (the dashboard read model) and the address book to answer a read, then logs `Indexes: built ...`. Each of those services builds its indexes at start-up before it answers a request (Spring Data auto-index-creation), so an answer means its indexes are built. A service that never answers fails the run in `setup()` before anything is measured. This confirms the indexes that exist are built. It adds none.
 

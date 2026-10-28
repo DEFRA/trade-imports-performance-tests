@@ -45,8 +45,7 @@ export const addressCountFrom = ({ heading, labelText }) => {
 }
 
 /**
- * Names a background address, which never matches the pickers' performance-test
- * address or the address-book sessions' addresses.
+ * Names a background address.
  *
  * @param {number} index - The address's number across the background volume, from 0.
  * @returns {string} The name.
@@ -74,19 +73,21 @@ export const volumeLine = (moment, volume, targets) =>
   ).join(', ')}`
 
 /**
- * States how much a run created. The read model is left out because it fills
- * from events, after the run.
+ * States how much a run created in each datastore it writes to.
  *
  * @param {Record<string, number>} before - The volume when the run started.
  * @param {Record<string, number>} after - The volume when it finished.
  * @returns {string} The line to log.
  */
-export const createdLine = (before, after) =>
-  `Created this run: ${DATASTORES.filter(
+export const createdLine = (before, after) => {
+  const datastoresARunWritesTo = DATASTORES.filter(
     (datastore) => datastore !== 'dashboard-read-model'
   )
+
+  return `Created this run: ${datastoresARunWritesTo
     .map((datastore) => `${datastore} ${after[datastore] - before[datastore]}`)
     .join(', ')}`
+}
 
 /**
  * Names every datastore that holds less than its target.
