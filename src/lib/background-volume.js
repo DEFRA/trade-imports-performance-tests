@@ -54,7 +54,7 @@ export const addressCountFrom = ({ heading, labelText }) => {
 export const backgroundAddressName = (index) =>
   `Background Address ${index + 1}`
 
-const countOf = (volume, targets, datastore) =>
+const countAgainstTargetText = (volume, targets, datastore) =>
   targets[datastore] === undefined
     ? `${volume[datastore]}`
     : `${volume[datastore]} of ${targets[datastore]}`
@@ -69,7 +69,8 @@ const countOf = (volume, targets, datastore) =>
  */
 export const volumeLine = (moment, volume, targets) =>
   `Background volume at ${moment}: ${DATASTORES.map(
-    (datastore) => `${datastore} ${countOf(volume, targets, datastore)}`
+    (datastore) =>
+      `${datastore} ${countAgainstTargetText(volume, targets, datastore)}`
   ).join(', ')}`
 
 /**
