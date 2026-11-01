@@ -49,6 +49,8 @@ const originAnswers = (context, page) => ({
   internalReferenceNumber: `PERF-${context.vu}-${context.iteration}${context.suffix}`
 })
 
+const COMMODITIES_SAVE_ATTEMPTS = 5
+
 const searchCow = (walker, page) =>
   walker.submit(
     page,
@@ -56,14 +58,21 @@ const searchCow = (walker, page) =>
     ENDPOINTS.commodities.search
   )
 
-const saveChosenSpecies = (walker, page) =>
-  walker.submit(
-    page,
-    {
-      species: choiceLabelled(page, 'species', ANIMAL_COMMODITY_SPECIES)
-    },
-    ENDPOINTS.commodities.save
+const speciesToSave = (page) => {
+  const values = choiceValues(page, 'species')
+  const byLineKey = values.find((value) =>
+    value.endsWith(`|${ANIMAL_COMMODITY_SPECIES}`)
   )
+
+  return (
+    byLineKey ??
+    choiceLabelled(page, 'species', ANIMAL_COMMODITY_SPECIES) ??
+    values[0]
+  )
+}
+
+const saveSpecies = (walker, page, species) =>
+  walker.submit(page, { species, action: 'save' }, ENDPOINTS.commodities.save)
 
 const commodities = {
   name: 'commodities',
@@ -71,13 +80,21 @@ const commodities = {
     const { walker } = context
     const path = pagePath(context, 'commodities')
     let page = walker.reach(landed, path, ENDPOINTS.commodities.open)
-    page = searchCow(walker, page)
-    let savedPage = saveChosenSpecies(walker, page)
+    let savedPage = page
 
-    if (!isSaved(savedPage)) {
-      page = walker.reach(savedPage, path, ENDPOINTS.commodities.open)
+    for (let attempt = 0; attempt < COMMODITIES_SAVE_ATTEMPTS; attempt += 1) {
       page = searchCow(walker, page)
-      savedPage = saveChosenSpecies(walker, page)
+      const species = speciesToSave(page)
+
+      if (species !== undefined) {
+        savedPage = saveSpecies(walker, page, species)
+
+        if (isSaved(savedPage)) {
+          break
+        }
+      }
+
+      page = walker.reach(savedPage, path, ENDPOINTS.commodities.open)
     }
 
     return saved('commodities', savedPage)
