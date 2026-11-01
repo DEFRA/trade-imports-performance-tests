@@ -13,9 +13,11 @@ import { documentsStep } from './documents.js'
 import {
   choiceLabelled,
   choiceValues,
+  hasFieldMatching,
   identityOf,
   isSaved,
   pagePath,
+  pathOfUrl,
   pickAddress,
   pickFrom,
   reachAndSubmit,
@@ -52,6 +54,7 @@ const originAnswers = (context, page) => ({
 const SAVE_ATTEMPTS = 2
 
 const COMMODITIES_SAVE_ATTEMPTS = SAVE_ATTEMPTS
+const CONSIGNMENT_SAVE_ATTEMPTS = SAVE_ATTEMPTS
 
 const searchCow = (walker, page) =>
   walker.submit(
@@ -76,30 +79,72 @@ const speciesToSave = (page) => {
 const saveSpecies = (walker, page, species) =>
   walker.submit(page, { species, action: 'save' }, ENDPOINTS.commodities.save)
 
+const commoditiesSavedPage = (context, landed) => {
+  const { walker } = context
+  const path = pagePath(context, 'commodities')
+  let page = walker.reach(landed, path, ENDPOINTS.commodities.open)
+  let savedPage = page
+
+  for (let attempt = 0; attempt < COMMODITIES_SAVE_ATTEMPTS; attempt += 1) {
+    page = searchCow(walker, page)
+    const species = speciesToSave(page)
+
+    if (species !== undefined) {
+      savedPage = saveSpecies(walker, page, species)
+
+      if (isSaved(savedPage)) {
+        break
+      }
+    }
+
+    page = walker.reach(savedPage, path, ENDPOINTS.commodities.open)
+  }
+
+  return savedPage
+}
+
 const commodities = {
   name: 'commodities',
+  run: (context, landed) =>
+    saved('commodities', commoditiesSavedPage(context, landed))
+}
+
+const consignmentReady = (page, path) =>
+  pathOfUrl(page.url) === path &&
+  hasFieldMatching(page, 'numberOfAnimalsQuantity')
+
+const consignmentDetails = {
+  name: 'consignment-details',
   run: (context, landed) => {
     const { walker } = context
-    const path = pagePath(context, 'commodities')
-    let page = walker.reach(landed, path, ENDPOINTS.commodities.open)
+    const endpoints = ENDPOINTS['consignment-details']
+    const path = pagePath(context, 'consignment-details')
+    const commoditiesPath = pagePath(context, 'commodities')
+    let page = walker.reach(landed, path, endpoints.open)
     let savedPage = page
 
-    for (let attempt = 0; attempt < COMMODITIES_SAVE_ATTEMPTS; attempt += 1) {
-      page = searchCow(walker, page)
-      const species = speciesToSave(page)
+    for (let attempt = 0; attempt < CONSIGNMENT_SAVE_ATTEMPTS; attempt += 1) {
+      if (!consignmentReady(page, path)) {
+        page = commoditiesSavedPage(context, page)
+        page = walker.reach(page, path, endpoints.open)
+      }
 
-      if (species !== undefined) {
-        savedPage = saveSpecies(walker, page, species)
+      if (consignmentReady(page, path)) {
+        savedPage = walker.submit(
+          page,
+          consignmentAnswers(context, page),
+          endpoints.save
+        )
 
         if (isSaved(savedPage)) {
           break
         }
       }
 
-      page = walker.reach(savedPage, path, ENDPOINTS.commodities.open)
+      page = walker.reach(savedPage, commoditiesPath, ENDPOINTS.commodities.open)
     }
 
-    return saved('commodities', savedPage)
+    return saved('consignment-details', savedPage)
   }
 }
 
@@ -228,12 +273,7 @@ export const LIVE_ANIMALS_STEPS = Object.freeze({
   draft: [
     reachAndSubmit('origin', 'origin', ENDPOINTS.origin, originAnswers),
     commodities,
-    reachAndSubmit(
-      'consignment-details',
-      'consignment-details',
-      ENDPOINTS['consignment-details'],
-      consignmentAnswers
-    ),
+    consignmentDetails,
     reachAndSubmit(
       'identification',
       'commodities/identification',

@@ -71,6 +71,25 @@ export const choiceLabelled = (page, name, text) => {
  */
 export const pagePath = ({ base }, slug) => `${base}/${slug}`
 
+/**
+ * Reads the path of a page URL without its origin or query.
+ *
+ * @param {string} url - A full page URL.
+ * @returns {string} The path.
+ */
+export const pathOfUrl = (url) =>
+  url.replace(/^https?:\/\/[^/?#]+/, '').split(/[?#]/)[0]
+
+/**
+ * Tells whether a page's parsed form includes a field whose name starts with a prefix.
+ *
+ * @param {{ formInputs?: Array<{ name: string }> }} page - A page from a browser session.
+ * @param {string} prefix - The wanted name prefix.
+ * @returns {boolean} True when at least one field matches.
+ */
+export const hasFieldMatching = (page, prefix) =>
+  page.formInputs?.some((input) => input.name.startsWith(prefix)) ?? false
+
 const searchWorstCase = (context, opened, endpoints) => {
   const { walker, worstCaseSearch } = context
 
