@@ -103,6 +103,19 @@ const commodities = {
   }
 }
 
+const consignmentAnswers = (context, page) => {
+  const fromPage = blankFieldAnswers(page.formInputs, identityOf(context))
+
+  if (Object.keys(fromPage).length > 0) {
+    return fromPage
+  }
+
+  return {
+    'numberOfAnimalsQuantity-0': '1',
+    'numberOfPackages-0': '5'
+  }
+}
+
 const saveWithRetry = (name, context, landed, slug, endpoints, answersFor) => {
   const { walker } = context
   const path = pagePath(context, slug)
@@ -227,7 +240,7 @@ export const LIVE_ANIMALS_STEPS = Object.freeze({
           landed,
           'consignment-details',
           ENDPOINTS['consignment-details'],
-          (ctx, page) => blankFieldAnswers(page.formInputs, identityOf(ctx))
+          consignmentAnswers
         )
     },
     reachAndSubmit(
