@@ -1,5 +1,5 @@
 import { STEP_ENDPOINTS } from '../config/journey-endpoints.js'
-import { ANIMAL_COMMODITY_SEARCH } from '../config/test-data.js'
+import { ANIMAL_COMMODITY_SEARCH, ANIMAL_COMMODITY_SPECIES } from '../config/test-data.js'
 import { countAt } from '../lib/distributions.js'
 import {
   blankFieldAnswers,
@@ -64,7 +64,13 @@ const commodities = {
       'commodities',
       walker.submit(
         searched,
-        { species: pickFrom(context, choiceValues(searched, 'species')) },
+        {
+          species: choiceLabelled(
+            searched,
+            'species',
+            ANIMAL_COMMODITY_SPECIES
+          )
+        },
         ENDPOINTS.commodities.save
       )
     )

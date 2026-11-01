@@ -4,6 +4,10 @@ export const WORST_CASE_SEARCH_LENGTH = 255
 // Cow is the one commodity whose pages match the live-animals step list exactly.
 export const ANIMAL_COMMODITY_SEARCH = 'Cow'
 
+// Checkbox labels use the scientific name (species-label.js). Bos taurus is always
+// among Cow search results; the smoke journey picks it instead of a random species.
+export const ANIMAL_COMMODITY_SPECIES = 'Bos taurus'
+
 // The narrowest origin constraint any category of the type can impose: plants-frontend services/commodities ORIGIN_CONSTRAINTS.
 const EU_MEMBER_STATES = Object.freeze([
   'AT',
