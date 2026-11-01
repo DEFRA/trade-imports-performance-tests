@@ -159,6 +159,57 @@ const consignmentDetails = {
   }
 }
 
+const IDENTIFICATION_SUBMIT_ATTEMPTS = 4
+
+const identificationAnswers = (context, page) => ({
+  action: 'implicit-submit',
+  ...blankFieldAnswers(page.formInputs, identityOf(context))
+})
+
+const identification = {
+  name: 'identification',
+  run: (context, landed) => {
+    const { walker } = context
+    const endpoints = ENDPOINTS.identification
+    const path = pagePath(context, 'commodities/identification')
+    let page = walker.reach(landed, path, endpoints.open)
+    let savedPage = page
+
+    if (pathOfUrl(page.url) !== path) {
+      return saved('identification', savedPage)
+    }
+
+    for (
+      let attempt = 0;
+      attempt < IDENTIFICATION_SUBMIT_ATTEMPTS;
+      attempt += 1
+    ) {
+      page = walker.reach(savedPage, path, endpoints.open)
+
+      if (pathOfUrl(page.url) !== path) {
+        savedPage = page
+        break
+      }
+
+      savedPage = walker.submit(
+        page,
+        identificationAnswers(context, page),
+        endpoints.save
+      )
+
+      if (pathOfUrl(savedPage.url) !== path && isSaved(savedPage)) {
+        break
+      }
+
+      if (!isSaved(savedPage) && !saveWorthRetrying(savedPage)) {
+        break
+      }
+    }
+
+    return saved('identification', savedPage)
+  }
+}
+
 const consignmentAnswers = (context, page) => {
   const answers = blankFieldAnswers(page.formInputs, identityOf(context))
 
@@ -285,12 +336,7 @@ export const LIVE_ANIMALS_STEPS = Object.freeze({
     reachAndSubmit('origin', 'origin', ENDPOINTS.origin, originAnswers),
     commodities,
     consignmentDetails,
-    reachAndSubmit(
-      'identification',
-      'commodities/identification',
-      ENDPOINTS.identification,
-      (context, page) => blankFieldAnswers(page.formInputs, identityOf(context))
-    ),
+    identification,
     reachAndSubmit(
       'import-reason',
       'import-reason',
