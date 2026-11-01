@@ -1,5 +1,8 @@
 import { STEP_ENDPOINTS } from '../config/journey-endpoints.js'
-import { ANIMAL_COMMODITY_SEARCH, ANIMAL_COMMODITY_SPECIES } from '../config/test-data.js'
+import {
+  ANIMAL_COMMODITY_SEARCH,
+  ANIMAL_COMMODITY_SPECIES
+} from '../config/test-data.js'
 import { countAt } from '../lib/distributions.js'
 import {
   blankFieldAnswers,
@@ -11,6 +14,7 @@ import {
   choiceLabelled,
   choiceValues,
   identityOf,
+  isSaved,
   pagePath,
   pickAddress,
   pickFrom,
@@ -45,35 +49,38 @@ const originAnswers = (context, page) => ({
   internalReferenceNumber: `PERF-${context.vu}-${context.iteration}${context.suffix}`
 })
 
+const searchCow = (walker, page) =>
+  walker.submit(
+    page,
+    { commoditySearch: ANIMAL_COMMODITY_SEARCH, action: 'search' },
+    ENDPOINTS.commodities.search
+  )
+
+const saveChosenSpecies = (walker, page) =>
+  walker.submit(
+    page,
+    {
+      species: choiceLabelled(page, 'species', ANIMAL_COMMODITY_SPECIES)
+    },
+    ENDPOINTS.commodities.save
+  )
+
 const commodities = {
   name: 'commodities',
   run: (context, landed) => {
     const { walker } = context
-    const opened = walker.reach(
-      landed,
-      pagePath(context, 'commodities'),
-      ENDPOINTS.commodities.open
-    )
-    const searched = walker.submit(
-      opened,
-      { commoditySearch: ANIMAL_COMMODITY_SEARCH, action: 'search' },
-      ENDPOINTS.commodities.search
-    )
+    const path = pagePath(context, 'commodities')
+    let page = walker.reach(landed, path, ENDPOINTS.commodities.open)
+    page = searchCow(walker, page)
+    let savedPage = saveChosenSpecies(walker, page)
 
-    return saved(
-      'commodities',
-      walker.submit(
-        searched,
-        {
-          species: choiceLabelled(
-            searched,
-            'species',
-            ANIMAL_COMMODITY_SPECIES
-          )
-        },
-        ENDPOINTS.commodities.save
-      )
-    )
+    if (!isSaved(savedPage)) {
+      page = walker.reach(savedPage, path, ENDPOINTS.commodities.open)
+      page = searchCow(walker, page)
+      savedPage = saveChosenSpecies(walker, page)
+    }
+
+    return saved('commodities', savedPage)
   }
 }
 
