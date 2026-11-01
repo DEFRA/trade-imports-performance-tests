@@ -43,12 +43,7 @@ const drawnOrElse = (context, formInputs, name, fallback) =>
   pickFrom(context, selectOptions(formInputs, name)) ?? fallback
 
 const originAnswers = (context, page) => ({
-  countryOfOrigin: drawnOrElse(
-    context,
-    page.formInputs,
-    'countryOfOrigin',
-    FRANCE
-  ),
+  countryOfOrigin: FRANCE,
   regionOfOriginCodeRequirement: 'no',
   internalReferenceNumber: `PERF-${context.vu}-${context.iteration}${context.suffix}`
 })
