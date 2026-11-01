@@ -39,6 +39,19 @@ const hiddenFieldsOf = (form) =>
       .filter(([name]) => name)
   )
 
+const NON_ANSWER_INPUT_TYPES = new Set(['hidden', 'submit', 'button'])
+
+const formHasAnswerInputs = (form) =>
+  form
+    .find('input')
+    .toArray()
+    .some((input) => {
+      const type = input.attr('type') ?? ''
+      const name = input.attr('name') ?? ''
+
+      return name && !NON_ANSWER_INPUT_TYPES.has(type)
+    })
+
 const chosenPostForm = (html) => {
   const postForms = html
     .find('form')
@@ -47,11 +60,11 @@ const chosenPostForm = (html) => {
   const withToken = postForms.filter(
     (form) => form.find('input[name="concurrencyToken"]').size() > 0
   )
+  const candidates = withToken.length > 0 ? withToken : postForms
+  const withAnswers = candidates.filter(formHasAnswerInputs)
 
-  return withToken.at(-1) ?? postForms[0]
+  return withAnswers.at(-1) ?? candidates.at(-1) ?? postForms[0]
 }
-
-const NON_ANSWER_INPUT_TYPES = new Set(['hidden', 'submit', 'button'])
 
 const isSet = (value) => value !== undefined
 

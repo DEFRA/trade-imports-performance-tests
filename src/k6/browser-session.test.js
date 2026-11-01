@@ -225,3 +225,30 @@ describe('createBrowserSession multipart submits', () => {
     expect(landed.uploadAction).toBe(UPLOAD_ACTION)
   })
 })
+
+describe('createBrowserSession form choice', () => {
+  test('reads answer fields from the post form that has them, not a later token-only form', () => {
+    const tokenInput = elementOf({
+      type: 'hidden',
+      name: 'concurrencyToken',
+      value: 't-1'
+    })
+    const animalInput = elementOf({
+      type: 'number',
+      name: 'numberOfAnimalsQuantity-0',
+      value: ''
+    })
+    const mainForm = elementOf({ method: 'post' }, { input: [tokenInput, animalInput] })
+    const removeForm = elementOf({ method: 'post' }, { input: [tokenInput] })
+    httpMock.get.mockReturnValueOnce(pageAnswer([mainForm, removeForm]))
+
+    const landed = newSession().open(
+      '/consignment-details',
+      'animals-consignment-details'
+    )
+
+    expect(landed.formInputs.map((input) => input.name)).toEqual([
+      'numberOfAnimalsQuantity-0'
+    ])
+  })
+})
