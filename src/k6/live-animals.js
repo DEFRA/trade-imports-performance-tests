@@ -130,18 +130,30 @@ const consignmentReady = (page, path) =>
   pathOfUrl(page.url) === path &&
   hasFieldMatching(page, 'numberOfAnimalsQuantity')
 
+const openConsignmentPage = (context, landed, path, endpoints) => {
+  const { walker } = context
+  let page = walker.reach(landed, path, endpoints.open)
+
+  if (!consignmentReady(page, path)) {
+    page = commoditiesSavedPage(context, page)
+    page = walker.reach(page, path, endpoints.open)
+  }
+
+  return page
+}
+
 const consignmentDetails = {
   name: 'consignment-details',
   run: (context, landed) => {
     const { walker } = context
     const endpoints = ENDPOINTS['consignment-details']
     const path = pagePath(context, 'consignment-details')
-    let page = walker.reach(landed, path, endpoints.open)
+    let page = openConsignmentPage(context, landed, path, endpoints)
     let savedPage = page
 
     for (let attempt = 0; attempt < CONSIGNMENT_SAVE_ATTEMPTS; attempt += 1) {
       if (!consignmentReady(page, path)) {
-        page = walker.reach(page, path, endpoints.open)
+        page = openConsignmentPage(context, page, path, endpoints)
       }
 
       if (!consignmentReady(page, path)) {

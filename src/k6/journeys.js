@@ -21,7 +21,7 @@ import {
   SIGN_IN_AND_DASHBOARD_PAGES,
   secondsSince
 } from './front-door.js'
-import { pagePath } from './journey-pages.js'
+import { pagePath, pathOfUrl } from './journey-pages.js'
 import {
   createWalker,
   recordNotificationPages,
@@ -250,19 +250,36 @@ const reEditUntilTarget = (run, context) => {
 
 const submitFromReview = (run, context, checkName, submission) => {
   const { walker } = context
-  const view = walker.open(
-    pagePath(context, 'notification-view'),
-    run.shared.notificationView
-  )
   const declarationPath = pagePath(context, 'declaration')
-  const declaration = view.hiddenFields.step
-    ? walker.post(declarationPath, view.hiddenFields, run.shared.declaration)
-    : walker.reach(undefined, declarationPath, run.shared.declaration)
-  const confirmation = walker.submit(
-    declaration,
-    { declaration: 'confirmed' },
-    run.shared.declarationSave
-  )
+  const reviewPath = pagePath(context, 'notification-view')
+  const openReview = () => walker.open(reviewPath, run.shared.notificationView)
+  const continueToDeclaration = (review) =>
+    walker.post(
+      declarationPath,
+      { ...review.hiddenFields, step: 'review' },
+      run.shared.declaration
+    )
+  const submitDeclaration = (declaration) =>
+    walker.submit(
+      declaration,
+      { declaration: 'confirmed' },
+      run.shared.declarationSave
+    )
+
+  let view = openReview()
+  let declaration = continueToDeclaration(view)
+  let confirmation = submitDeclaration(declaration)
+
+  if (
+    view.status === HTTP_OK &&
+    confirmation.status === HTTP_OK &&
+    !confirmation.url.endsWith('/confirmation') &&
+    pathOfUrl(declaration.url) !== declarationPath
+  ) {
+    view = openReview()
+    declaration = continueToDeclaration(view)
+    confirmation = submitDeclaration(declaration)
+  }
 
   check(confirmation, {
     [checkName]: (page) =>

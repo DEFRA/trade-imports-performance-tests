@@ -52,6 +52,12 @@ const formHasAnswerInputs = (form) =>
       return name && !NON_ANSWER_INPUT_TYPES.has(type)
     })
 
+const formHasStepField = (form) =>
+  form
+    .find('input')
+    .toArray()
+    .some((input) => input.attr('name') === 'step')
+
 const chosenPostForm = (html) => {
   const postForms = html
     .find('form')
@@ -61,9 +67,12 @@ const chosenPostForm = (html) => {
     (form) => form.find('input[name="concurrencyToken"]').size() > 0
   )
   const candidates = withToken.length > 0 ? withToken : postForms
+  const withStep = candidates.filter(formHasStepField)
   const withAnswers = candidates.filter(formHasAnswerInputs)
 
-  return withAnswers.at(-1) ?? candidates.at(-1) ?? postForms[0]
+  return (
+    withAnswers.at(-1) ?? withStep.at(-1) ?? candidates.at(-1) ?? postForms[0]
+  )
 }
 
 const isSet = (value) => value !== undefined

@@ -254,4 +254,50 @@ describe('createBrowserSession form choice', () => {
       'numberOfAnimalsQuantity-0'
     ])
   })
+
+  test('reads hidden fields from the continue-to-declaration form, not an earlier copy form', () => {
+    const tokenInput = elementOf({
+      type: 'hidden',
+      name: 'concurrencyToken',
+      value: 't-1'
+    })
+    const copyOrigin = elementOf({
+      type: 'hidden',
+      name: 'copyOrigin',
+      value: 'notification-view'
+    })
+    const stepInput = elementOf({
+      type: 'hidden',
+      name: 'step',
+      value: 'review'
+    })
+    const formDescendants = (inputs) => ({
+      input: inputs,
+      'input[name="concurrencyToken"]': inputs.filter(
+        (input) => input.attributes.name === 'concurrencyToken'
+      ),
+      'input[type="hidden"]': inputs.filter(
+        (input) => input.attributes.type === 'hidden'
+      )
+    })
+    const copyForm = elementOf(
+      { method: 'post' },
+      formDescendants([tokenInput, copyOrigin])
+    )
+    const declareForm = elementOf(
+      { method: 'post' },
+      formDescendants([tokenInput, stepInput])
+    )
+    httpMock.get.mockReturnValueOnce(pageAnswer([copyForm, declareForm]))
+
+    const landed = newSession().open(
+      '/live-animals/notifications/n-1/notification-view',
+      'animals-notification-view'
+    )
+
+    expect(landed.hiddenFields).toEqual({
+      concurrencyToken: 't-1',
+      step: 'review'
+    })
+  })
 })
