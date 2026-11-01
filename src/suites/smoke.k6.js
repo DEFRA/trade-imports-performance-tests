@@ -212,8 +212,7 @@ const journeyOptions = ({ journey, steps, frontend, backend, data }) => ({
   vu: exec.vu.idInTest,
   iterationInTest: exec.scenario.iterationInTest,
   confirmsEventArrival: true,
-  insBackendUrl: urls.insBackend,
-  replaysCapturedSave: false
+  insBackendUrl: urls.insBackend
 })
 
 export function liveAnimals(data) {

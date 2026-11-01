@@ -104,35 +104,32 @@ const commodities = {
 }
 
 const consignmentAnswers = (context, page) => {
-  const fromPage = blankFieldAnswers(page.formInputs, identityOf(context))
+  const answers = blankFieldAnswers(page.formInputs, identityOf(context))
 
-  if (Object.keys(fromPage).length > 0) {
-    return fromPage
+  for (const input of page.formInputs) {
+    if (
+      input.name.startsWith('numberOfAnimalsQuantity') &&
+      answers[input.name] === undefined
+    ) {
+      answers[input.name] = '1'
+    }
+
+    if (
+      input.name.startsWith('numberOfPackages') &&
+      answers[input.name] === undefined
+    ) {
+      answers[input.name] = '5'
+    }
+  }
+
+  if (Object.keys(answers).length > 0) {
+    return answers
   }
 
   return {
     'numberOfAnimalsQuantity-0': '1',
     'numberOfPackages-0': '5'
   }
-}
-
-const saveWithRetry = (name, context, landed, slug, endpoints, answersFor) => {
-  const { walker } = context
-  const path = pagePath(context, slug)
-  let page = walker.reach(landed, path, endpoints.open)
-  let savedPage = page
-
-  for (let attempt = 0; attempt < SAVE_ATTEMPTS; attempt += 1) {
-    savedPage = walker.submit(page, answersFor(context, page), endpoints.save)
-
-    if (isSaved(savedPage)) {
-      break
-    }
-
-    page = walker.reach(savedPage, path, endpoints.open)
-  }
-
-  return saved(name, savedPage)
 }
 
 const addresses = {
@@ -231,18 +228,12 @@ export const LIVE_ANIMALS_STEPS = Object.freeze({
   draft: [
     reachAndSubmit('origin', 'origin', ENDPOINTS.origin, originAnswers),
     commodities,
-    {
-      name: 'consignment-details',
-      run: (context, landed) =>
-        saveWithRetry(
-          'consignment-details',
-          context,
-          landed,
-          'consignment-details',
-          ENDPOINTS['consignment-details'],
-          consignmentAnswers
-        )
-    },
+    reachAndSubmit(
+      'consignment-details',
+      'consignment-details',
+      ENDPOINTS['consignment-details'],
+      consignmentAnswers
+    ),
     reachAndSubmit(
       'identification',
       'commodities/identification',
