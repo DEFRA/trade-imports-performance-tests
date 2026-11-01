@@ -56,6 +56,9 @@ const SAVE_ATTEMPTS = 2
 const COMMODITIES_SAVE_ATTEMPTS = SAVE_ATTEMPTS
 const CONSIGNMENT_SAVE_ATTEMPTS = SAVE_ATTEMPTS
 
+const saveWorthRetrying = (page) =>
+  page.staleActionHandled || page.tooManyRedirects
+
 const searchCow = (walker, page) =>
   walker.submit(
     page,
@@ -95,6 +98,10 @@ const commoditiesSavedPage = (context, landed) => {
       if (isSaved(savedPage)) {
         break
       }
+
+      if (!saveWorthRetrying(savedPage)) {
+        break
+      }
     }
 
     page = walker.reach(savedPage, path, ENDPOINTS.commodities.open)
@@ -119,29 +126,33 @@ const consignmentDetails = {
     const { walker } = context
     const endpoints = ENDPOINTS['consignment-details']
     const path = pagePath(context, 'consignment-details')
-    const commoditiesPath = pagePath(context, 'commodities')
     let page = walker.reach(landed, path, endpoints.open)
     let savedPage = page
 
     for (let attempt = 0; attempt < CONSIGNMENT_SAVE_ATTEMPTS; attempt += 1) {
       if (!consignmentReady(page, path)) {
-        page = commoditiesSavedPage(context, page)
         page = walker.reach(page, path, endpoints.open)
       }
 
-      if (consignmentReady(page, path)) {
-        savedPage = walker.submit(
-          page,
-          consignmentAnswers(context, page),
-          endpoints.save
-        )
-
-        if (isSaved(savedPage)) {
-          break
-        }
+      if (!consignmentReady(page, path)) {
+        break
       }
 
-      page = walker.reach(savedPage, commoditiesPath, ENDPOINTS.commodities.open)
+      savedPage = walker.submit(
+        page,
+        consignmentAnswers(context, page),
+        endpoints.save
+      )
+
+      if (isSaved(savedPage)) {
+        break
+      }
+
+      if (!saveWorthRetrying(savedPage)) {
+        break
+      }
+
+      page = walker.reach(savedPage, path, endpoints.open)
     }
 
     return saved('consignment-details', savedPage)
