@@ -21,7 +21,7 @@ import {
   SIGN_IN_AND_DASHBOARD_PAGES,
   secondsSince
 } from './front-door.js'
-import { pagePath, pathOfUrl } from './journey-pages.js'
+import { pagePath } from './journey-pages.js'
 import {
   createWalker,
   recordNotificationPages,
@@ -266,20 +266,9 @@ const submitFromReview = (run, context, checkName, submission) => {
       run.shared.declarationSave
     )
 
-  let view = openReview()
-  let declaration = continueToDeclaration(view)
-  let confirmation = submitDeclaration(declaration)
-
-  if (
-    view.status === HTTP_OK &&
-    confirmation.status === HTTP_OK &&
-    !confirmation.url.endsWith('/confirmation') &&
-    pathOfUrl(declaration.url) !== declarationPath
-  ) {
-    view = openReview()
-    declaration = continueToDeclaration(view)
-    confirmation = submitDeclaration(declaration)
-  }
+  const view = openReview()
+  const declaration = continueToDeclaration(view)
+  const confirmation = submitDeclaration(declaration)
 
   check(confirmation, {
     [checkName]: (page) =>
