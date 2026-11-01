@@ -253,12 +253,23 @@ const submitFromReview = (run, context, checkName, submission) => {
   const declarationPath = pagePath(context, 'declaration')
   const reviewPath = pagePath(context, 'notification-view')
   const openReview = () => walker.open(reviewPath, run.shared.notificationView)
-  const continueToDeclaration = (review) =>
-    walker.post(
-      declarationPath,
-      { ...review.hiddenFields, step: 'review' },
-      run.shared.declaration
+  const openDeclaration = (review) => {
+    if (run.journey.endpointPrefix === 'animals') {
+      return walker.post(
+        declarationPath,
+        { ...review.hiddenFields, step: 'review' },
+        run.shared.declaration
+      )
+    }
+
+    const continued = walker.post(
+      reviewPath,
+      review.hiddenFields,
+      run.shared.notificationView
     )
+
+    return walker.reach(continued, declarationPath, run.shared.declaration)
+  }
   const submitDeclaration = (declaration) =>
     walker.submit(
       declaration,
@@ -267,7 +278,7 @@ const submitFromReview = (run, context, checkName, submission) => {
     )
 
   const view = openReview()
-  const declaration = continueToDeclaration(view)
+  const declaration = openDeclaration(view)
   const confirmation = submitDeclaration(declaration)
 
   check(confirmation, {
