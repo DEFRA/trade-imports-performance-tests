@@ -277,7 +277,7 @@ const submitFromReview = (run, context, checkName, submission) => {
       run.shared.declarationSave
     )
 
-  const view = openReview()
+  let view = openReview()
   let declaration = openDeclaration(view)
 
   if (run.journey.endpointPrefix === 'plants') {
@@ -286,9 +286,15 @@ const submitFromReview = (run, context, checkName, submission) => {
       declarationPath,
       run.shared.declaration
     )
-  } else if (pathOfUrl(declaration.url) !== declarationPath) {
-    const refreshed = openReview()
-    declaration = openDeclaration(refreshed)
+  } else {
+    for (
+      let attempt = 0;
+      attempt < 2 && pathOfUrl(declaration.url) !== declarationPath;
+      attempt += 1
+    ) {
+      view = openReview()
+      declaration = openDeclaration(view)
+    }
   }
 
   const confirmation =
