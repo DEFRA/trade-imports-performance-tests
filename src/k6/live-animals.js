@@ -1,3 +1,5 @@
+import { check } from 'k6'
+
 import { STEP_ENDPOINTS } from '../config/journey-endpoints.js'
 import {
   ANIMAL_COMMODITY_SEARCH,
@@ -161,10 +163,32 @@ const consignmentDetails = {
 
 const IDENTIFICATION_SUBMIT_ATTEMPTS = 4
 
-const identificationAnswers = (context, page) => ({
-  action: 'implicit-submit',
-  ...blankFieldAnswers(page.formInputs, identityOf(context))
-})
+const identificationFinished = (page, path) =>
+  isSaved(page) && pathOfUrl(page.url) !== path
+
+const identificationAnswers = (context, page) => {
+  const answers = {
+    action: 'implicit-submit',
+    ...blankFieldAnswers(page.formInputs, identityOf(context))
+  }
+
+  for (const input of page.formInputs) {
+    if (
+      input.name.startsWith('animalIdentifierEarTag') &&
+      answers[input.name] === undefined
+    ) {
+      answers[input.name] = 'UK123456789012'
+    }
+  }
+
+  if (
+    !Object.keys(answers).some((name) => name.startsWith('animalIdentifier'))
+  ) {
+    answers['animalIdentifierEarTag-0'] = 'UK123456789012'
+  }
+
+  return answers
+}
 
 const identification = {
   name: 'identification',
@@ -176,7 +200,11 @@ const identification = {
     let savedPage = page
 
     if (pathOfUrl(page.url) !== path) {
-      return saved('identification', savedPage)
+      check(page, {
+        'identification saved': (landed) => identificationFinished(landed, path)
+      })
+
+      return savedPage
     }
 
     for (
@@ -197,7 +225,7 @@ const identification = {
         endpoints.save
       )
 
-      if (pathOfUrl(savedPage.url) !== path && isSaved(savedPage)) {
+      if (identificationFinished(savedPage, path)) {
         break
       }
 
@@ -206,7 +234,11 @@ const identification = {
       }
     }
 
-    return saved('identification', savedPage)
+    check(savedPage, {
+      'identification saved': (page) => identificationFinished(page, path)
+    })
+
+    return savedPage
   }
 }
 
