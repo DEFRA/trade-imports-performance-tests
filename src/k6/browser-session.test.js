@@ -238,7 +238,10 @@ describe('createBrowserSession form choice', () => {
       name: 'numberOfAnimalsQuantity-0',
       value: ''
     })
-    const mainForm = elementOf({ method: 'post' }, { input: [tokenInput, animalInput] })
+    const mainForm = elementOf(
+      { method: 'post' },
+      { input: [tokenInput, animalInput] }
+    )
     const removeForm = elementOf({ method: 'post' }, { input: [tokenInput] })
     httpMock.get.mockReturnValueOnce(pageAnswer([mainForm, removeForm]))
 

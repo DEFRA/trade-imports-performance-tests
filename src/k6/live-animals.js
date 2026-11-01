@@ -49,7 +49,9 @@ const originAnswers = (context, page) => ({
   internalReferenceNumber: `PERF-${context.vu}-${context.iteration}${context.suffix}`
 })
 
-const COMMODITIES_SAVE_ATTEMPTS = 3
+const SAVE_ATTEMPTS = 2
+
+const COMMODITIES_SAVE_ATTEMPTS = SAVE_ATTEMPTS
 
 const searchCow = (walker, page) =>
   walker.submit(
@@ -99,6 +101,25 @@ const commodities = {
 
     return saved('commodities', savedPage)
   }
+}
+
+const saveWithRetry = (name, context, landed, slug, endpoints, answersFor) => {
+  const { walker } = context
+  const path = pagePath(context, slug)
+  let page = walker.reach(landed, path, endpoints.open)
+  let savedPage = page
+
+  for (let attempt = 0; attempt < SAVE_ATTEMPTS; attempt += 1) {
+    savedPage = walker.submit(page, answersFor(context, page), endpoints.save)
+
+    if (isSaved(savedPage)) {
+      break
+    }
+
+    page = walker.reach(savedPage, path, endpoints.open)
+  }
+
+  return saved(name, savedPage)
 }
 
 const addresses = {
@@ -197,12 +218,18 @@ export const LIVE_ANIMALS_STEPS = Object.freeze({
   draft: [
     reachAndSubmit('origin', 'origin', ENDPOINTS.origin, originAnswers),
     commodities,
-    reachAndSubmit(
-      'consignment-details',
-      'consignment-details',
-      ENDPOINTS['consignment-details'],
-      (context, page) => blankFieldAnswers(page.formInputs, identityOf(context))
-    ),
+    {
+      name: 'consignment-details',
+      run: (context, landed) =>
+        saveWithRetry(
+          'consignment-details',
+          context,
+          landed,
+          'consignment-details',
+          ENDPOINTS['consignment-details'],
+          (ctx, page) => blankFieldAnswers(page.formInputs, identityOf(ctx))
+        )
+    },
     reachAndSubmit(
       'identification',
       'commodities/identification',
