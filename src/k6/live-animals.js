@@ -214,6 +214,12 @@ const identification = {
     let page = walker.reach(landed, path, endpoints.open)
     let savedPage = page
 
+    if (pathOfUrl(page.url) !== path && !identificationFinished(page, path)) {
+      page = commoditiesSavedPage(context, page)
+      page = walker.reach(page, path, endpoints.open)
+      savedPage = page
+    }
+
     if (pathOfUrl(page.url) !== path) {
       check(page, {
         'identification saved': (landed) => identificationFinished(landed, path)
