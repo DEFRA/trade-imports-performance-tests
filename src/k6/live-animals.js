@@ -74,15 +74,21 @@ const speciesToSave = (page) => {
     value.endsWith(`|${ANIMAL_COMMODITY_SPECIES}`)
   )
 
-  return (
+  const chosen =
     byLineKey ??
     choiceLabelled(page, 'species', ANIMAL_COMMODITY_SPECIES) ??
     values[0]
-  )
+
+  return chosen !== undefined && values.includes(chosen) ? chosen : undefined
 }
 
-const saveSpecies = (walker, page, species) =>
-  walker.submit(page, { species, action: 'save' }, ENDPOINTS.commodities.save)
+const saveSpecies = (walker, page, species) => {
+  if (!choiceValues(page, 'species').includes(species)) {
+    return page
+  }
+
+  return walker.submit(page, { species, action: 'save' }, ENDPOINTS.commodities.save)
+}
 
 const commoditiesSavedPage = (context, landed) => {
   const { walker } = context
