@@ -278,22 +278,17 @@ const submitFromReview = (run, context, checkName, submission) => {
     )
 
   const view = openReview()
-  let declaration = walker.reach(
-    openDeclaration(view),
-    declarationPath,
-    run.shared.declaration
-  )
+  let declaration = openDeclaration(view)
 
-  if (
-    run.journey.endpointPrefix === 'animals' &&
-    pathOfUrl(declaration.url) !== declarationPath
-  ) {
-    const refreshed = openReview()
+  if (run.journey.endpointPrefix === 'plants') {
     declaration = walker.reach(
-      openDeclaration(refreshed),
+      declaration,
       declarationPath,
       run.shared.declaration
     )
+  } else if (pathOfUrl(declaration.url) !== declarationPath) {
+    const refreshed = openReview()
+    declaration = openDeclaration(refreshed)
   }
 
   const confirmation =
