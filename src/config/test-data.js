@@ -1,8 +1,8 @@
 // The longest searchable address field: ins-frontend features/address-book/fields.js FIELD_RULES.name.maxLength.
 export const WORST_CASE_SEARCH_LENGTH = 255
 
-// Cow is the one commodity whose pages match the live-animals step list exactly.
-export const ANIMAL_COMMODITY_SEARCH = 'Cow'
+// Cattle is the one commodity whose pages match the live-animals step list exactly. MDM finds it by its Latin name, not by "cow".
+export const ANIMAL_COMMODITY_SEARCH = 'Bos taurus'
 
 // The narrowest origin constraint any category of the type can impose: plants-frontend services/commodities ORIGIN_CONSTRAINTS.
 const EU_MEMBER_STATES = Object.freeze([
