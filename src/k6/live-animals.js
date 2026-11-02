@@ -379,42 +379,61 @@ const contact = reachAndSubmit(
   })
 )
 
+const DRAFT_STEPS = [
+  reachAndSubmit('origin', 'origin', ENDPOINTS.origin, originAnswers),
+  commodities,
+  consignmentDetails,
+  identification,
+  reachAndSubmit(
+    'import-reason',
+    'import-reason',
+    ENDPOINTS['import-reason'],
+    () => ({
+      reasonForImport: 'internalMarket',
+      purposeInInternalMarket: 'breeding'
+    })
+  ),
+  reachAndSubmit(
+    'additional-details',
+    'additional-details',
+    ENDPOINTS['additional-details'],
+    () => ({
+      animalsCertifiedFor: 'slaughter',
+      containsUnweanedAnimals: 'no'
+    })
+  ),
+  documentsStep,
+  addresses,
+  reachAndSubmit('cph-number', 'cph-number', ENDPOINTS['cph-number'], () => ({
+    cphCounty: '12',
+    cphParish: '345',
+    cphHolding: '6789'
+  })),
+  portOfEntry,
+  transitCountries,
+  transporters,
+  contact
+]
+
+const PRE_DECLARATION_RESYNC_NAMES = [
+  'origin',
+  'commodities',
+  'consignment-details',
+  'identification',
+  'import-reason',
+  'additional-details',
+  'addresses',
+  'cph-number',
+  'port-of-entry',
+  'transit-countries',
+  'transporters',
+  'contact'
+]
+
+const draftStepNamed = (name) => DRAFT_STEPS.find((step) => step.name === name)
+
 export const LIVE_ANIMALS_STEPS = Object.freeze({
-  draft: [
-    reachAndSubmit('origin', 'origin', ENDPOINTS.origin, originAnswers),
-    commodities,
-    consignmentDetails,
-    identification,
-    reachAndSubmit(
-      'import-reason',
-      'import-reason',
-      ENDPOINTS['import-reason'],
-      () => ({
-        reasonForImport: 'internalMarket',
-        purposeInInternalMarket: 'breeding'
-      })
-    ),
-    reachAndSubmit(
-      'additional-details',
-      'additional-details',
-      ENDPOINTS['additional-details'],
-      () => ({
-        animalsCertifiedFor: 'slaughter',
-        containsUnweanedAnimals: 'no'
-      })
-    ),
-    documentsStep,
-    addresses,
-    reachAndSubmit('cph-number', 'cph-number', ENDPOINTS['cph-number'], () => ({
-      cphCounty: '12',
-      cphParish: '345',
-      cphHolding: '6789'
-    })),
-    portOfEntry,
-    transitCountries,
-    transporters,
-    contact
-  ],
+  draft: DRAFT_STEPS,
   reEdit: [
     'origin',
     'import-reason',
@@ -428,10 +447,12 @@ export const LIVE_ANIMALS_STEPS = Object.freeze({
     documents: countAt(iteration, journeyModel.documentsPerNotification)
   }),
   stabiliseBeforeDeclaration: (context) => {
-    let landed = commodities.run(context, undefined)
+    let landed
 
-    landed = consignmentDetails.run(context, landed)
-    landed = identification.run(context, landed)
+    for (const name of PRE_DECLARATION_RESYNC_NAMES) {
+      landed = draftStepNamed(name).run(context, landed)
+    }
+
     awaitDocumentsReady(context)
 
     return landed

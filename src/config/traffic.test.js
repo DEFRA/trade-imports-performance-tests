@@ -152,6 +152,9 @@ describe('SMOKE_PROFILE', () => {
     expect(model.liveAnimals.documentsPerNotification).toEqual([
       { share: 1, min: 1, max: 1 }
     ])
+    expect(model.liveAnimals.documentTypes).toEqual([
+      { share: 1, value: 'pdf' }
+    ])
     expect(model.addressBook.worstCaseSearchShare).toBe(1)
   })
 })

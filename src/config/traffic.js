@@ -263,7 +263,8 @@ export const SMOKE_PROFILE = freezeDeep({
     sessionsPerNotification: 1,
     amendShare: 1,
     cancelAmendShare: 0,
-    documentsPerNotification: [{ share: 1, min: 1, max: 1 }]
+    documentsPerNotification: [{ share: 1, min: 1, max: 1 }],
+    documentTypes: [{ share: 1, value: 'pdf' }]
   },
   highRiskPlants: {
     notificationsPerHour: SMOKE_NOTIFICATIONS_PER_HOUR,

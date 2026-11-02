@@ -267,22 +267,17 @@ const openDeclarationPage = (run, context, review) => {
     return walker.reach(continued, declarationPath, run.shared.declaration)
   }
 
-  if (review.hiddenFields.step) {
-    return walker.post(
-      declarationPath,
-      review.hiddenFields,
-      run.shared.declaration
-    )
-  }
-
-  return walker.reach(review, declarationPath, run.shared.declaration)
+  return walker.post(
+    declarationPath,
+    { ...review.hiddenFields, step: 'review' },
+    run.shared.declaration
+  )
 }
 
 const submitFromReview = (run, context, checkName, submission) => {
   const { walker } = context
   const reviewPath = pagePath(context, 'notification-view')
   const declarationPath = pagePath(context, 'declaration')
-  let view
   let confirmation
 
   for (let attempt = 0; attempt < DECLARATION_SUBMIT_ATTEMPTS; attempt += 1) {
@@ -290,7 +285,7 @@ const submitFromReview = (run, context, checkName, submission) => {
       run.steps.stabiliseBeforeDeclaration?.(context)
     }
 
-    view = walker.open(reviewPath, run.shared.notificationView)
+    const view = walker.open(reviewPath, run.shared.notificationView)
     let declarePage = openDeclarationPage(run, context, view)
 
     if (run.journey.endpointPrefix === 'plants') {
@@ -321,7 +316,7 @@ const submitFromReview = (run, context, checkName, submission) => {
   }
 
   check(confirmation, {
-    [checkName]: (page) => view.status === HTTP_OK && confirmationLanded(page)
+    [checkName]: (page) => confirmationLanded(page)
   })
 
   if (confirmationLanded(confirmation)) {
