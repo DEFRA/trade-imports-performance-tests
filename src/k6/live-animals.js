@@ -11,7 +11,7 @@ import {
   selectOptions,
   slashDateText
 } from '../lib/form-fill.js'
-import { documentsStep } from './documents.js'
+import { awaitDocumentsReady, documentsStep } from './documents.js'
 import {
   choiceLabelled,
   choiceValues,
@@ -434,5 +434,14 @@ export const LIVE_ANIMALS_STEPS = Object.freeze({
   planFor: (journeyModel, iteration) => ({
     notificationType: 'live-animals',
     documents: countAt(iteration, journeyModel.documentsPerNotification)
-  })
+  }),
+  stabiliseBeforeDeclaration: (context) => {
+    let landed = commodities.run(context, undefined)
+
+    landed = consignmentDetails.run(context, landed)
+    landed = identification.run(context, landed)
+    awaitDocumentsReady(context)
+
+    return landed
+  }
 })

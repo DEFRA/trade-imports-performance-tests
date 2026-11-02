@@ -86,6 +86,23 @@ const awaitScan = (context, landed) => {
   })
 }
 
+/**
+ * Polls the documents status route until every upload has finished scanning.
+ *
+ * Used after re-edits so the review page is not still refused for pending scans.
+ *
+ * @param {object} context - The step context.
+ */
+export const awaitDocumentsReady = (context) => {
+  if (context.plan.documents <= 0) {
+    return
+  }
+
+  const landed = { receivedAt: Date.now() }
+
+  awaitScan(context, landed)
+}
+
 const isUploaded = ({ base }, response) =>
   response.status === HTTP_OK &&
   response.url.split(/[?#]/)[0].endsWith(`${base}/${DOCUMENTS_SLUG}`)

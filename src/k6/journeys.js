@@ -315,22 +315,18 @@ const submitFromReview = (run, context, checkName, submission) => {
 
   if (
     confirmation.status !== HTTP_OK ||
-    !confirmation.url.endsWith('/confirmation')
+    !confirmationLanded(confirmation)
   ) {
+    run.steps.stabiliseBeforeDeclaration?.(context)
     ;({ review: view, confirmation } = completeSubmit())
   }
 
   check(confirmation, {
     [checkName]: (page) =>
-      view.status === HTTP_OK &&
-      page.status === HTTP_OK &&
-      page.url.endsWith('/confirmation')
+      view.status === HTTP_OK && confirmationLanded(page)
   })
 
-  if (
-    confirmation.status === HTTP_OK &&
-    confirmation.url.endsWith('/confirmation')
-  ) {
+  if (confirmationLanded(confirmation)) {
     recordSubmission(submission)
   }
 
@@ -424,12 +420,17 @@ const amendPagesFor = (amends, cancels) => {
   )
 }
 
+const confirmationLanded = (page) =>
+  page.status === HTTP_OK && pathOfUrl(page.url).endsWith('/confirmation')
+
 const finishNotification = (run, context) => {
   const reEdited = reEditUntilTarget(run, context)
 
   if (!reEdited.ok) {
     return false
   }
+
+  run.steps.stabiliseBeforeDeclaration?.(context)
 
   const confirmation = submitFromReview(
     run,
@@ -438,7 +439,7 @@ const finishNotification = (run, context) => {
     'first'
   )
 
-  if (confirmation.status !== HTTP_OK) {
+  if (!confirmationLanded(confirmation)) {
     return false
   }
 
