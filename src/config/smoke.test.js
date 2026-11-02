@@ -137,9 +137,9 @@ describe('smokeScenarios', () => {
     expect(scenarios['live-animals'].gracefulStop).toBe(
       LIVE_ANIMALS_SMOKE_GRACEFUL_STOP
     )
-    expect(resolveTrafficModel({}, SMOKE_PROFILE).liveAnimals.sessionMinutes).toBe(
-      1
-    )
+    expect(
+      resolveTrafficModel({}, SMOKE_PROFILE).liveAnimals.sessionMinutes
+    ).toBe(1)
   })
 })
 

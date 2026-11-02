@@ -252,7 +252,7 @@ const reEditUntilTarget = (run, context) => {
   return runSteps(context, steps, undefined)
 }
 
-const openDeclarationPage = (run, context, review) => {
+const openDeclarationPage = (run, context, view) => {
   const { walker } = context
   const declarationPath = pagePath(context, 'declaration')
   const reviewPath = pagePath(context, 'notification-view')
@@ -260,18 +260,16 @@ const openDeclarationPage = (run, context, review) => {
   if (run.journey.endpointPrefix === 'plants') {
     const continued = walker.post(
       reviewPath,
-      review.hiddenFields,
+      view.hiddenFields,
       run.shared.notificationView
     )
 
     return walker.reach(continued, declarationPath, run.shared.declaration)
   }
 
-  return walker.post(
-    declarationPath,
-    { ...review.hiddenFields, step: 'review' },
-    run.shared.declaration
-  )
+  return view.hiddenFields.step
+    ? walker.post(declarationPath, view.hiddenFields, run.shared.declaration)
+    : walker.reach(undefined, declarationPath, run.shared.declaration)
 }
 
 const submitFromReview = (run, context, checkName, submission) => {
@@ -279,10 +277,15 @@ const submitFromReview = (run, context, checkName, submission) => {
   const reviewPath = pagePath(context, 'notification-view')
   const declarationPath = pagePath(context, 'declaration')
   let confirmation
+  let reviewView
 
   for (let attempt = 0; attempt < DECLARATION_SUBMIT_ATTEMPTS; attempt += 1) {
-    const view = walker.open(reviewPath, run.shared.notificationView)
-    let declarePage = openDeclarationPage(run, context, view)
+    if (attempt > 0) {
+      run.steps.stabiliseBeforeDeclaration?.(context)
+    }
+
+    reviewView = walker.open(reviewPath, run.shared.notificationView)
+    let declarePage = openDeclarationPage(run, context, reviewView)
 
     if (run.journey.endpointPrefix === 'plants') {
       declarePage = walker.reach(
@@ -302,7 +305,7 @@ const submitFromReview = (run, context, checkName, submission) => {
 
     confirmation = walker.submit(
       declarePage,
-      { declaration: 'confirmed', step: 'declare' },
+      { declaration: 'confirmed' },
       run.shared.declarationSave
     )
 
@@ -312,7 +315,8 @@ const submitFromReview = (run, context, checkName, submission) => {
   }
 
   check(confirmation, {
-    [checkName]: (page) => confirmationLanded(page)
+    [checkName]: (page) =>
+      reviewView?.status === HTTP_OK && confirmationLanded(page)
   })
 
   if (confirmationLanded(confirmation)) {
