@@ -415,23 +415,6 @@ const DRAFT_STEPS = [
   contact
 ]
 
-const PRE_DECLARATION_RESYNC_NAMES = [
-  'origin',
-  'commodities',
-  'consignment-details',
-  'identification',
-  'import-reason',
-  'additional-details',
-  'addresses',
-  'cph-number',
-  'port-of-entry',
-  'transit-countries',
-  'transporters',
-  'contact'
-]
-
-const draftStepNamed = (name) => DRAFT_STEPS.find((step) => step.name === name)
-
 export const LIVE_ANIMALS_STEPS = Object.freeze({
   draft: DRAFT_STEPS,
   reEdit: [
@@ -447,14 +430,6 @@ export const LIVE_ANIMALS_STEPS = Object.freeze({
     documents: countAt(iteration, journeyModel.documentsPerNotification)
   }),
   stabiliseBeforeDeclaration: (context) => {
-    let landed
-
-    for (const name of PRE_DECLARATION_RESYNC_NAMES) {
-      landed = draftStepNamed(name).run(context, landed)
-    }
-
     awaitDocumentsReady(context)
-
-    return landed
   }
 })

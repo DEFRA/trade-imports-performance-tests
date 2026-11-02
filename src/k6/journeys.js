@@ -42,7 +42,6 @@ const AMEND_START_AND_EDIT_PAGES = 3
 const CANCEL_AMEND_PAGES = 2
 const RESUBMIT_AMEND_PAGES = 3
 const AMENDMENT_SUFFIX = '-A'
-const DECLARATION_SUBMIT_ATTEMPTS = 5
 
 const confirmationLanded = (page) =>
   page.status === HTTP_OK && pathOfUrl(page.url).endsWith('/confirmation')
@@ -257,66 +256,37 @@ const openDeclarationPage = (run, context, view) => {
   const declarationPath = pagePath(context, 'declaration')
   const reviewPath = pagePath(context, 'notification-view')
 
-  if (run.journey.endpointPrefix === 'plants') {
-    const continued = walker.post(
-      reviewPath,
-      view.hiddenFields,
-      run.shared.notificationView
-    )
+  const continued = walker.post(
+    reviewPath,
+    view.hiddenFields,
+    run.shared.notificationView
+  )
 
-    return walker.reach(continued, declarationPath, run.shared.declaration)
-  }
-
-  return view.hiddenFields.step
-    ? walker.post(declarationPath, view.hiddenFields, run.shared.declaration)
-    : walker.reach(undefined, declarationPath, run.shared.declaration)
+  return walker.reach(continued, declarationPath, run.shared.declaration)
 }
 
 const submitFromReview = (run, context, checkName, submission) => {
   const { walker } = context
   const reviewPath = pagePath(context, 'notification-view')
   const declarationPath = pagePath(context, 'declaration')
-  let confirmation
-  let reviewView
-
-  for (let attempt = 0; attempt < DECLARATION_SUBMIT_ATTEMPTS; attempt += 1) {
-    if (attempt > 0) {
-      run.steps.stabiliseBeforeDeclaration?.(context)
-    }
-
-    reviewView = walker.open(reviewPath, run.shared.notificationView)
-    let declarePage = openDeclarationPage(run, context, reviewView)
-
-    if (run.journey.endpointPrefix === 'plants') {
-      declarePage = walker.reach(
-        declarePage,
-        declarationPath,
-        run.shared.declaration
-      )
-    }
-
-    if (
-      declarePage.status !== HTTP_OK ||
-      pathOfUrl(declarePage.url) !== declarationPath
-    ) {
-      confirmation = declarePage
-      continue
-    }
-
-    confirmation = walker.submit(
-      declarePage,
-      { declaration: 'confirmed' },
-      run.shared.declarationSave
-    )
-
-    if (confirmationLanded(confirmation)) {
-      break
-    }
-  }
+  const view = walker.open(reviewPath, run.shared.notificationView)
+  const declaration =
+    run.journey.endpointPrefix === 'plants'
+      ? openDeclarationPage(run, context, view)
+      : view.hiddenFields.step
+        ? walker.post(declarationPath, view.hiddenFields, run.shared.declaration)
+        : walker.reach(undefined, declarationPath, run.shared.declaration)
+  const confirmation = walker.submit(
+    declaration,
+    { declaration: 'confirmed' },
+    run.shared.declarationSave
+  )
 
   check(confirmation, {
     [checkName]: (page) =>
-      reviewView?.status === HTTP_OK && confirmationLanded(page)
+      view.status === HTTP_OK &&
+      page.status === HTTP_OK &&
+      pathOfUrl(page.url).endsWith('/confirmation')
   })
 
   if (confirmationLanded(confirmation)) {
