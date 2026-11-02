@@ -274,7 +274,11 @@ const submitFromReview = (run, context, checkName, submission) => {
     run.journey.endpointPrefix === 'plants'
       ? openDeclarationPage(run, context, view)
       : view.hiddenFields.step
-        ? walker.post(declarationPath, view.hiddenFields, run.shared.declaration)
+        ? walker.post(
+            declarationPath,
+            view.hiddenFields,
+            run.shared.declaration
+          )
         : walker.reach(undefined, declarationPath, run.shared.declaration)
   const confirmation = walker.submit(
     declaration,

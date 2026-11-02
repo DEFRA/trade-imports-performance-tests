@@ -1,5 +1,3 @@
-import { check } from 'k6'
-
 import { STEP_ENDPOINTS } from '../config/journey-endpoints.js'
 import {
   ANIMAL_COMMODITY_SEARCH,
@@ -15,11 +13,8 @@ import { awaitDocumentsReady, documentsStep } from './documents.js'
 import {
   choiceLabelled,
   choiceValues,
-  hasFieldMatching,
   identityOf,
-  isSaved,
   pagePath,
-  pathOfUrl,
   pickAddress,
   pickFrom,
   reachAndSubmit,
@@ -48,247 +43,39 @@ const originAnswers = (context, page) => ({
   internalReferenceNumber: `PERF-${context.vu}-${context.iteration}${context.suffix}`
 })
 
-const SAVE_ATTEMPTS = 2
-
-const COMMODITIES_SAVE_ATTEMPTS = SAVE_ATTEMPTS
-const CONSIGNMENT_SAVE_ATTEMPTS = SAVE_ATTEMPTS
-
-const saveWorthRetrying = (page) =>
-  page.staleActionHandled || page.tooManyRedirects
-
-const searchCow = (walker, page) =>
-  walker.submit(
-    page,
-    { commoditySearch: ANIMAL_COMMODITY_SEARCH, action: 'search' },
-    ENDPOINTS.commodities.search
-  )
-
-const speciesToSave = (page) => {
+const speciesForSave = (context, page) => {
   const values = choiceValues(page, 'species')
-  const byLineKey = values.find((value) =>
-    value.endsWith(`|${ANIMAL_COMMODITY_SPECIES}`)
+
+  return (
+    values.find((value) => value.endsWith(`|${ANIMAL_COMMODITY_SPECIES}`)) ??
+    choiceLabelled(page, 'species', ANIMAL_COMMODITY_SPECIES) ??
+    pickFrom(context, values)
   )
-
-  const chosen =
-    byLineKey ?? choiceLabelled(page, 'species', ANIMAL_COMMODITY_SPECIES)
-
-  return chosen !== undefined && values.includes(chosen) ? chosen : undefined
-}
-
-const saveSpecies = (walker, page, species) => {
-  if (!choiceValues(page, 'species').includes(species)) {
-    return page
-  }
-
-  return walker.submit(
-    page,
-    { species, action: 'save' },
-    ENDPOINTS.commodities.save
-  )
-}
-
-const commoditiesSavedPage = (context, landed) => {
-  const { walker } = context
-  const path = pagePath(context, 'commodities')
-  let page = walker.reach(landed, path, ENDPOINTS.commodities.open)
-  let savedPage = page
-
-  for (let attempt = 0; attempt < COMMODITIES_SAVE_ATTEMPTS; attempt += 1) {
-    page = searchCow(walker, page)
-    const species = speciesToSave(page)
-
-    if (species !== undefined) {
-      savedPage = saveSpecies(walker, page, species)
-
-      if (isSaved(savedPage)) {
-        break
-      }
-
-      if (!saveWorthRetrying(savedPage)) {
-        break
-      }
-    }
-
-    page = walker.reach(savedPage, path, ENDPOINTS.commodities.open)
-  }
-
-  return savedPage
 }
 
 const commodities = {
   name: 'commodities',
-  run: (context, landed) =>
-    saved('commodities', commoditiesSavedPage(context, landed))
-}
-
-const consignmentReady = (page, path) =>
-  pathOfUrl(page.url) === path &&
-  hasFieldMatching(page, 'numberOfAnimalsQuantity')
-
-const openConsignmentPage = (context, landed, path, endpoints) => {
-  const { walker } = context
-  let page = walker.reach(landed, path, endpoints.open)
-
-  if (!consignmentReady(page, path)) {
-    page = commoditiesSavedPage(context, page)
-    page = walker.reach(page, path, endpoints.open)
-  }
-
-  return page
-}
-
-const consignmentDetails = {
-  name: 'consignment-details',
   run: (context, landed) => {
     const { walker } = context
-    const endpoints = ENDPOINTS['consignment-details']
-    const path = pagePath(context, 'consignment-details')
-    let page = openConsignmentPage(context, landed, path, endpoints)
-    let savedPage = page
+    const opened = walker.reach(
+      landed,
+      pagePath(context, 'commodities'),
+      ENDPOINTS.commodities.open
+    )
+    const searched = walker.submit(
+      opened,
+      { commoditySearch: ANIMAL_COMMODITY_SEARCH, action: 'search' },
+      ENDPOINTS.commodities.search
+    )
 
-    for (let attempt = 0; attempt < CONSIGNMENT_SAVE_ATTEMPTS; attempt += 1) {
-      if (!consignmentReady(page, path)) {
-        page = openConsignmentPage(context, page, path, endpoints)
-      }
-
-      if (!consignmentReady(page, path)) {
-        break
-      }
-
-      savedPage = walker.submit(
-        page,
-        consignmentAnswers(context, page),
-        endpoints.save
+    return saved(
+      'commodities',
+      walker.submit(
+        searched,
+        { species: speciesForSave(context, searched) },
+        ENDPOINTS.commodities.save
       )
-
-      if (isSaved(savedPage)) {
-        break
-      }
-
-      if (!saveWorthRetrying(savedPage)) {
-        break
-      }
-
-      page = walker.reach(savedPage, path, endpoints.open)
-    }
-
-    return saved('consignment-details', savedPage)
-  }
-}
-
-const IDENTIFICATION_SUBMIT_ATTEMPTS = 4
-
-const identificationFinished = (page, path) =>
-  isSaved(page) && pathOfUrl(page.url) !== path
-
-const identificationAnswers = (context, page) => {
-  const answers = {
-    action: 'implicit-submit',
-    ...blankFieldAnswers(page.formInputs, identityOf(context))
-  }
-
-  for (const input of page.formInputs) {
-    if (
-      input.name.startsWith('animalIdentifierEarTag') &&
-      answers[input.name] === undefined
-    ) {
-      answers[input.name] = 'UK123456789012'
-    }
-  }
-
-  if (
-    !Object.keys(answers).some((name) => name.startsWith('animalIdentifier'))
-  ) {
-    answers['animalIdentifierEarTag-0'] = 'UK123456789012'
-  }
-
-  return answers
-}
-
-const identification = {
-  name: 'identification',
-  run: (context, landed) => {
-    const { walker } = context
-    const endpoints = ENDPOINTS.identification
-    const path = pagePath(context, 'commodities/identification')
-    let page = walker.reach(landed, path, endpoints.open)
-    let savedPage = page
-
-    if (pathOfUrl(page.url) !== path && !identificationFinished(page, path)) {
-      page = commoditiesSavedPage(context, page)
-      page = walker.reach(page, path, endpoints.open)
-      savedPage = page
-    }
-
-    if (pathOfUrl(page.url) !== path) {
-      check(page, {
-        'identification saved': (landed) => identificationFinished(landed, path)
-      })
-
-      return savedPage
-    }
-
-    for (
-      let attempt = 0;
-      attempt < IDENTIFICATION_SUBMIT_ATTEMPTS;
-      attempt += 1
-    ) {
-      page = walker.reach(savedPage, path, endpoints.open)
-
-      if (pathOfUrl(page.url) !== path) {
-        savedPage = page
-        break
-      }
-
-      savedPage = walker.submit(
-        page,
-        identificationAnswers(context, page),
-        endpoints.save
-      )
-
-      if (identificationFinished(savedPage, path)) {
-        break
-      }
-
-      if (!isSaved(savedPage) && !saveWorthRetrying(savedPage)) {
-        break
-      }
-    }
-
-    check(savedPage, {
-      'identification saved': (page) => identificationFinished(page, path)
-    })
-
-    return savedPage
-  }
-}
-
-const consignmentAnswers = (context, page) => {
-  const answers = blankFieldAnswers(page.formInputs, identityOf(context))
-
-  for (const input of page.formInputs) {
-    if (
-      input.name.startsWith('numberOfAnimalsQuantity') &&
-      answers[input.name] === undefined
-    ) {
-      answers[input.name] = '1'
-    }
-
-    if (
-      input.name.startsWith('numberOfPackages') &&
-      answers[input.name] === undefined
-    ) {
-      answers[input.name] = '5'
-    }
-  }
-
-  if (Object.keys(answers).length > 0) {
-    return answers
-  }
-
-  return {
-    'numberOfAnimalsQuantity-0': '1',
-    'numberOfPackages-0': '5'
+    )
   }
 }
 
@@ -379,44 +166,52 @@ const contact = reachAndSubmit(
   })
 )
 
-const DRAFT_STEPS = [
-  reachAndSubmit('origin', 'origin', ENDPOINTS.origin, originAnswers),
-  commodities,
-  consignmentDetails,
-  identification,
-  reachAndSubmit(
-    'import-reason',
-    'import-reason',
-    ENDPOINTS['import-reason'],
-    () => ({
-      reasonForImport: 'internalMarket',
-      purposeInInternalMarket: 'breeding'
-    })
-  ),
-  reachAndSubmit(
-    'additional-details',
-    'additional-details',
-    ENDPOINTS['additional-details'],
-    () => ({
-      animalsCertifiedFor: 'slaughter',
-      containsUnweanedAnimals: 'no'
-    })
-  ),
-  documentsStep,
-  addresses,
-  reachAndSubmit('cph-number', 'cph-number', ENDPOINTS['cph-number'], () => ({
-    cphCounty: '12',
-    cphParish: '345',
-    cphHolding: '6789'
-  })),
-  portOfEntry,
-  transitCountries,
-  transporters,
-  contact
-]
-
 export const LIVE_ANIMALS_STEPS = Object.freeze({
-  draft: DRAFT_STEPS,
+  draft: [
+    reachAndSubmit('origin', 'origin', ENDPOINTS.origin, originAnswers),
+    commodities,
+    reachAndSubmit(
+      'consignment-details',
+      'consignment-details',
+      ENDPOINTS['consignment-details'],
+      (context, page) => blankFieldAnswers(page.formInputs, identityOf(context))
+    ),
+    reachAndSubmit(
+      'identification',
+      'commodities/identification',
+      ENDPOINTS.identification,
+      (context, page) => blankFieldAnswers(page.formInputs, identityOf(context))
+    ),
+    reachAndSubmit(
+      'import-reason',
+      'import-reason',
+      ENDPOINTS['import-reason'],
+      () => ({
+        reasonForImport: 'internalMarket',
+        purposeInInternalMarket: 'breeding'
+      })
+    ),
+    reachAndSubmit(
+      'additional-details',
+      'additional-details',
+      ENDPOINTS['additional-details'],
+      () => ({
+        animalsCertifiedFor: 'slaughter',
+        containsUnweanedAnimals: 'no'
+      })
+    ),
+    documentsStep,
+    addresses,
+    reachAndSubmit('cph-number', 'cph-number', ENDPOINTS['cph-number'], () => ({
+      cphCounty: '12',
+      cphParish: '345',
+      cphHolding: '6789'
+    })),
+    portOfEntry,
+    transitCountries,
+    transporters,
+    contact
+  ],
   reEdit: [
     'origin',
     'import-reason',
