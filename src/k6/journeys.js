@@ -281,10 +281,6 @@ const submitFromReview = (run, context, checkName, submission) => {
   let confirmation
 
   for (let attempt = 0; attempt < DECLARATION_SUBMIT_ATTEMPTS; attempt += 1) {
-    if (attempt > 0) {
-      run.steps.stabiliseBeforeDeclaration?.(context)
-    }
-
     const view = walker.open(reviewPath, run.shared.notificationView)
     let declarePage = openDeclarationPage(run, context, view)
 
@@ -419,6 +415,8 @@ const finishNotification = (run, context) => {
   if (!reEdited.ok) {
     return false
   }
+
+  run.steps.stabiliseBeforeDeclaration?.(context)
 
   const confirmation = submitFromReview(
     run,
