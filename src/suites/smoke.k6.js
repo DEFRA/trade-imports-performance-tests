@@ -213,7 +213,8 @@ const journeyOptions = ({ journey, steps, frontend, backend, data }) => ({
   iterationInTest: exec.scenario.iterationInTest,
   confirmsEventArrival: true,
   insBackendUrl: urls.insBackend,
-  replaysCapturedSave: false
+  replaysCapturedSave: false,
+  paced: false
 })
 
 export function liveAnimals(data) {

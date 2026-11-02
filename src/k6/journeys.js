@@ -302,7 +302,7 @@ const submitFromReview = (run, context, checkName, submission) => {
 
     confirmation = walker.submit(
       declarePage,
-      { declaration: 'confirmed' },
+      { declaration: 'confirmed', step: 'declare' },
       run.shared.declarationSave
     )
 

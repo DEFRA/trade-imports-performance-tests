@@ -1,4 +1,5 @@
 import { journeyEndpoints } from './journey-endpoints.js'
+import { ARRIVAL_TIMEOUT_SECONDS } from './eventing.js'
 import { arrivalScenarios } from './traffic.js'
 
 const DEFAULT_STUB_PASSWORD = 'Password123'
@@ -86,13 +87,27 @@ export const SCENARIOS = Object.freeze({
   )
 })
 
+// Graceful stop is tied to iterationSeconds in arrivalScenarios, which also sets
+// think time via sessionMinutes — do not inflate sessionMinutes for stop budget.
+export const LIVE_ANIMALS_SMOKE_GRACEFUL_STOP = `${ARRIVAL_TIMEOUT_SECONDS + 480}s`
+
 /**
  * Builds the k6 `scenarios` option for the smoke run.
  *
  * @param {object} model - A resolved traffic model.
  * @returns {Record<string, object>} One constant-arrival-rate scenario per entry of `SCENARIOS`.
  */
-export const smokeScenarios = (model) => arrivalScenarios(model, SCENARIOS)
+export const smokeScenarios = (model) => {
+  const scenarios = arrivalScenarios(model, SCENARIOS)
+
+  return {
+    ...scenarios,
+    'live-animals': {
+      ...scenarios['live-animals'],
+      gracefulStop: LIVE_ANIMALS_SMOKE_GRACEFUL_STOP
+    }
+  }
+}
 
 /**
  * Lists every notification type the run splits its load by.

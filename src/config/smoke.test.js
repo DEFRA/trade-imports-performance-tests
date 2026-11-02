@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest'
 
 import { ENDPOINTS } from './endpoints.js'
 import {
+  LIVE_ANIMALS_SMOKE_GRACEFUL_STOP,
   SCENARIOS,
   notificationSplits,
   resolvePassword,
@@ -128,6 +129,17 @@ describe('smokeScenarios', () => {
         exec: SCENARIOS[name].exec
       })
     }
+  })
+
+  test('gives live-animals a long graceful stop without slowing think time', () => {
+    const scenarios = smokeScenarios(resolveTrafficModel({}, SMOKE_PROFILE))
+
+    expect(scenarios['live-animals'].gracefulStop).toBe(
+      LIVE_ANIMALS_SMOKE_GRACEFUL_STOP
+    )
+    expect(resolveTrafficModel({}, SMOKE_PROFILE).liveAnimals.sessionMinutes).toBe(
+      1
+    )
   })
 })
 
