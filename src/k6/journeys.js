@@ -42,6 +42,10 @@ const AMEND_START_AND_EDIT_PAGES = 3
 const CANCEL_AMEND_PAGES = 2
 const RESUBMIT_AMEND_PAGES = 3
 const AMENDMENT_SUFFIX = '-A'
+const DECLARATION_SUBMIT_ATTEMPTS = 5
+
+const confirmationLanded = (page) =>
+  page.status === HTTP_OK && pathOfUrl(page.url).endsWith('/confirmation')
 
 const backendParams = (endpoint, headers = {}) => {
   markPhase()
@@ -248,20 +252,12 @@ const reEditUntilTarget = (run, context) => {
   return runSteps(context, steps, undefined)
 }
 
-const submitFromReview = (run, context, checkName, submission) => {
+const openDeclarationPage = (run, context, review) => {
   const { walker } = context
   const declarationPath = pagePath(context, 'declaration')
   const reviewPath = pagePath(context, 'notification-view')
-  const openReview = () => walker.open(reviewPath, run.shared.notificationView)
-  const openDeclaration = (review) => {
-    if (run.journey.endpointPrefix === 'animals') {
-      return walker.post(
-        declarationPath,
-        { ...review.hiddenFields, step: 'review' },
-        run.shared.declaration
-      )
-    }
 
+  if (run.journey.endpointPrefix === 'plants') {
     const continued = walker.post(
       reviewPath,
       review.hiddenFields,
@@ -270,16 +266,32 @@ const submitFromReview = (run, context, checkName, submission) => {
 
     return walker.reach(continued, declarationPath, run.shared.declaration)
   }
-  const submitDeclaration = (declaration) =>
-    walker.submit(
-      declaration,
-      { declaration: 'confirmed' },
-      run.shared.declarationSave
-    )
 
-  const completeSubmit = () => {
-    let review = openReview()
-    let declarePage = openDeclaration(review)
+  if (review.hiddenFields.step) {
+    return walker.post(
+      declarationPath,
+      review.hiddenFields,
+      run.shared.declaration
+    )
+  }
+
+  return walker.reach(review, declarationPath, run.shared.declaration)
+}
+
+const submitFromReview = (run, context, checkName, submission) => {
+  const { walker } = context
+  const reviewPath = pagePath(context, 'notification-view')
+  const declarationPath = pagePath(context, 'declaration')
+  let view
+  let confirmation
+
+  for (let attempt = 0; attempt < DECLARATION_SUBMIT_ATTEMPTS; attempt += 1) {
+    if (attempt > 0) {
+      run.steps.stabiliseBeforeDeclaration?.(context)
+    }
+
+    view = walker.open(reviewPath, run.shared.notificationView)
+    let declarePage = openDeclarationPage(run, context, view)
 
     if (run.journey.endpointPrefix === 'plants') {
       declarePage = walker.reach(
@@ -287,43 +299,29 @@ const submitFromReview = (run, context, checkName, submission) => {
         declarationPath,
         run.shared.declaration
       )
-    } else {
-      for (
-        let attempt = 0;
-        attempt < 2 && pathOfUrl(declarePage.url) !== declarationPath;
-        attempt += 1
-      ) {
-        review = openReview()
-        declarePage = openDeclaration(review)
-      }
     }
 
     if (
       declarePage.status !== HTTP_OK ||
       pathOfUrl(declarePage.url) !== declarationPath
     ) {
-      return { review, confirmation: declarePage }
+      confirmation = declarePage
+      continue
     }
 
-    return {
-      review,
-      confirmation: submitDeclaration(declarePage)
+    confirmation = walker.submit(
+      declarePage,
+      { declaration: 'confirmed' },
+      run.shared.declarationSave
+    )
+
+    if (confirmationLanded(confirmation)) {
+      break
     }
-  }
-
-  let { review: view, confirmation } = completeSubmit()
-
-  if (
-    confirmation.status !== HTTP_OK ||
-    !confirmationLanded(confirmation)
-  ) {
-    run.steps.stabiliseBeforeDeclaration?.(context)
-    ;({ review: view, confirmation } = completeSubmit())
   }
 
   check(confirmation, {
-    [checkName]: (page) =>
-      view.status === HTTP_OK && confirmationLanded(page)
+    [checkName]: (page) => view.status === HTTP_OK && confirmationLanded(page)
   })
 
   if (confirmationLanded(confirmation)) {
@@ -419,9 +417,6 @@ const amendPagesFor = (amends, cancels) => {
     (cancels ? CANCEL_AMEND_PAGES : RESUBMIT_AMEND_PAGES)
   )
 }
-
-const confirmationLanded = (page) =>
-  page.status === HTTP_OK && pathOfUrl(page.url).endsWith('/confirmation')
 
 const finishNotification = (run, context) => {
   const reEdited = reEditUntilTarget(run, context)

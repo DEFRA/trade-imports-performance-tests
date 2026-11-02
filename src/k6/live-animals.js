@@ -398,17 +398,9 @@ export const LIVE_ANIMALS_STEPS = Object.freeze({
       'additional-details',
       'additional-details',
       ENDPOINTS['additional-details'],
-      (_context, page) => ({
-        animalsCertifiedFor: choiceLabelled(
-          page,
-          'animalsCertifiedFor',
-          'Slaughter'
-        ),
-        containsUnweanedAnimals: choiceLabelled(
-          page,
-          'containsUnweanedAnimals',
-          'No'
-        )
+      () => ({
+        animalsCertifiedFor: 'slaughter',
+        containsUnweanedAnimals: 'no'
       })
     ),
     documentsStep,
