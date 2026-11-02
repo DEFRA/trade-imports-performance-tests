@@ -4,9 +4,15 @@ import { Gauge } from 'k6/metrics'
 import { targetsFrom } from '../config/background-volume.js'
 import { PERF_ADDRESS } from '../config/smoke.js'
 import {
+  ADDRESS_BOOK,
+  ADDRESS_TYPES,
+  addressBookListPath
+} from '../lib/address-book.js'
+import {
   addressCountFrom,
   backgroundAddressName,
   shortfallMessage,
+  sumAddressCounts,
   volumeLine
 } from '../lib/background-volume.js'
 import { createBrowserSession } from './browser-session.js'
@@ -14,25 +20,26 @@ import { READINESS_TAGS, ignoreStaleRedirects } from './readiness.js'
 import { serviceHttp } from './service-http.js'
 
 const HTTP_OK = 200
-const ADDRESS_BOOK = '/address-book'
 const RESULTS_LABEL = '[data-testid="address-book-results-label"]'
 
 const backgroundVolumeGauge = new Gauge('background_volume')
 
-const unreadable = (datastore) =>
-  new Error(`Could not read the background volume of ${datastore}`)
+const unreadableVolumeError = (datastore, detail) =>
+  new Error(
+    `Could not read the background volume of ${datastore}${detail ? ` (${detail})` : ''}`
+  )
 
 const totalOf = (url, datastore) => {
   const response = serviceHttp.get(url, { tags: READINESS_TAGS })
 
   if (response.status !== HTTP_OK) {
-    throw unreadable(datastore)
+    throw unreadableVolumeError(datastore)
   }
 
   const total = response.json('totalElements')
 
   if (!Number.isInteger(total)) {
-    throw unreadable(datastore)
+    throw unreadableVolumeError(datastore)
   }
 
   return total
@@ -46,29 +53,38 @@ const addressCount = ({ urls, localhostAlias, credentials }) => {
     staleRedirects: ignoreStaleRedirects,
     extraTags: READINESS_TAGS
   })
-  const page = session.open(ADDRESS_BOOK, 'ins-address-book')
+  const tabCounts = Object.values(ADDRESS_TYPES).map((addressType) => {
+    const page = session.open(
+      addressBookListPath(addressType),
+      'ins-address-book'
+    )
 
-  if (page.status !== HTTP_OK) {
-    throw unreadable('address-book')
-  }
+    if (page.status !== HTTP_OK) {
+      throw unreadableVolumeError(
+        'address-book',
+        `${addressType} status ${page.status}`
+      )
+    }
 
-  const count = addressCountFrom({
-    heading: page.heading,
-    labelText: page.html.find(RESULTS_LABEL).text()
+    const tabCount = addressCountFrom({
+      heading: page.heading,
+      labelText: page.html.find(RESULTS_LABEL).text()
+    })
+
+    if (tabCount === undefined) {
+      throw unreadableVolumeError('address-book', addressType)
+    }
+
+    return tabCount
   })
 
-  if (count === undefined) {
-    throw unreadable('address-book')
-  }
-
-  return count
+  return sumAddressCounts(tabCounts)
 }
 
 /**
  * Reads how much background volume each datastore holds.
  *
  * The journey backends and the dashboard read model answer a count over HTTP.
- * The address book is counted from the INS address-book page's results label.
  * Every request carries the readiness tags, so no threshold measures it.
  *
  * @param {object} options - Read settings.
@@ -134,10 +150,7 @@ export const requireBackgroundVolume = (volume, backgroundVolume) => {
 }
 
 /**
- * Adds one background address through the INS add-address form.
- *
- * Signs in afresh and waits for nothing. With no picker handshake, the save
- * redirects to the address-book list.
+ * Adds one background address through the INS add-address form, signing in first.
  *
  * @param {object} options - Address settings.
  * @param {Record<string, string>} options.urls - Service base URLs, with `ins`.

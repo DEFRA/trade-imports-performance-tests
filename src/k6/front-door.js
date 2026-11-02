@@ -4,16 +4,19 @@ import { TRAFFIC_CLASSES } from '../config/request-mix.js'
 import { ADDRESS_BOOK_LOAD_NAME_PREFIX, PERF_ADDRESS } from '../config/smoke.js'
 import { WORST_CASE_SEARCH_LENGTH } from '../config/test-data.js'
 import { frontDoorThinkSecondsMean, isChosen } from '../config/traffic.js'
-import { addressIdFrom, worstCaseSearchTerm } from '../lib/address-book.js'
+import {
+  ADDRESS_BOOK,
+  ADDRESS_TYPES,
+  addressBookListPath,
+  addressIdFrom,
+  worstCaseSearchTerm
+} from '../lib/address-book.js'
 import { createBrowserSession } from './browser-session.js'
 import { createWalker, recordSession } from './pages.js'
 import { READINESS_TAGS, ignoreStaleRedirects } from './readiness.js'
 
 const HTTP_OK = 200
 const MS_PER_SECOND = 1000
-
-const ADDRESS_BOOK = '/address-book'
-const EDITED_TOWN = 'Dundee'
 
 /** The page requests an INS session makes on opening: the sign-in plus the dashboard. */
 export const SIGN_IN_AND_DASHBOARD_PAGES = 2
@@ -26,7 +29,8 @@ const hrefsOf = (page) =>
 
 const textOf = (page) => page.html?.find('body').text() ?? ''
 
-const searchPath = (name) => `${ADDRESS_BOOK}?q=${encodeURIComponent(name)}`
+const originAndConsignorSearchPath = (searchTerm) =>
+  addressBookListPath(ADDRESS_TYPES.ORIGIN_OR_CONSIGNOR, { searchTerm })
 
 const valuesOf = (page) =>
   Object.fromEntries(
@@ -117,11 +121,11 @@ export const dashboardOnlySession = (options) => {
 
   openInsDashboard(walker)
 
-  const further =
+  const extraDashboardReads =
     options.model.frontDoor.pagesPerDashboardOnlySession -
     SIGN_IN_AND_DASHBOARD_PAGES
 
-  for (let view = 0; view < further; view += 1) {
+  for (let view = 0; view < extraDashboardReads; view += 1) {
     walker.open('/', 'ins-dashboard')
   }
 
@@ -140,19 +144,23 @@ const addAddress = (walker, name) => {
   )
 }
 
-const editAddress = (walker, id) => {
-  const form = walker.open(`${ADDRESS_BOOK}/${id}/edit`, 'ins-address-edit')
+const editAddress = (walker, addressId) => {
+  const editedTown = 'Dundee'
+  const form = walker.open(
+    `${ADDRESS_BOOK}/${addressId}/edit`,
+    'ins-address-edit'
+  )
 
   return walker.submit(
     form,
-    { ...valuesOf(form), townOrCity: EDITED_TOWN },
+    { ...valuesOf(form), townOrCity: editedTown },
     'ins-address-edit-save'
   )
 }
 
-const deleteAddress = (walker, id) => {
+const deleteAddress = (walker, addressId) => {
   const confirmation = walker.open(
-    `${ADDRESS_BOOK}/${id}/delete`,
+    `${ADDRESS_BOOK}/${addressId}/delete`,
     'ins-address-delete'
   )
 
@@ -165,7 +173,7 @@ const searchWorstCaseWhenChosen = (walker, { iteration, model }) => {
   }
 
   const searched = walker.open(
-    searchPath(worstCaseSearchTerm(WORST_CASE_SEARCH_LENGTH)),
+    originAndConsignorSearchPath(worstCaseSearchTerm(WORST_CASE_SEARCH_LENGTH)),
     'ins-address-book-search'
   )
 
@@ -175,7 +183,9 @@ const searchWorstCaseWhenChosen = (walker, { iteration, model }) => {
 }
 
 /**
- * Runs an address-book session: add an address, find it, view, edit and delete it.
+ * Runs an address-book session: add an address, find it by searching the
+ * Origin and Consignor tab, view, edit and delete it. A worst-case search
+ * searches the same tab.
  *
  * Makes the nine address-book page requests after the sign-in and dashboard,
  * or ten when the session also runs a worst-case search, and leaves nothing
@@ -204,46 +214,47 @@ export const addressBookSession = (options) => {
   searchWorstCaseWhenChosen(walker, options)
   addAddress(walker, name)
 
-  const found = walker.open(searchPath(name), 'ins-address-book-search')
-  const id = addressIdFrom(hrefsOf(found))
+  const found = walker.open(
+    originAndConsignorSearchPath(name),
+    'ins-address-book-search'
+  )
+  const addressId = addressIdFrom(hrefsOf(found))
 
-  check(found, { 'address added': () => id !== '' })
+  check(found, { 'address added': () => addressId !== '' })
 
-  if (id === '') {
+  if (addressId === '') {
     return
   }
 
-  const viewed = walker.open(`${ADDRESS_BOOK}/${id}`, 'ins-address-view')
+  const viewed = walker.open(`${ADDRESS_BOOK}/${addressId}`, 'ins-address-view')
 
   check(viewed, {
     'address viewed': (page) =>
       page.status === HTTP_OK && textOf(page).includes(name)
   })
 
-  const edited = editAddress(walker, id)
+  const edited = editAddress(walker, addressId)
 
   check(edited, {
     'address edited': (page) =>
       page.status === HTTP_OK && page.url.endsWith(ADDRESS_BOOK)
   })
 
-  const deleted = deleteAddress(walker, id)
+  const deleted = deleteAddress(walker, addressId)
 
   check(deleted, {
     'address deleted': (page) =>
       page.status === HTTP_OK &&
-      !hrefsOf(page).includes(`${ADDRESS_BOOK}/${id}`)
+      !hrefsOf(page).includes(`${ADDRESS_BOOK}/${addressId}`)
   })
 
   recordSession(secondsSince(startedAt))
 }
 
 /**
- * Makes sure the address every journey picks exists in the address book.
+ * Makes sure the performance-test address exists in the address book.
  *
- * Signs in to INS, searches for the performance-test address by name and adds
- * it through the frontend's add form when it is not there. Its requests carry
- * the readiness tags, so no threshold measures them.
+ * Signs in to INS, searches the Origin and Consignor tab for the performance-test address by name and adds it through the frontend's add form when it is not there. Its requests carry the readiness tags, so no threshold measures them.
  *
  * @param {object} options - Setup settings.
  * @param {string} options.insUrl - The INS frontend's base URL.
@@ -266,7 +277,10 @@ export const ensurePerfAddress = ({
     extraTags: READINESS_TAGS
   })
   const search = () =>
-    session.open(searchPath(address.name), 'ins-address-book-search')
+    session.open(
+      originAndConsignorSearchPath(address.name),
+      'ins-address-book-search'
+    )
 
   if (addressIdFrom(hrefsOf(search())) !== '') {
     return
