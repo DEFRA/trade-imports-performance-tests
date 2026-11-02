@@ -253,13 +253,16 @@ export const TRAFFIC_DEFAULTS = freezeDeep({
 
 const SMOKE_NOTIFICATIONS_PER_HOUR = 20
 const SMOKE_SESSION_MINUTES = 1
+// Live-animals smoke runs the full journey plus declaration retries and event
+// arrival; wall time exceeds the design sessionMinutes until resync is lighter.
+const SMOKE_LIVE_ANIMALS_SESSION_MINUTES = 5
 const SMOKE_DASHBOARD_ONLY_SESSION_MINUTES = 0.25
 
 export const SMOKE_PROFILE = freezeDeep({
   duration: '2m',
   liveAnimals: {
     notificationsPerHour: SMOKE_NOTIFICATIONS_PER_HOUR,
-    sessionMinutes: SMOKE_SESSION_MINUTES,
+    sessionMinutes: SMOKE_LIVE_ANIMALS_SESSION_MINUTES,
     sessionsPerNotification: 1,
     amendShare: 1,
     cancelAmendShare: 0,

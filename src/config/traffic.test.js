@@ -313,7 +313,7 @@ describe('resolveTrafficModel', () => {
 
     expect(model.liveAnimals.pagesPerNotification).toBe(40)
     expect(model.liveAnimals.notificationsPerHour).toBe(20)
-    expect(model.liveAnimals.sessionMinutes).toBe(1)
+    expect(model.liveAnimals.sessionMinutes).toBe(5)
     expect(model.highRiskPlants.cancelAmendShare).toBe(0)
     expect(model.frontDoor.dashboardOnlySessionMinutes).toBe(0.25)
   })
@@ -329,7 +329,7 @@ describe('resolveTrafficModel', () => {
 
     expect(model.liveAnimals.notificationsPerHour).toBe(7)
     expect(model.liveAnimals.pagesPerNotification).toBe(45)
-    expect(model.liveAnimals.sessionMinutes).toBe(1)
+    expect(model.liveAnimals.sessionMinutes).toBe(5)
     expect(model.highRiskPlants.pagesPerNotification).toBe(50)
   })
 

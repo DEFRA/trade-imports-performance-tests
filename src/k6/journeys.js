@@ -420,8 +420,6 @@ const finishNotification = (run, context) => {
     return false
   }
 
-  run.steps.stabiliseBeforeDeclaration?.(context)
-
   const confirmation = submitFromReview(
     run,
     context,
@@ -480,8 +478,25 @@ const runUserSession = (run, { index, chunk, last }) => {
     index === 0 && run.replaysCapturedSave
   )
 
-  if (!drafted.ok || (last && !finishNotification(run, context))) {
+  if (!drafted.ok) {
     return false
+  }
+
+  if (last && !finishNotification(run, context)) {
+    return false
+  }
+
+  if (
+    last &&
+    run.confirmsEventArrival &&
+    publishesEvents(run.journey) &&
+    run.insBackendUrl
+  ) {
+    confirmEventArrival({
+      backendUrl: run.urls.backend,
+      insBackendUrl: run.insBackendUrl,
+      referenceNumber: run.id
+    })
   }
 
   closeUserSession(run, user)
@@ -520,6 +535,7 @@ const prepareRun = (options) => {
         : thinkSecondsMean(journeyModel, model.frontDoor),
     replaysCapturedSave: options.replaysCapturedSave ?? true,
     confirmsEventArrival: options.confirmsEventArrival ?? false,
+    insBackendUrl: options.insBackendUrl,
     counter: { count: 0 },
     id: '',
     amends,
@@ -584,14 +600,6 @@ export const notificationJourney = (options) => {
     if (!finished) {
       return
     }
-  }
-
-  if (run.confirmsEventArrival && publishesEvents(run.journey)) {
-    confirmEventArrival({
-      backendUrl: run.urls.backend,
-      insBackendUrl: options.insBackendUrl,
-      referenceNumber: run.id
-    })
   }
 
   recordNotificationPages(run.counter.count)
