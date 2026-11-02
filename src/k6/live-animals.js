@@ -325,12 +325,7 @@ const portOfEntry = reachAndSubmit(
   ENDPOINTS['port-of-entry'],
   (context, page) => ({
     arrivalDateAtPort: slashDateText(context.now, ARRIVAL_DAYS_AHEAD),
-    portOfEntry: drawnOrElse(
-      context,
-      page.formInputs,
-      'portOfEntry',
-      DEFAULT_PORT_OF_ENTRY
-    ),
+    portOfEntry: DEFAULT_PORT_OF_ENTRY,
     meansOfTransport: 'ROAD_VEHICLE',
     transportIdentification: 'FR-892-LK',
     transportDocumentReference: 'CMR-2026-884721'

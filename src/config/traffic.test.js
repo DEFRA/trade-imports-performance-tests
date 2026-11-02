@@ -149,6 +149,9 @@ describe('SMOKE_PROFILE', () => {
     expect(model.highRiskPlants.cancelAmendShare).toBe(0)
     expect(model.liveAnimals.sessionsPerNotification).toBe(1)
     expect(model.highRiskPlants.sessionsPerNotification).toBe(1)
+    expect(model.liveAnimals.documentsPerNotification).toEqual([
+      { share: 1, min: 1, max: 1 }
+    ])
     expect(model.addressBook.worstCaseSearchShare).toBe(1)
   })
 })

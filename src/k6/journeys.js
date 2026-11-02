@@ -277,31 +277,48 @@ const submitFromReview = (run, context, checkName, submission) => {
       run.shared.declarationSave
     )
 
-  let view = openReview()
-  let declaration = openDeclaration(view)
+  const completeSubmit = () => {
+    let review = openReview()
+    let declarePage = openDeclaration(review)
 
-  if (run.journey.endpointPrefix === 'plants') {
-    declaration = walker.reach(
-      declaration,
-      declarationPath,
-      run.shared.declaration
-    )
-  } else {
-    for (
-      let attempt = 0;
-      attempt < 2 && pathOfUrl(declaration.url) !== declarationPath;
-      attempt += 1
+    if (run.journey.endpointPrefix === 'plants') {
+      declarePage = walker.reach(
+        declarePage,
+        declarationPath,
+        run.shared.declaration
+      )
+    } else {
+      for (
+        let attempt = 0;
+        attempt < 2 && pathOfUrl(declarePage.url) !== declarationPath;
+        attempt += 1
+      ) {
+        review = openReview()
+        declarePage = openDeclaration(review)
+      }
+    }
+
+    if (
+      declarePage.status !== HTTP_OK ||
+      pathOfUrl(declarePage.url) !== declarationPath
     ) {
-      view = openReview()
-      declaration = openDeclaration(view)
+      return { review, confirmation: declarePage }
+    }
+
+    return {
+      review,
+      confirmation: submitDeclaration(declarePage)
     }
   }
 
-  const confirmation =
-    declaration.status === HTTP_OK &&
-    pathOfUrl(declaration.url) === declarationPath
-      ? submitDeclaration(declaration)
-      : declaration
+  let { review: view, confirmation } = completeSubmit()
+
+  if (
+    confirmation.status !== HTTP_OK ||
+    !confirmation.url.endsWith('/confirmation')
+  ) {
+    ;({ review: view, confirmation } = completeSubmit())
+  }
 
   check(confirmation, {
     [checkName]: (page) =>

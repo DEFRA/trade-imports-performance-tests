@@ -262,7 +262,8 @@ export const SMOKE_PROFILE = freezeDeep({
     sessionMinutes: SMOKE_SESSION_MINUTES,
     sessionsPerNotification: 1,
     amendShare: 1,
-    cancelAmendShare: 0
+    cancelAmendShare: 0,
+    documentsPerNotification: [{ share: 1, min: 1, max: 1 }]
   },
   highRiskPlants: {
     notificationsPerHour: SMOKE_NOTIFICATIONS_PER_HOUR,
