@@ -14,7 +14,8 @@ const INS_PAGES = [
   'ins-dashboard',
   'ins-address-book',
   'ins-address-book-search',
-  'ins-address-add',
+  'ins-address-type',
+  'ins-address-type-save',
   'ins-address-add-save',
   'ins-address-view',
   'ins-address-edit',
@@ -150,14 +151,12 @@ export const ENDPOINTS = Object.freeze(
   ])
 )
 
-// The INS dashboard reads the dashboard read model (ins-backend GET /notifications) once a view; the journeys' dashboards read their own backends.
 export const READ_MODEL_ENDPOINTS = Object.freeze(['ins-dashboard'])
 
 /**
  * Looks up the kind of an endpoint: one of the `ENDPOINT_KINDS` values.
  *
- * Throws for a name outside the catalogue, so a typo cannot leave a request
- * without a threshold.
+ * Throws for a name outside the catalogue.
  *
  * @param {string} endpoint - An endpoint name from `ENDPOINTS`.
  * @returns {string} The endpoint's `ENDPOINT_KINDS` value: `page`, `api`, `upload` or `stub`.

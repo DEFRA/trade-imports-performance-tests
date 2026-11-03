@@ -43,7 +43,8 @@ const SHARED_ROLES = [
 const ADDRESS_BOOK_ENDPOINTS = [
   'ins-address-book',
   'ins-address-book-search',
-  'ins-address-add',
+  'ins-address-type',
+  'ins-address-type-save',
   'ins-address-add-save',
   'ins-address-view',
   'ins-address-edit',

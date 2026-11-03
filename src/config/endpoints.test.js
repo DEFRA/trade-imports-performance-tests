@@ -36,6 +36,11 @@ describe('kindOf', () => {
     expect(kindOf('ins-dashboard')).toBe('page')
   })
 
+  test('returns page for the address type page and its form save', () => {
+    expect(kindOf('ins-address-type')).toBe('page')
+    expect(kindOf('ins-address-type-save')).toBe('page')
+  })
+
   test('returns page for an address-book form save', () => {
     expect(kindOf('ins-address-add-save')).toBe('page')
   })

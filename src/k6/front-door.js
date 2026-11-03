@@ -12,7 +12,12 @@ import {
   worstCaseSearchTerm
 } from '../lib/address-book.js'
 import { createBrowserSession } from './browser-session.js'
-import { createWalker, recordSession } from './pages.js'
+import {
+  chooseTypeAndOpenAddForm,
+  chooseTypeAndOpenAddFormInSession,
+  createWalker,
+  recordSession
+} from './pages.js'
 import { READINESS_TAGS, ignoreStaleRedirects } from './readiness.js'
 
 const HTTP_OK = 200
@@ -135,7 +140,7 @@ export const dashboardOnlySession = (options) => {
 const addAnswers = (address, name) => ({ ...address, name })
 
 const addAddress = (walker, name) => {
-  const form = walker.open(`${ADDRESS_BOOK}/add`, 'ins-address-add')
+  const form = chooseTypeAndOpenAddForm(walker)
 
   return walker.submit(
     form,
@@ -187,9 +192,7 @@ const searchWorstCaseWhenChosen = (walker, { iteration, model }) => {
  * Origin and Consignor tab, view, edit and delete it. A worst-case search
  * searches the same tab.
  *
- * Makes the nine address-book page requests after the sign-in and dashboard,
- * or ten when the session also runs a worst-case search, and leaves nothing
- * behind in the book.
+ * Leaves nothing behind in the book.
  *
  * @param {object} options - Session settings.
  * @param {Record<string, string>} options.urls - Service base URLs, with `ins`.
@@ -254,7 +257,7 @@ export const addressBookSession = (options) => {
 /**
  * Makes sure the performance-test address exists in the address book.
  *
- * Signs in to INS, searches the Origin and Consignor tab for the performance-test address by name and adds it through the frontend's add form when it is not there. Its requests carry the readiness tags, so no threshold measures them.
+ * Signs in to INS, searches the Origin and Consignor tab for the performance-test address by name and adds it through the frontend's add form when it is not there. Its requests carry the readiness tags.
  *
  * @param {object} options - Setup settings.
  * @param {string} options.insUrl - The INS frontend's base URL.
@@ -286,7 +289,7 @@ export const ensurePerfAddress = ({
     return
   }
 
-  const form = session.open(`${ADDRESS_BOOK}/add`, 'ins-address-add')
+  const form = chooseTypeAndOpenAddFormInSession(session)
 
   session.submitForm(
     form,

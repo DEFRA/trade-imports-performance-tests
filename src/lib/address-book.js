@@ -6,10 +6,12 @@ export const ADDRESS_TYPES = Object.freeze({
   BRANCH: 'BRANCH'
 })
 
+export const ADDRESS_TYPE_START_PATH = `${ADDRESS_BOOK}/add/address-type?start=true`
+
+export const CHOSEN_ADDRESS_TYPE = ADDRESS_TYPES.ORIGIN_OR_CONSIGNOR
+
 /**
  * Finds the id of the first address a list page links to.
- *
- * The add page's link has the same shape as an address's, so it is skipped.
  *
  * @param {string[]} hrefs - Link targets read off the address book list.
  * @returns {string} The id, or an empty string when the page lists no address.
@@ -17,7 +19,7 @@ export const ADDRESS_TYPES = Object.freeze({
 export const addressIdFrom = (hrefs) =>
   hrefs
     .map((href) => /^\/address-book\/([^/?#]+)$/.exec(href)?.[1])
-    .find((id) => Boolean(id) && id !== 'add') ?? ''
+    .find(Boolean) ?? ''
 
 /**
  * Builds the worst-case free-text address search term.

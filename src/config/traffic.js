@@ -1,18 +1,18 @@
-const AG1_PAGES_PER_NOTIFICATION = 40
-const AG2_SESSION_MINUTES = 20
-const PP1_PAGES_PER_NOTIFICATION = 50
-const PP2_SESSION_MINUTES = 25
-const A2_SESSIONS_PER_NOTIFICATION = 1.5
-const C1_CORE_PAGES_PER_JOURNEY_SESSION = 6
-const C2_DASHBOARD_ONLY_SESSIONS_PER_NOTIFICATION = 1
-const C3_DASHBOARD_ONLY_SESSION_MINUTES = 5
-const C4_PAGES_PER_DASHBOARD_ONLY_SESSION = 8
-const D7_DASHBOARD_READ_SHARE = 0.25
+const LIVE_ANIMALS_PAGES_PER_NOTIFICATION = 40
+const LIVE_ANIMALS_SESSION_MINUTES = 20
+const PLANTS_PAGES_PER_NOTIFICATION = 50
+const PLANTS_SESSION_MINUTES = 25
+const SESSIONS_PER_NOTIFICATION = 1.5
+const CORE_PAGES_PER_JOURNEY_SESSION = 6
+const DASHBOARD_ONLY_SESSIONS_PER_NOTIFICATION = 1
+const DASHBOARD_ONLY_SESSION_MINUTES = 5
+const PAGES_PER_DASHBOARD_ONLY_SESSION = 8
+const DASHBOARD_READ_SHARE = 0.25
 const LIVE_ANIMALS_NOTIFICATIONS_PER_HOUR = 44
 const HIGH_RISK_PLANTS_NOTIFICATIONS_PER_HOUR = 36
 const INTERIM_ADDRESS_BOOK_SESSIONS_PER_NOTIFICATION = 0.25
-const C012_AMENDED_SHARE = 0.2
-const C012_CANCELLED_SHARE_OF_AMENDED = 0.05
+const AMENDED_SHARE = 0.2
+const CANCELLED_SHARE_OF_AMENDED = 0.05
 const INTERIM_WORST_CASE_SEARCH_SHARE = 0.25
 const DOCUMENT_CAP_KILOBYTES = 10_000
 const DEFAULT_DURATION = '2m'
@@ -21,93 +21,62 @@ const GBN_PP_ANNUAL_NOTIFICATIONS = 34_000
 const INTERIM_ADDRESS_BOOK_ENTRIES = 500
 const BACKGROUND_VIRTUAL_USERS = 10
 const BACKGROUND_MAX_DURATION = '24h'
-// Volumetrics §6.4 NFR-VOL-AG-06 / §7.4 NFR-VOL-PP-06: the peak-day volume.
-const NFR_VOL_AG_06_PEAK_DAY_NOTIFICATIONS = 546
-const NFR_VOL_PP_06_PEAK_DAY_NOTIFICATIONS = 442
-// Interim: 12 hours puts both journeys within 4% of their design peak-hour rate.
+const LIVE_ANIMALS_PEAK_DAY_NOTIFICATIONS = 546
+const PLANTS_PEAK_DAY_NOTIFICATIONS = 442
 const PEAK_DAY_DURATION = '12h'
 
-// DR-EUDP-005 'Scenario shapes' row 1: ramp over 3 hours, hold over the 7-hour 09:00 to 16:00 window.
-const T1_RAMP_DURATION = '3h'
-const T1_HOLD_DURATION = '7h'
-// DR-EUDP-005 'Scenario shapes' row 2 and volumetrics section 4.2 T5: 30 minutes at peak, then 60 seconds at 1.5 times.
+const RAMP_DURATION = '3h'
+const HOLD_DURATION = '7h'
 const BURST_PEAK_DURATION = '30m'
 const BURST_DURATION = '60s'
-const T5_BURST_FACTOR = 1.5
-// Volumetrics section 4.4 A1 and A3: the seasonal peak-day factor and the design headroom the average weekday leaves out.
-const A1_SEASONAL_PEAK_FACTOR = 2
-const A3_DESIGN_HEADROOM = 2
+const BURST_FACTOR = 1.5
+const SEASONAL_PEAK_FACTOR = 2
+const DESIGN_HEADROOM = 2
 const AVERAGE_LOAD_HOUR_DURATION = '1h'
-// Volumetrics section 4.3 daily profile, each row read hour by hour and interpolated linearly: the 09:00 to 16:00 window sums to 54.4% against T2's "about 54%", and the busiest hour, 11:00, is T2's 8%.
 const WEEKDAY_HOURLY_SHARES = [
   0.009, 0.009, 0.009, 0.009, 0.009, 0.009, 0.019, 0.036, 0.053, 0.077, 0.078,
   0.08, 0.078, 0.077, 0.077, 0.077, 0.072, 0.058, 0.041, 0.036, 0.031, 0.026,
   0.021, 0.016
 ]
 
-// DR-EUDP-005 'Scenario shapes' row 3 and volumetrics section 4.2: five minutes at peak, then a ten-second spike.
 const SPIKE_BASELINE_DURATION = '5m'
 const SPIKE_DURATION = '10s'
-// c-004 default: P95 back within 10% of the pre-spike baseline within 60 seconds.
 const SPIKE_RECOVERY_DURATION = '60s'
-// Interim: the window judged once the minute c-004 allows has passed.
 const SPIKE_RECOVERED_DURATION = '2m'
-// Volumetrics section 4.2 Spike capacities row 1: a proposal pending open item 2.
 const FRONTEND_SPIKE_CAPACITY_RPS = 5
-// DR-EUDP-005 'Scenario shapes' row 4: eight hours at the design-target peak.
 const ENDURANCE_HOLD_DURATION = '8h'
-// c-004 default: the final hour's P95 against the first hour's.
 const ENDURANCE_COMPARISON_WINDOW = '1h'
-// The frontends' session.cache.ttl default (four hours), set at sign-in and not sliding.
 const FRONTEND_SESSION_LIFETIME = '4h'
-// Interim: how often a returning user visits its frontend, and how many there are for each.
 const RETURNING_VISIT_INTERVAL = '10m'
 const RETURNING_USERS_PER_FRONTEND = 1
 const SESSION_EXPIRIES = ['frontend', 'client']
-// Interim: as long as the burst's peak (DR-EUDP-005 'Scenario shapes' row 2), so each journey is measured alone for a steady window.
 const COMBINED_ALONE_DURATION = '30m'
-// DR-EUDP-005 'Scenario shapes' row 2: 30 minutes at peak.
 const COMBINED_DURATION = '30m'
-// Interim: the pause that lets a spike's queues drain before the next phase.
 const COMBINED_SETTLE_DURATION = '5m'
-// Volumetrics section 9.4 Session API spike capacity (NFR-DEP-05).
 const SESSION_PATH_SPIKE_RPS = 25
-// Interim: how often the reference-data watch reads each endpoint.
 const REFERENCE_DATA_READ_INTERVAL = '10s'
-// trade-imports-reference-data cache.mdm.ttl-minutes default (CACHE_MDM_TTL_MINUTES).
 const MDM_CACHE_MINUTES = 60
-// DR-EUDP-005 'Scenario shapes' row 3: the spike run's five minutes at peak, reused as the resilience run's healthy baseline.
 const RESILIENCE_BASELINE_DURATION = '5m'
-// Interim: long enough for a caller's timeout, retries and breaker to show, short enough that 18 faults fit one run.
 const RESILIENCE_FAULT_DURATION = '2m'
-// Interim: four recovery steps of the spike run's 60 seconds c-004 allows, doubled so a slow recovery is seen.
 const RESILIENCE_CLEARED_DURATION = '2m'
-// Interim: half of c-004's 60 second recovery allowance, so recovery time is reported to 30 seconds.
 const RESILIENCE_RECOVERY_STEP = '30s'
-// Interim: five times the interim p99 target of 1,000 ms.
 const RESILIENCE_SLOW_DELAY_MS = 5000
-// Interim: twice k6's 60 second request timeout, so an unbounded wait cannot hide inside k6's own timeout.
 const RESILIENCE_HANG_MS = 120_000
 const RESILIENCE_ERROR_STATUS = 503
 const RESILIENCE_RETRY_AFTER_SECONDS = 5
-// Interim: slow, hang and reset hit every request, so the whole window is faulted.
 const RESILIENCE_ALWAYS_RATE = 1
-// Interim: "errors at a chosen rate": half the requests are throttled or fail.
 const RESILIENCE_SOMETIMES_RATE = 0.5
-// The status range of a 5xx error.
 const MIN_ERROR_STATUS = 500
 const MAX_ERROR_STATUS = 599
 
-export const ADDRESS_BOOK_SESSION_PAGES = 12
+export const ADDRESS_BOOK_SESSION_PAGES = 13
 export const SECONDS_PER_MINUTE = 60
 const SIGN_IN_PAGES_WITHOUT_WAIT = 1
 export const SECONDS_PER_HOUR = 3600
 const GRACEFUL_STOP_FACTOR = 2
 export const MAX_VUS_FACTOR = 2
 const DURATION_FORMAT = /^\d+[smh]$/
-// The burst stage list spends one second ramping to the burst rate, then holds it.
 const MIN_BURST_SECONDS = 2
-// Each hour after the first spends one second stepping to its rate, then holds it.
 const MIN_HOUR_SECONDS = 2
 const HALF_DENOMINATOR = 2
 
@@ -131,11 +100,11 @@ export const freezeDeep = (value) => {
 export const TRAFFIC_DEFAULTS = freezeDeep({
   liveAnimals: {
     notificationsPerHour: LIVE_ANIMALS_NOTIFICATIONS_PER_HOUR,
-    pagesPerNotification: AG1_PAGES_PER_NOTIFICATION,
-    sessionsPerNotification: A2_SESSIONS_PER_NOTIFICATION,
-    sessionMinutes: AG2_SESSION_MINUTES,
-    amendShare: C012_AMENDED_SHARE,
-    cancelAmendShare: C012_CANCELLED_SHARE_OF_AMENDED,
+    pagesPerNotification: LIVE_ANIMALS_PAGES_PER_NOTIFICATION,
+    sessionsPerNotification: SESSIONS_PER_NOTIFICATION,
+    sessionMinutes: LIVE_ANIMALS_SESSION_MINUTES,
+    amendShare: AMENDED_SHARE,
+    cancelAmendShare: CANCELLED_SHARE_OF_AMENDED,
     documentsPerNotification: [
       { share: 0.3, min: 0, max: 0 },
       { share: 0.45, min: 1, max: 1 },
@@ -150,11 +119,11 @@ export const TRAFFIC_DEFAULTS = freezeDeep({
   },
   highRiskPlants: {
     notificationsPerHour: HIGH_RISK_PLANTS_NOTIFICATIONS_PER_HOUR,
-    pagesPerNotification: PP1_PAGES_PER_NOTIFICATION,
-    sessionsPerNotification: A2_SESSIONS_PER_NOTIFICATION,
-    sessionMinutes: PP2_SESSION_MINUTES,
-    amendShare: C012_AMENDED_SHARE,
-    cancelAmendShare: C012_CANCELLED_SHARE_OF_AMENDED,
+    pagesPerNotification: PLANTS_PAGES_PER_NOTIFICATION,
+    sessionsPerNotification: SESSIONS_PER_NOTIFICATION,
+    sessionMinutes: PLANTS_SESSION_MINUTES,
+    amendShare: AMENDED_SHARE,
+    cancelAmendShare: CANCELLED_SHARE_OF_AMENDED,
     commodityLinesPerNotification: [
       { share: 0.5, min: 1, max: 3 },
       { share: 0.3, min: 4, max: 10 },
@@ -169,28 +138,28 @@ export const TRAFFIC_DEFAULTS = freezeDeep({
   },
   addressBook: { worstCaseSearchShare: INTERIM_WORST_CASE_SEARCH_SHARE },
   frontDoor: {
-    corePagesPerJourneySession: C1_CORE_PAGES_PER_JOURNEY_SESSION,
+    corePagesPerJourneySession: CORE_PAGES_PER_JOURNEY_SESSION,
     dashboardOnlySessionsPerNotification:
-      C2_DASHBOARD_ONLY_SESSIONS_PER_NOTIFICATION,
-    dashboardOnlySessionMinutes: C3_DASHBOARD_ONLY_SESSION_MINUTES,
-    pagesPerDashboardOnlySession: C4_PAGES_PER_DASHBOARD_ONLY_SESSION,
+      DASHBOARD_ONLY_SESSIONS_PER_NOTIFICATION,
+    dashboardOnlySessionMinutes: DASHBOARD_ONLY_SESSION_MINUTES,
+    pagesPerDashboardOnlySession: PAGES_PER_DASHBOARD_ONLY_SESSION,
     addressBookSessionsPerNotification:
       INTERIM_ADDRESS_BOOK_SESSIONS_PER_NOTIFICATION
   },
   sustainedPeak: {
-    rampDuration: T1_RAMP_DURATION,
-    holdDuration: T1_HOLD_DURATION
+    rampDuration: RAMP_DURATION,
+    holdDuration: HOLD_DURATION
   },
   p99Burst: {
     peakDuration: BURST_PEAK_DURATION,
     burstDuration: BURST_DURATION,
-    burstFactor: T5_BURST_FACTOR
+    burstFactor: BURST_FACTOR
   },
   averageLoad: {
     hourDuration: AVERAGE_LOAD_HOUR_DURATION,
     hourlyShares: WEEKDAY_HOURLY_SHARES,
-    seasonalPeakFactor: A1_SEASONAL_PEAK_FACTOR,
-    designHeadroom: A3_DESIGN_HEADROOM
+    seasonalPeakFactor: SEASONAL_PEAK_FACTOR,
+    designHeadroom: DESIGN_HEADROOM
   },
   spikeRecovery: {
     baselineDuration: SPIKE_BASELINE_DURATION,
@@ -234,7 +203,7 @@ export const TRAFFIC_DEFAULTS = freezeDeep({
     throttleRate: RESILIENCE_SOMETIMES_RATE,
     errorRate: RESILIENCE_SOMETIMES_RATE
   },
-  mix: { dashboardReadShareTarget: D7_DASHBOARD_READ_SHARE },
+  mix: { dashboardReadShareTarget: DASHBOARD_READ_SHARE },
   backgroundVolume: {
     liveAnimalsNotifications: GBN_AG_ANNUAL_NOTIFICATIONS,
     highRiskPlantsNotifications: GBN_PP_ANNUAL_NOTIFICATIONS,
@@ -244,8 +213,8 @@ export const TRAFFIC_DEFAULTS = freezeDeep({
     maxDuration: BACKGROUND_MAX_DURATION
   },
   peakDay: {
-    liveAnimalsNotifications: NFR_VOL_AG_06_PEAK_DAY_NOTIFICATIONS,
-    highRiskPlantsNotifications: NFR_VOL_PP_06_PEAK_DAY_NOTIFICATIONS,
+    liveAnimalsNotifications: LIVE_ANIMALS_PEAK_DAY_NOTIFICATIONS,
+    highRiskPlantsNotifications: PLANTS_PEAK_DAY_NOTIFICATIONS,
     duration: PEAK_DAY_DURATION
   },
   duration: DEFAULT_DURATION
@@ -283,7 +252,7 @@ const BACKGROUND_WORST_CASE_SEARCH_SHARE = 0
 /**
  * What the background-volume suite lays over the defaults: each notification
  * is one page and one session with no documents, and no address-book search
- * or extra INS status check, because the run is set-up and measures nothing.
+ * or extra INS status check.
  */
 export const BACKGROUND_VOLUME_PROFILE = freezeDeep({
   liveAnimals: {
@@ -636,9 +605,8 @@ const failIfResilienceInvalid = ({
  * Works out the traffic model a run applies.
  *
  * Layers the defaults, then the suite's profile, then a JSON object in the
- * `TRAFFIC_MODEL` environment variable, so a revised figure changes a value and
- * never a script. Throws, naming the key, for an unknown key or a value that is
- * not allowed.
+ * `TRAFFIC_MODEL` environment variable. Throws, naming the key, for an unknown
+ * key or a value that is not allowed.
  *
  * @param {Record<string, string | undefined>} env - k6's `__ENV`, or any map of environment variables.
  * @param {object} [profile] - Values a suite lays over the defaults.
@@ -902,8 +870,7 @@ const arrivalScenario = ({ rate, seconds, duration, exec }) => ({
 /**
  * Builds the k6 `scenarios` option: one open-model scenario per entry.
  *
- * Each scenario starts iterations at a stated rate however long they take, so
- * a slowing service keeps receiving the load it would in production. The
+ * Each scenario starts iterations at a stated rate however long they take. The
  * virtual users come from Little's law, with headroom for a slow service.
  *
  * @param {object} model - A resolved traffic model.

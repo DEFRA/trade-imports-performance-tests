@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 
 import {
+  ADDRESS_TYPE_START_PATH,
   ADDRESS_TYPES,
   addressBookListPath,
   addressIdFrom,
@@ -24,10 +25,10 @@ describe('worstCaseSearchTerm', () => {
 })
 
 describe('addressIdFrom', () => {
-  test('reads the id of the first address link', () => {
+  test('reads the id of the first address link, passing the start link by', () => {
     expect(
       addressIdFrom([
-        '/address-book/add',
+        ADDRESS_TYPE_START_PATH,
         '/address-book/abc-1',
         '/address-book/xyz'
       ])
@@ -36,7 +37,7 @@ describe('addressIdFrom', () => {
 
   test.each([
     [[]],
-    [['/address-book/add']],
+    [[ADDRESS_TYPE_START_PATH]],
     [['/address-book/abc-1/edit', '/address-book?page=2', '/']]
   ])('returns an empty string when no address is listed: %j', (hrefs) => {
     expect(addressIdFrom(hrefs)).toBe('')

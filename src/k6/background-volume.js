@@ -16,6 +16,7 @@ import {
   volumeLine
 } from '../lib/background-volume.js'
 import { createBrowserSession } from './browser-session.js'
+import { chooseTypeAndOpenAddFormInSession } from './pages.js'
 import { READINESS_TAGS, ignoreStaleRedirects } from './readiness.js'
 import { serviceHttp } from './service-http.js'
 
@@ -83,9 +84,6 @@ const addressCount = ({ urls, localhostAlias, credentials }) => {
 
 /**
  * Reads how much background volume each datastore holds.
- *
- * The journey backends and the dashboard read model answer a count over HTTP.
- * Every request carries the readiness tags, so no threshold measures it.
  *
  * @param {object} options - Read settings.
  * @param {Record<string, string>} options.urls - `ins`, `animalsBackend`, `plantsBackend` and `insBackend` base URLs.
@@ -172,7 +170,7 @@ export const addBackgroundAddress = ({
     credentials,
     staleRedirects
   })
-  const form = session.open(`${ADDRESS_BOOK}/add`, 'ins-address-add')
+  const form = chooseTypeAndOpenAddFormInSession(session)
   const saved = session.submitForm(
     form,
     {

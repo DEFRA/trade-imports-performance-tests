@@ -239,7 +239,7 @@ The targets are one year at the 2025 baseline: 42,000 live-animals notifications
 
 The animals backend, plants backend, INS backend and address book each set `spring.data.mongodb.auto-index-creation: true` in `src/main/resources/application.yml` and create no index any other way. Each builds its indexes at start-up, before it answers a read. That is why a run counts its indexes as built once every service has answered.
 
-Everything is created through the frontends' own save routes, as the one stubbed user. Each notification is one run of the same journey driver as journey traffic, with the same commodity types, commodity lines, origins, species, amendment shares and cancelled shares, so the volume is varied as journey traffic is. Each address goes through the INS add-address form and is named `Background Address <n>`, numbered across the whole background volume, so it never matches the `Perf Test Holding` address the pickers use or the addresses the address-book sessions add. An address added with no use lands on the Origin and Consignor tab, and the address book is counted by adding up the results lines of its three tabs.
+Everything is created through the frontends' own save routes, as the one stubbed user. Each notification is one run of the same journey driver as journey traffic, with the same commodity types, commodity lines, origins, species, amendment shares and cancelled shares, so the volume is varied as journey traffic is. Each address is added through the 'Choose an address type' page, choosing Origin or Consignor, and then the INS add-address form, and is named `Background Address <n>`, numbered across the whole background volume, so it never matches the `Perf Test Holding` address the pickers use or the addresses the address-book sessions add. An address lands on the Origin and Consignor tab because Origin or Consignor is the type chosen, and the address book is counted by adding up the results lines of its three tabs.
 
 Run it once per environment:
 
@@ -542,9 +542,9 @@ As the burst does, the arrival rate steps up for the spike and every user moves 
 | --------------------------------------- | ----------- |
 | `live-animals`                          | 10.23       |
 | `high-risk-plants`                      | 10          |
-| `ins-front-door` and `ins-address-book` | 12.17       |
+| `ins-front-door` and `ins-address-book` | 11.9        |
 
-Page rate does not depend on session length, so the factors are the same at every run length. The 25 RPS session path and the backend rates are derived, as the burst's backend rate is: nothing in the stack is a session API, so the session path is every frontend page plus one backend call a journey page. `setup()` logs what the run applies: `Spike: 10s at the stated capacities: animals 5 RPS (pace x10.23), plants 5 RPS (pace x10), INS front door 5 RPS including sign-in (pace x12.17), session path 25 RPS (derived); recovery judged over the 2m after the 60s allowed`. The one-second view of the recovery is the run's `index.html` and `timeseries.json.gz`.
+Page rate does not depend on session length, so the factors are the same at every run length. The 25 RPS session path and the backend rates are derived, as the burst's backend rate is: nothing in the stack is a session API, so the session path is every frontend page plus one backend call a journey page. `setup()` logs what the run applies: `Spike: 10s at the stated capacities: animals 5 RPS (pace x10.23), plants 5 RPS (pace x10), INS front door 5 RPS including sign-in (pace x11.9), session path 25 RPS (derived); recovery judged over the 2m after the 60s allowed`. The one-second view of the recovery is the run's `index.html` and `timeseries.json.gz`.
 
 ### Endurance and re-authentication
 
@@ -843,80 +843,80 @@ Generator trust: trusted: the load generator was not the bottleneck
 
 The load is a model, held as values in `src/config/traffic.js` and never fixed in the scripts. Every figure is a working figure from the INS volumetrics page and is still to be confirmed, so a revised figure changes a value, not a script.
 
-| Parameter                                        | Default    | Source                                                              | Smoke |
-| ------------------------------------------------ | ---------- | ------------------------------------------------------------------- | ----- |
-| `liveAnimals.notificationsPerHour`               | 44         | design target, section 6.3                                          | 20    |
-| `liveAnimals.pagesPerNotification`               | 40         | AG1                                                                 | 40    |
-| `liveAnimals.sessionsPerNotification`            | 1.5        | A2                                                                  | 1.5   |
-| `liveAnimals.sessionMinutes`                     | 20         | AG2                                                                 | 1     |
-| `liveAnimals.amendShare`                         | 0.2        | c-012: share of notifications amended                               | 1     |
-| `liveAnimals.cancelAmendShare`                   | 0.05       | c-012: share of amendments cancelled                                | 1     |
-| `liveAnimals.documentsPerNotification`           | buckets    | c-012: 0–3 documents, mean 1                                        | same  |
-| `liveAnimals.documentKilobytes`                  | 100–5000   | c-012: 100KB to 5MB, under the 10MB cap                             | same  |
-| `liveAnimals.documentTypes`                      | buckets    | c-012: PDF or JPEG, 50% each                                        | same  |
-| `highRiskPlants.notificationsPerHour`            | 36         | design target, section 7.3                                          | 20    |
-| `highRiskPlants.pagesPerNotification`            | 50         | PP1                                                                 | 50    |
-| `highRiskPlants.sessionsPerNotification`         | 1.5        | A2                                                                  | 1.5   |
-| `highRiskPlants.sessionMinutes`                  | 25         | PP2                                                                 | 1     |
-| `highRiskPlants.amendShare`                      | 0.2        | c-012: share of notifications amended                               | 1     |
-| `highRiskPlants.cancelAmendShare`                | 0.05       | c-012: share of amendments cancelled                                | 0     |
-| `highRiskPlants.commodityLinesPerNotification`   | buckets    | NFR-VOL-PP-07: 50% 1–3, 30% 4–10, 15% 11–25, 5% 26–50               | same  |
-| `highRiskPlants.commodityTypes`                  | buckets    | interim even split, no volumetrics figure                           | same  |
-| `addressBook.worstCaseSearchShare`               | 0.25       | interim, no volumetrics figure                                      | 1     |
-| `frontDoor.corePagesPerJourneySession`           | 6          | C1                                                                  | 6     |
-| `frontDoor.dashboardOnlySessionsPerNotification` | 1          | C2                                                                  | 1     |
-| `frontDoor.dashboardOnlySessionMinutes`          | 5          | C3                                                                  | 0.25  |
-| `frontDoor.pagesPerDashboardOnlySession`         | 8          | C4                                                                  | 8     |
-| `frontDoor.addressBookSessionsPerNotification`   | 0.25       | interim, no volumetrics figure                                      | 0.25  |
-| `sustainedPeak.rampDuration`                     | `3h`       | DR-EUDP-005 scenario shapes, row 1                                  | same  |
-| `sustainedPeak.holdDuration`                     | `7h`       | DR-EUDP-005 scenario shapes, row 1                                  | same  |
-| `p99Burst.peakDuration`                          | `30m`      | DR-EUDP-005 scenario shapes, row 2                                  | same  |
-| `p99Burst.burstDuration`                         | `60s`      | DR-EUDP-005 scenario shapes, row 2                                  | same  |
-| `p99Burst.burstFactor`                           | 1.5        | T5                                                                  | same  |
-| `averageLoad.hourDuration`                       | `1h`       | one profile hour (nightly `10m`, local `2m`)                        | same  |
-| `averageLoad.hourlyShares`                       | 24 shares  | section 4.3 daily profile                                           | same  |
-| `averageLoad.seasonalPeakFactor`                 | 2          | A1                                                                  | same  |
-| `averageLoad.designHeadroom`                     | 2          | A3                                                                  | same  |
-| `spikeRecovery.baselineDuration`                 | `5m`       | DR-EUDP-005 scenario shapes, row 3 (local `2m`)                     | same  |
-| `spikeRecovery.spikeDuration`                    | `10s`      | DR-EUDP-005 scenario shapes, row 3; section 4.2                     | same  |
-| `spikeRecovery.recoveryDuration`                 | `60s`      | c-004 default: back within 60 seconds                               | same  |
-| `spikeRecovery.recoveredDuration`                | `2m`       | interim: the window judged after that minute (local `1m`)           | same  |
-| `spikeRecovery.capacityRps.ins`                  | 5          | section 4.2 Spike capacities, pending open item 2                   | same  |
-| `spikeRecovery.capacityRps.animals`              | 5          | section 4.2 Spike capacities, pending open item 2                   | same  |
-| `spikeRecovery.capacityRps.plants`               | 5          | section 4.2 Spike capacities, pending open item 2                   | same  |
-| `endurance.holdDuration`                         | `8h`       | DR-EUDP-005 scenario shapes, row 4 (local `12m`)                    | same  |
-| `endurance.comparisonWindow`                     | `1h`       | c-004 default: final hour against first (local `3m`)                | same  |
-| `endurance.sessionExpiry`                        | `frontend` | `frontend` or `client` (local `client`)                             | same  |
-| `endurance.sessionLifetime`                      | `4h`       | the frontends' `session.cache.ttl` (local `3m`)                     | same  |
-| `endurance.visitInterval`                        | `10m`      | interim (local `20s`)                                               | same  |
-| `endurance.returningUsersPerFrontend`            | 1          | interim                                                             | same  |
-| `combined.aloneDuration`                         | `30m`      | interim: as long as the burst's peak (local `3m`)                   | same  |
-| `combined.combinedDuration`                      | `30m`      | DR-EUDP-005 scenario shapes, row 2 (local `3m`)                     | same  |
-| `combined.settleDuration`                        | `5m`       | interim (local `1m`)                                                | same  |
-| `combined.sessionPathSpikeRps`                   | 25         | section 9.4 Session API spike capacity, NFR-DEP-05                  | same  |
-| `combined.referenceDataReadInterval`             | `10s`      | interim                                                             | same  |
-| `combined.referenceDataCacheMinutes`             | 60         | reference-data `cache.mdm.ttl-minutes` default                      | same  |
-| `resilience.baselineDuration`                    | `5m`       | DR-EUDP-005 scenario shapes, row 3 (local `2m`)                     | same  |
-| `resilience.faultDuration`                       | `2m`       | interim: long enough for timeouts and breakers to show (local `1m`) | same  |
-| `resilience.clearedDuration`                     | `2m`       | interim: a whole number of recovery steps (local `1m`)              | same  |
-| `resilience.recoveryStep`                        | `30s`      | interim: half of c-004's 60 seconds (local `15s`)                   | same  |
-| `resilience.slowDelayMs`                         | 5000       | interim: five times the p99 target of 1,000ms                       | same  |
-| `resilience.hangMs`                              | 120000     | interim: twice k6's 60 second request timeout                       | same  |
-| `resilience.errorStatus`                         | 503        | interim: a 5xx status, 500 to 599                                   | same  |
-| `resilience.retryAfterSeconds`                   | 5          | interim: the Retry-After a throttle answers                         | same  |
-| `resilience.slowRate`                            | 1          | interim: every request in the window                                | same  |
-| `resilience.hangRate`                            | 1          | interim: every request in the window                                | same  |
-| `resilience.resetRate`                           | 1          | interim: every request in the window                                | same  |
-| `resilience.throttleRate`                        | 0.5        | interim: half the requests                                          | same  |
-| `resilience.errorRate`                           | 0.5        | interim: errors at a chosen rate, half the requests                 | same  |
-| `mix.dashboardReadShareTarget`                   | 0.25       | D7                                                                  | 0.25  |
-| `backgroundVolume.liveAnimalsNotifications`      | 42000      | section 6.1, vol-130                                                | same  |
-| `backgroundVolume.highRiskPlantsNotifications`   | 34000      | section 7.1, vol-144                                                | same  |
-| `backgroundVolume.addressBookEntries`            | 500        | interim, no volumetrics figure                                      | same  |
-| `backgroundVolume.maxCreatedPerRun`              | 42000      | the largest target, so a run creates the whole gap                  | same  |
-| `backgroundVolume.virtualUsers`                  | 10         | interim                                                             | same  |
-| `backgroundVolume.maxDuration`                   | `24h`      | interim                                                             | same  |
-| `duration`                                       | `2m`       | the length of the run                                               | `2m`  |
+| Parameter                                        | Default    | Source                                                                                                       | Smoke |
+| ------------------------------------------------ | ---------- | ------------------------------------------------------------------------------------------------------------ | ----- |
+| `liveAnimals.notificationsPerHour`               | 44         | design target, section 6.3                                                                                   | 20    |
+| `liveAnimals.pagesPerNotification`               | 40         | AG1                                                                                                          | 40    |
+| `liveAnimals.sessionsPerNotification`            | 1.5        | A2                                                                                                           | 1.5   |
+| `liveAnimals.sessionMinutes`                     | 20         | AG2                                                                                                          | 1     |
+| `liveAnimals.amendShare`                         | 0.2        | c-012: share of notifications amended                                                                        | 1     |
+| `liveAnimals.cancelAmendShare`                   | 0.05       | c-012: share of amendments cancelled                                                                         | 1     |
+| `liveAnimals.documentsPerNotification`           | buckets    | c-012: 0–3 documents, mean 1                                                                                 | same  |
+| `liveAnimals.documentKilobytes`                  | 100–5000   | c-012: 100KB to 5MB, under the 10MB cap                                                                      | same  |
+| `liveAnimals.documentTypes`                      | buckets    | c-012: PDF or JPEG, 50% each                                                                                 | same  |
+| `highRiskPlants.notificationsPerHour`            | 36         | design target, section 7.3                                                                                   | 20    |
+| `highRiskPlants.pagesPerNotification`            | 50         | PP1                                                                                                          | 50    |
+| `highRiskPlants.sessionsPerNotification`         | 1.5        | A2                                                                                                           | 1.5   |
+| `highRiskPlants.sessionMinutes`                  | 25         | PP2                                                                                                          | 1     |
+| `highRiskPlants.amendShare`                      | 0.2        | c-012: share of notifications amended                                                                        | 1     |
+| `highRiskPlants.cancelAmendShare`                | 0.05       | c-012: share of amendments cancelled                                                                         | 0     |
+| `highRiskPlants.commodityLinesPerNotification`   | buckets    | NFR-VOL-PP-07: 50% 1–3, 30% 4–10, 15% 11–25, 5% 26–50                                                        | same  |
+| `highRiskPlants.commodityTypes`                  | buckets    | interim even split, no volumetrics figure                                                                    | same  |
+| `addressBook.worstCaseSearchShare`               | 0.25       | interim, no volumetrics figure                                                                               | 1     |
+| `frontDoor.corePagesPerJourneySession`           | 6          | C1                                                                                                           | 6     |
+| `frontDoor.dashboardOnlySessionsPerNotification` | 1          | C2                                                                                                           | 1     |
+| `frontDoor.dashboardOnlySessionMinutes`          | 5          | C3                                                                                                           | 0.25  |
+| `frontDoor.pagesPerDashboardOnlySession`         | 8          | C4                                                                                                           | 8     |
+| `frontDoor.addressBookSessionsPerNotification`   | 0.25       | interim, no volumetrics figure                                                                               | 0.25  |
+| `sustainedPeak.rampDuration`                     | `3h`       | DR-EUDP-005 scenario shapes, row 1                                                                           | same  |
+| `sustainedPeak.holdDuration`                     | `7h`       | DR-EUDP-005 scenario shapes, row 1                                                                           | same  |
+| `p99Burst.peakDuration`                          | `30m`      | DR-EUDP-005 scenario shapes, row 2                                                                           | same  |
+| `p99Burst.burstDuration`                         | `60s`      | DR-EUDP-005 scenario shapes, row 2                                                                           | same  |
+| `p99Burst.burstFactor`                           | 1.5        | T5                                                                                                           | same  |
+| `averageLoad.hourDuration`                       | `1h`       | one profile hour (nightly `10m`, local `2m`)                                                                 | same  |
+| `averageLoad.hourlyShares`                       | 24 shares  | section 4.3 daily profile                                                                                    | same  |
+| `averageLoad.seasonalPeakFactor`                 | 2          | A1                                                                                                           | same  |
+| `averageLoad.designHeadroom`                     | 2          | A3                                                                                                           | same  |
+| `spikeRecovery.baselineDuration`                 | `5m`       | DR-EUDP-005 scenario shapes, row 3 (local `2m`)                                                              | same  |
+| `spikeRecovery.spikeDuration`                    | `10s`      | DR-EUDP-005 scenario shapes, row 3; section 4.2                                                              | same  |
+| `spikeRecovery.recoveryDuration`                 | `60s`      | c-004 default: back within 60 seconds                                                                        | same  |
+| `spikeRecovery.recoveredDuration`                | `2m`       | interim: the window judged after that minute (local `1m`)                                                    | same  |
+| `spikeRecovery.capacityRps.ins`                  | 5          | section 4.2 Spike capacities, pending open item 2                                                            | same  |
+| `spikeRecovery.capacityRps.animals`              | 5          | section 4.2 Spike capacities, pending open item 2                                                            | same  |
+| `spikeRecovery.capacityRps.plants`               | 5          | section 4.2 Spike capacities, pending open item 2                                                            | same  |
+| `endurance.holdDuration`                         | `8h`       | DR-EUDP-005 scenario shapes, row 4 (local `12m`)                                                             | same  |
+| `endurance.comparisonWindow`                     | `1h`       | c-004 default: final hour against first (local `3m`)                                                         | same  |
+| `endurance.sessionExpiry`                        | `frontend` | `frontend` or `client` (local `client`)                                                                      | same  |
+| `endurance.sessionLifetime`                      | `4h`       | the frontends' `session.cache.ttl` (local `3m`)                                                              | same  |
+| `endurance.visitInterval`                        | `10m`      | interim (local `20s`)                                                                                        | same  |
+| `endurance.returningUsersPerFrontend`            | 1          | interim                                                                                                      | same  |
+| `combined.aloneDuration`                         | `30m`      | interim: as long as the burst's peak (local `3m`)                                                            | same  |
+| `combined.combinedDuration`                      | `30m`      | DR-EUDP-005 scenario shapes, row 2 (local `3m`)                                                              | same  |
+| `combined.settleDuration`                        | `5m`       | interim (local `1m`)                                                                                         | same  |
+| `combined.sessionPathSpikeRps`                   | 25         | section 9.4 Session API spike capacity, NFR-DEP-05                                                           | same  |
+| `combined.referenceDataReadInterval`             | `10s`      | interim                                                                                                      | same  |
+| `combined.referenceDataCacheMinutes`             | 60         | reference-data `cache.mdm.ttl-minutes` default                                                               | same  |
+| `resilience.baselineDuration`                    | `5m`       | DR-EUDP-005 scenario shapes, row 3 (local `2m`)                                                              | same  |
+| `resilience.faultDuration`                       | `2m`       | interim: long enough for timeouts and breakers to show, short enough that 18 faults fit one run (local `1m`) | same  |
+| `resilience.clearedDuration`                     | `2m`       | interim: a whole number of recovery steps (local `1m`)                                                       | same  |
+| `resilience.recoveryStep`                        | `30s`      | interim: half of c-004's 60 seconds (local `15s`)                                                            | same  |
+| `resilience.slowDelayMs`                         | 5000       | interim: five times the p99 target of 1,000ms                                                                | same  |
+| `resilience.hangMs`                              | 120000     | interim: twice k6's 60 second request timeout                                                                | same  |
+| `resilience.errorStatus`                         | 503        | interim: a 5xx status, 500 to 599                                                                            | same  |
+| `resilience.retryAfterSeconds`                   | 5          | interim: the Retry-After a throttle answers                                                                  | same  |
+| `resilience.slowRate`                            | 1          | interim: every request in the window                                                                         | same  |
+| `resilience.hangRate`                            | 1          | interim: every request in the window                                                                         | same  |
+| `resilience.resetRate`                           | 1          | interim: every request in the window                                                                         | same  |
+| `resilience.throttleRate`                        | 0.5        | interim: half the requests                                                                                   | same  |
+| `resilience.errorRate`                           | 0.5        | interim: errors at a chosen rate, half the requests                                                          | same  |
+| `mix.dashboardReadShareTarget`                   | 0.25       | D7                                                                                                           | 0.25  |
+| `backgroundVolume.liveAnimalsNotifications`      | 42000      | section 6.1, vol-130                                                                                         | same  |
+| `backgroundVolume.highRiskPlantsNotifications`   | 34000      | section 7.1, vol-144                                                                                         | same  |
+| `backgroundVolume.addressBookEntries`            | 500        | interim, no volumetrics figure                                                                               | same  |
+| `backgroundVolume.maxCreatedPerRun`              | 42000      | the largest target, so a run creates the whole gap                                                           | same  |
+| `backgroundVolume.virtualUsers`                  | 10         | interim                                                                                                      | same  |
+| `backgroundVolume.maxDuration`                   | `24h`      | interim                                                                                                      | same  |
+| `duration`                                       | `2m`       | the length of the run                                                                                        | `2m`  |
 
 The smoke run reads the `backgroundVolume` targets only to report them beside the counts.
 

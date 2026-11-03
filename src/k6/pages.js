@@ -2,6 +2,10 @@ import { Counter, Rate, Trend } from 'k6/metrics'
 
 import { READ_MODEL_ENDPOINTS } from '../config/endpoints.js'
 import { TRAFFIC_CLASSES, isDashboardRead } from '../config/request-mix.js'
+import {
+  ADDRESS_TYPE_START_PATH,
+  CHOSEN_ADDRESS_TYPE
+} from '../lib/address-book.js'
 import { thinkSeconds } from '../lib/traffic-shape.js'
 import { markPhase, pacedSleep } from './phase.js'
 
@@ -170,3 +174,32 @@ export const createWalker = ({
       })
   }
 }
+
+/**
+ * Opens the add-address form through the INS address type page, choosing the
+ * type the suite adds addresses as.
+ *
+ * Posts the address type page and returns the form it leads to.
+ *
+ * @param {{ open: Function, submit: Function }} walker - A walker, or the same two calls on a session.
+ * @returns {object} The add-address form page.
+ */
+export const chooseTypeAndOpenAddForm = ({ open, submit }) => {
+  const typePage = open(ADDRESS_TYPE_START_PATH, 'ins-address-type')
+
+  return submit(
+    typePage,
+    { addressType: CHOSEN_ADDRESS_TYPE },
+    'ins-address-type-save'
+  )
+}
+
+/**
+ * Posts the address type page on a browser session and returns the add-address
+ * form, choosing the type the suite adds addresses as.
+ *
+ * @param {{ open: Function, submitForm: Function }} session - A browser session.
+ * @returns {object} The add-address form page.
+ */
+export const chooseTypeAndOpenAddFormInSession = (session) =>
+  chooseTypeAndOpenAddForm({ open: session.open, submit: session.submitForm })
