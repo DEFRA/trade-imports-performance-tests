@@ -7,6 +7,8 @@ import { frontDoorThinkSecondsMean, isChosen } from '../config/traffic.js'
 import {
   ADDRESS_BOOK,
   ADDRESS_TYPES,
+  CHOSEN_ADDRESS_TYPE,
+  addAddressAnswers,
   addressBookListPath,
   addressIdFrom,
   worstCaseSearchTerm
@@ -137,14 +139,12 @@ export const dashboardOnlySession = (options) => {
   recordSession(secondsSince(startedAt))
 }
 
-const addAnswers = (address, name) => ({ ...address, name })
-
 const addAddress = (walker, name) => {
   const form = chooseTypeAndOpenAddForm(walker)
 
   return walker.submit(
     form,
-    addAnswers(PERF_ADDRESS, name),
+    addAddressAnswers(PERF_ADDRESS, name),
     'ins-address-add-save'
   )
 }
@@ -215,7 +215,14 @@ export const addressBookSession = (options) => {
   openInsDashboard(dashboard)
   walker.open(ADDRESS_BOOK, 'ins-address-book')
   searchWorstCaseWhenChosen(walker, options)
-  addAddress(walker, name)
+  const saved = addAddress(walker, name)
+
+  check(saved, {
+    'address added': (page) =>
+      page.status === HTTP_OK &&
+      page.url.endsWith(addressBookListPath(CHOSEN_ADDRESS_TYPE)) &&
+      textOf(page).includes(name)
+  })
 
   const found = walker.open(
     originAndConsignorSearchPath(name),
@@ -223,7 +230,7 @@ export const addressBookSession = (options) => {
   )
   const addressId = addressIdFrom(hrefsOf(found))
 
-  check(found, { 'address added': () => addressId !== '' })
+  check(found, { 'address found by name': () => addressId !== '' })
 
   if (addressId === '') {
     return
@@ -293,7 +300,7 @@ export const ensurePerfAddress = ({
 
   session.submitForm(
     form,
-    addAnswers(address, address.name),
+    addAddressAnswers(address, address.name),
     'ins-address-add-save'
   )
 

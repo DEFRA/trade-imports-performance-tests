@@ -11,6 +11,19 @@ export const ADDRESS_TYPE_START_PATH = `${ADDRESS_BOOK}/add/address-type?start=t
 export const CHOSEN_ADDRESS_TYPE = ADDRESS_TYPES.ORIGIN_OR_CONSIGNOR
 
 /**
+ * Builds the answers that post the add-address form for an address.
+ *
+ * @param {Record<string, string>} address - The address's field answers.
+ * @param {string} name - The name to save the address under.
+ * @returns {Record<string, string>} The address's answers under the name, with the use the suite ticks.
+ */
+export const addAddressAnswers = (address, name) => ({
+  ...address,
+  name,
+  uses: 'PLACE_OF_ORIGIN'
+})
+
+/**
  * Finds the id of the first address a list page links to.
  *
  * @param {string[]} hrefs - Link targets read off the address book list.

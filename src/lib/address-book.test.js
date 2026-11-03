@@ -3,10 +3,23 @@ import { describe, expect, test } from 'vitest'
 import {
   ADDRESS_TYPE_START_PATH,
   ADDRESS_TYPES,
+  addAddressAnswers,
   addressBookListPath,
   addressIdFrom,
   worstCaseSearchTerm
 } from './address-book.js'
+
+describe('addAddressAnswers', () => {
+  test('gives the address fields under the name, with Place of origin ticked', () => {
+    expect(
+      addAddressAnswers({ name: 'Old name', postcode: 'SW1A 1AA' }, 'New name')
+    ).toEqual({
+      name: 'New name',
+      postcode: 'SW1A 1AA',
+      uses: 'PLACE_OF_ORIGIN'
+    })
+  })
+})
 
 describe('worstCaseSearchTerm', () => {
   test('is exactly the length asked and starts with the fixed words', () => {

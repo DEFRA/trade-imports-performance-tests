@@ -4,8 +4,9 @@ import { Gauge } from 'k6/metrics'
 import { targetsFrom } from '../config/background-volume.js'
 import { PERF_ADDRESS } from '../config/smoke.js'
 import {
-  ADDRESS_BOOK,
   ADDRESS_TYPES,
+  CHOSEN_ADDRESS_TYPE,
+  addAddressAnswers,
   addressBookListPath
 } from '../lib/address-book.js'
 import {
@@ -173,16 +174,16 @@ export const addBackgroundAddress = ({
   const form = chooseTypeAndOpenAddFormInSession(session)
   const saved = session.submitForm(
     form,
-    {
-      ...PERF_ADDRESS,
-      name: backgroundAddressName(index),
-      addressLine1: `${index + 1} Background Road`
-    },
+    addAddressAnswers(
+      { ...PERF_ADDRESS, addressLine1: `${index + 1} Background Road` },
+      backgroundAddressName(index)
+    ),
     'ins-address-add-save'
   )
 
   check(saved, {
     'background address added': (page) =>
-      page.status === HTTP_OK && page.url.endsWith(ADDRESS_BOOK)
+      page.status === HTTP_OK &&
+      page.url.endsWith(addressBookListPath(CHOSEN_ADDRESS_TYPE))
   })
 }
