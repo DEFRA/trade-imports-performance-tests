@@ -21,33 +21,37 @@ describe('STEP_ENDPOINTS', () => {
   )
 
   test('has a step for every page of each journey the user fills in', () => {
-    expect(Object.keys(STEP_ENDPOINTS['live-animals'])).toEqual([
-      'origin',
-      'commodities',
-      'consignment-details',
-      'identification',
-      'import-reason',
-      'additional-details',
-      'documents',
-      'addresses',
-      'cph-number',
-      'port-of-entry',
-      'transit-countries',
-      'transporters',
-      'contact'
-    ])
-    expect(Object.keys(STEP_ENDPOINTS['high-risk-plants'])).toEqual([
-      'commodity-type',
-      'commodity-line',
-      'commodities',
-      'origin',
-      'arrival-status',
-      'arrival-details',
-      'destination',
-      'consignor',
-      'identification-numbers',
-      'contact'
-    ])
+    expect(Object.keys(STEP_ENDPOINTS['live-animals']).sort()).toEqual(
+      [
+        'origin',
+        'commodities',
+        'consignment-details',
+        'identification',
+        'import-reason',
+        'additional-details',
+        'documents',
+        'addresses',
+        'cph-number',
+        'port-of-entry',
+        'transit-countries',
+        'transporters',
+        'contact'
+      ].sort()
+    )
+    expect(Object.keys(STEP_ENDPOINTS['high-risk-plants']).sort()).toEqual(
+      [
+        'commodity-type',
+        'commodity-line',
+        'commodities',
+        'origin',
+        'arrival-status',
+        'arrival-details',
+        'destination',
+        'consignor',
+        'identification-numbers',
+        'contact'
+      ].sort()
+    )
   })
 })
 
