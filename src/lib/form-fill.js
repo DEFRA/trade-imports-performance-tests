@@ -98,6 +98,16 @@ export const hasField = (formInputs, name) =>
   formInputs.some((input) => input.name === name)
 
 /**
+ * Keeps the species choices listed under one commodity code.
+ *
+ * @param {string[]} speciesValues - Species checkbox values, each `<commodity code>|<Latin name>`.
+ * @param {string} commodityCode - The commodity code to keep.
+ * @returns {string[]} The values under that code, in page order.
+ */
+export const speciesUnderCode = (speciesValues, commodityCode) =>
+  speciesValues.filter((value) => value.split('|')[0] === commodityCode)
+
+/**
  * Writes a date the way the frontends render one, in UTC.
  *
  * @param {Date} now - The starting moment.

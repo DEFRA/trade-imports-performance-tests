@@ -1,10 +1,14 @@
 import { STEP_ENDPOINTS } from '../config/journey-endpoints.js'
-import { ANIMAL_COMMODITY_SEARCH } from '../config/test-data.js'
+import {
+  ANIMAL_COMMODITY_CODE,
+  ANIMAL_COMMODITY_SEARCH
+} from '../config/test-data.js'
 import { countAt } from '../lib/distributions.js'
 import {
   blankFieldAnswers,
   selectOptions,
-  slashDateText
+  slashDateText,
+  speciesUnderCode
 } from '../lib/form-fill.js'
 import { documentsStep } from './documents.js'
 import {
@@ -64,7 +68,15 @@ const commodities = {
       'commodities',
       walker.submit(
         searched,
-        { species: pickFrom(context, choiceValues(searched, 'species')) },
+        {
+          species: pickFrom(
+            context,
+            speciesUnderCode(
+              choiceValues(searched, 'species'),
+              ANIMAL_COMMODITY_CODE
+            )
+          )
+        },
         ENDPOINTS.commodities.save
       )
     )
