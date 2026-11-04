@@ -4,8 +4,8 @@ import { Gauge } from 'k6/metrics'
 import { targetsFrom } from '../config/background-volume.js'
 import { PERF_ADDRESS } from '../config/smoke.js'
 import {
+  ADDED_ADDRESS,
   ADDRESS_TYPES,
-  CHOSEN_ADDRESS_TYPE,
   addAddressAnswers,
   addressBookListPath
 } from '../lib/address-book.js'
@@ -17,7 +17,7 @@ import {
   volumeLine
 } from '../lib/background-volume.js'
 import { createBrowserSession } from './browser-session.js'
-import { chooseTypeAndOpenAddFormInSession } from './pages.js'
+import { chooseTypeAndOpenAddFormInSession } from './front-door.js'
 import { READINESS_TAGS, ignoreStaleRedirects } from './readiness.js'
 import { serviceHttp } from './service-http.js'
 
@@ -47,6 +47,31 @@ const totalOf = (url, datastore) => {
   return total
 }
 
+const tabAddressCount = (session, addressType) => {
+  const page = session.open(
+    addressBookListPath(addressType),
+    'ins-address-book'
+  )
+
+  if (page.status !== HTTP_OK) {
+    throw unreadableVolumeError(
+      'address-book',
+      `${addressType} status ${page.status}`
+    )
+  }
+
+  const tabCount = addressCountFrom({
+    heading: page.heading,
+    labelText: page.html.find(RESULTS_LABEL).text()
+  })
+
+  if (tabCount === undefined) {
+    throw unreadableVolumeError('address-book', addressType)
+  }
+
+  return tabCount
+}
+
 const addressCount = ({ urls, localhostAlias, credentials }) => {
   const session = createBrowserSession({
     baseUrl: urls.ins,
@@ -55,32 +80,12 @@ const addressCount = ({ urls, localhostAlias, credentials }) => {
     staleRedirects: ignoreStaleRedirects,
     extraTags: READINESS_TAGS
   })
-  const tabCounts = Object.values(ADDRESS_TYPES).map((addressType) => {
-    const page = session.open(
-      addressBookListPath(addressType),
-      'ins-address-book'
+
+  return sumAddressCounts(
+    Object.values(ADDRESS_TYPES).map((addressType) =>
+      tabAddressCount(session, addressType)
     )
-
-    if (page.status !== HTTP_OK) {
-      throw unreadableVolumeError(
-        'address-book',
-        `${addressType} status ${page.status}`
-      )
-    }
-
-    const tabCount = addressCountFrom({
-      heading: page.heading,
-      labelText: page.html.find(RESULTS_LABEL).text()
-    })
-
-    if (tabCount === undefined) {
-      throw unreadableVolumeError('address-book', addressType)
-    }
-
-    return tabCount
-  })
-
-  return sumAddressCounts(tabCounts)
+  )
 }
 
 /**
@@ -184,6 +189,6 @@ export const addBackgroundAddress = ({
   check(saved, {
     'background address added': (page) =>
       page.status === HTTP_OK &&
-      page.url.endsWith(addressBookListPath(CHOSEN_ADDRESS_TYPE))
+      page.url.endsWith(addressBookListPath(ADDED_ADDRESS.addressType))
   })
 }

@@ -8,7 +8,10 @@ export const ADDRESS_TYPES = Object.freeze({
 
 export const ADDRESS_TYPE_START_PATH = `${ADDRESS_BOOK}/add/address-type?start=true`
 
-export const CHOSEN_ADDRESS_TYPE = ADDRESS_TYPES.ORIGIN_OR_CONSIGNOR
+export const ADDED_ADDRESS = Object.freeze({
+  addressType: ADDRESS_TYPES.ORIGIN_OR_CONSIGNOR,
+  use: 'PLACE_OF_ORIGIN'
+})
 
 /**
  * Builds the answers that post the add-address form for an address.
@@ -20,7 +23,7 @@ export const CHOSEN_ADDRESS_TYPE = ADDRESS_TYPES.ORIGIN_OR_CONSIGNOR
 export const addAddressAnswers = (address, name) => ({
   ...address,
   name,
-  uses: 'PLACE_OF_ORIGIN'
+  uses: ADDED_ADDRESS.use
 })
 
 /**
@@ -29,10 +32,11 @@ export const addAddressAnswers = (address, name) => ({
  * @param {string[]} hrefs - Link targets read off the address book list.
  * @returns {string} The id, or an empty string when the page lists no address.
  */
-export const addressIdFrom = (hrefs) =>
-  hrefs
-    .map((href) => /^\/address-book\/([^/?#]+)$/.exec(href)?.[1])
-    .find(Boolean) ?? ''
+export const addressIdFrom = (hrefs) => {
+  const addressHref = new RegExp(`^${ADDRESS_BOOK}/([^/?#]+)$`)
+
+  return hrefs.map((href) => addressHref.exec(href)?.[1]).find(Boolean) ?? ''
+}
 
 /**
  * Builds the worst-case free-text address search term.

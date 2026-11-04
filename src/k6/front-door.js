@@ -5,21 +5,16 @@ import { ADDRESS_BOOK_LOAD_NAME_PREFIX, PERF_ADDRESS } from '../config/smoke.js'
 import { WORST_CASE_SEARCH_LENGTH } from '../config/test-data.js'
 import { frontDoorThinkSecondsMean, isChosen } from '../config/traffic.js'
 import {
+  ADDED_ADDRESS,
   ADDRESS_BOOK,
-  ADDRESS_TYPES,
-  CHOSEN_ADDRESS_TYPE,
+  ADDRESS_TYPE_START_PATH,
   addAddressAnswers,
   addressBookListPath,
   addressIdFrom,
   worstCaseSearchTerm
 } from '../lib/address-book.js'
 import { createBrowserSession } from './browser-session.js'
-import {
-  chooseTypeAndOpenAddForm,
-  chooseTypeAndOpenAddFormInSession,
-  createWalker,
-  recordSession
-} from './pages.js'
+import { createWalker, recordSession } from './pages.js'
 import { READINESS_TAGS, ignoreStaleRedirects } from './readiness.js'
 
 const HTTP_OK = 200
@@ -30,14 +25,14 @@ export const SIGN_IN_AND_DASHBOARD_PAGES = 2
 
 const hrefsOf = (page) =>
   page.html
-    ?.find('a[href^="/address-book/"]')
+    ?.find(`a[href^="${ADDRESS_BOOK}/"]`)
     .toArray()
     .map((link) => link.attr('href')) ?? []
 
 const textOf = (page) => page.html?.find('body').text() ?? ''
 
-const originAndConsignorSearchPath = (searchTerm) =>
-  addressBookListPath(ADDRESS_TYPES.ORIGIN_OR_CONSIGNOR, { searchTerm })
+const addedAddressSearchPath = (searchTerm) =>
+  addressBookListPath(ADDED_ADDRESS.addressType, { searchTerm })
 
 const valuesOf = (page) =>
   Object.fromEntries(
@@ -139,6 +134,35 @@ export const dashboardOnlySession = (options) => {
   recordSession(secondsSince(startedAt))
 }
 
+/**
+ * Opens the add-address form through the INS address type page, choosing the
+ * type the suite adds addresses as.
+ *
+ * Posts the address type page and returns the form it leads to.
+ *
+ * @param {{ open: Function, submit: Function }} walker - A walker, or the same two calls on a session.
+ * @returns {object} The add-address form page.
+ */
+export const chooseTypeAndOpenAddForm = ({ open, submit }) => {
+  const typePage = open(ADDRESS_TYPE_START_PATH, 'ins-address-type')
+
+  return submit(
+    typePage,
+    { addressType: ADDED_ADDRESS.addressType },
+    'ins-address-type-save'
+  )
+}
+
+/**
+ * Posts the address type page on a browser session and returns the add-address
+ * form, choosing the type the suite adds addresses as.
+ *
+ * @param {{ open: Function, submitForm: Function }} session - A browser session.
+ * @returns {object} The add-address form page.
+ */
+export const chooseTypeAndOpenAddFormInSession = (session) =>
+  chooseTypeAndOpenAddForm({ open: session.open, submit: session.submitForm })
+
 const addAddress = (walker, name) => {
   const form = chooseTypeAndOpenAddForm(walker)
 
@@ -178,7 +202,7 @@ const searchWorstCaseWhenChosen = (walker, { iteration, model }) => {
   }
 
   const searched = walker.open(
-    originAndConsignorSearchPath(worstCaseSearchTerm(WORST_CASE_SEARCH_LENGTH)),
+    addedAddressSearchPath(worstCaseSearchTerm(WORST_CASE_SEARCH_LENGTH)),
     'ins-address-book-search'
   )
 
@@ -189,7 +213,7 @@ const searchWorstCaseWhenChosen = (walker, { iteration, model }) => {
 
 /**
  * Runs an address-book session: add an address, find it by searching the
- * Origin and Consignor tab, view, edit and delete it. A worst-case search
+ * added address type's tab, view, edit and delete it. A worst-case search
  * searches the same tab.
  *
  * Leaves nothing behind in the book.
@@ -220,12 +244,12 @@ export const addressBookSession = (options) => {
   check(saved, {
     'address added': (page) =>
       page.status === HTTP_OK &&
-      page.url.endsWith(addressBookListPath(CHOSEN_ADDRESS_TYPE)) &&
+      page.url.endsWith(addressBookListPath(ADDED_ADDRESS.addressType)) &&
       textOf(page).includes(name)
   })
 
   const found = walker.open(
-    originAndConsignorSearchPath(name),
+    addedAddressSearchPath(name),
     'ins-address-book-search'
   )
   const addressId = addressIdFrom(hrefsOf(found))
@@ -264,7 +288,9 @@ export const addressBookSession = (options) => {
 /**
  * Makes sure the performance-test address exists in the address book.
  *
- * Signs in to INS, searches the Origin and Consignor tab for the performance-test address by name and adds it through the frontend's add form when it is not there. Its requests carry the readiness tags.
+ * Signs in to INS, searches the added address type's tab for the performance-test
+ * address by name and adds it through the frontend's add form when it is not
+ * there. Its requests carry the readiness tags.
  *
  * @param {object} options - Setup settings.
  * @param {string} options.insUrl - The INS frontend's base URL.
@@ -288,7 +314,7 @@ export const ensurePerfAddress = ({
   })
   const search = () =>
     session.open(
-      originAndConsignorSearchPath(address.name),
+      addedAddressSearchPath(address.name),
       'ins-address-book-search'
     )
 
