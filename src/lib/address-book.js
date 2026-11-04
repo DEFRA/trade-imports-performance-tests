@@ -14,6 +14,25 @@ export const ADDED_ADDRESS = Object.freeze({
 })
 
 /**
+ * The endpoint name of each address-book request an address-book session
+ * makes after the dashboard, one entry per request. A session makes all of
+ * them when its worst-case search is chosen.
+ */
+export const ADDRESS_BOOK_SESSION_ENDPOINTS = Object.freeze({
+  list: 'ins-address-book',
+  worstCaseSearch: 'ins-address-book-search',
+  typePage: 'ins-address-type',
+  typeSave: 'ins-address-type-save',
+  addSave: 'ins-address-add-save',
+  search: 'ins-address-book-search',
+  view: 'ins-address-view',
+  edit: 'ins-address-edit',
+  editSave: 'ins-address-edit-save',
+  delete: 'ins-address-delete',
+  deleteSave: 'ins-address-delete-save'
+})
+
+/**
  * Builds the answers that post the add-address form for an address.
  *
  * @param {Record<string, string>} address - The address's field answers.

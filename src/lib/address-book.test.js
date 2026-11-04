@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'vitest'
 
+import { ENDPOINTS } from '../config/endpoints.js'
 import {
+  ADDRESS_BOOK_SESSION_ENDPOINTS,
   ADDRESS_TYPE_START_PATH,
   ADDRESS_TYPES,
   addAddressAnswers,
@@ -8,6 +10,15 @@ import {
   addressIdFrom,
   worstCaseSearchTerm
 } from './address-book.js'
+
+describe('ADDRESS_BOOK_SESSION_ENDPOINTS', () => {
+  test.each(Object.entries(ADDRESS_BOOK_SESSION_ENDPOINTS))(
+    'the %s request is tagged with %s, an endpoint in the catalogue',
+    (_request, endpoint) => {
+      expect(Object.keys(ENDPOINTS)).toContain(endpoint)
+    }
+  )
+})
 
 describe('addAddressAnswers', () => {
   test('gives the address fields under the name, with Place of origin ticked', () => {

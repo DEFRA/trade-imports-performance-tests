@@ -3,10 +3,15 @@ import { check } from 'k6'
 import { TRAFFIC_CLASSES } from '../config/request-mix.js'
 import { ADDRESS_BOOK_LOAD_NAME_PREFIX, PERF_ADDRESS } from '../config/smoke.js'
 import { WORST_CASE_SEARCH_LENGTH } from '../config/test-data.js'
-import { frontDoorThinkSecondsMean, isChosen } from '../config/traffic.js'
+import {
+  SIGN_IN_AND_DASHBOARD_PAGES,
+  frontDoorThinkSecondsMean,
+  isChosen
+} from '../config/traffic.js'
 import {
   ADDED_ADDRESS,
   ADDRESS_BOOK,
+  ADDRESS_BOOK_SESSION_ENDPOINTS,
   ADDRESS_TYPE_START_PATH,
   addAddressAnswers,
   addressBookListPath,
@@ -19,9 +24,6 @@ import { READINESS_TAGS, ignoreStaleRedirects } from './readiness.js'
 
 const HTTP_OK = 200
 const MS_PER_SECOND = 1000
-
-/** The page requests an INS session makes on opening: the sign-in plus the dashboard. */
-export const SIGN_IN_AND_DASHBOARD_PAGES = 2
 
 const hrefsOf = (page) =>
   page.html
@@ -144,12 +146,15 @@ export const dashboardOnlySession = (options) => {
  * @returns {object} The add-address form page.
  */
 export const chooseTypeAndOpenAddForm = ({ open, submit }) => {
-  const typePage = open(ADDRESS_TYPE_START_PATH, 'ins-address-type')
+  const typePage = open(
+    ADDRESS_TYPE_START_PATH,
+    ADDRESS_BOOK_SESSION_ENDPOINTS.typePage
+  )
 
   return submit(
     typePage,
     { addressType: ADDED_ADDRESS.addressType },
-    'ins-address-type-save'
+    ADDRESS_BOOK_SESSION_ENDPOINTS.typeSave
   )
 }
 
@@ -169,7 +174,7 @@ const addAddress = (walker, name) => {
   return walker.submit(
     form,
     addAddressAnswers(PERF_ADDRESS, name),
-    'ins-address-add-save'
+    ADDRESS_BOOK_SESSION_ENDPOINTS.addSave
   )
 }
 
@@ -177,23 +182,27 @@ const editAddress = (walker, addressId) => {
   const editedTown = 'Dundee'
   const form = walker.open(
     `${ADDRESS_BOOK}/${addressId}/edit`,
-    'ins-address-edit'
+    ADDRESS_BOOK_SESSION_ENDPOINTS.edit
   )
 
   return walker.submit(
     form,
     { ...valuesOf(form), townOrCity: editedTown },
-    'ins-address-edit-save'
+    ADDRESS_BOOK_SESSION_ENDPOINTS.editSave
   )
 }
 
 const deleteAddress = (walker, addressId) => {
   const confirmation = walker.open(
     `${ADDRESS_BOOK}/${addressId}/delete`,
-    'ins-address-delete'
+    ADDRESS_BOOK_SESSION_ENDPOINTS.delete
   )
 
-  return walker.submit(confirmation, {}, 'ins-address-delete-save')
+  return walker.submit(
+    confirmation,
+    {},
+    ADDRESS_BOOK_SESSION_ENDPOINTS.deleteSave
+  )
 }
 
 const searchWorstCaseWhenChosen = (walker, { iteration, model }) => {
@@ -203,7 +212,7 @@ const searchWorstCaseWhenChosen = (walker, { iteration, model }) => {
 
   const searched = walker.open(
     addedAddressSearchPath(worstCaseSearchTerm(WORST_CASE_SEARCH_LENGTH)),
-    'ins-address-book-search'
+    ADDRESS_BOOK_SESSION_ENDPOINTS.worstCaseSearch
   )
 
   check(searched, {
@@ -237,7 +246,7 @@ export const addressBookSession = (options) => {
   const walker = dashboard.withClass(TRAFFIC_CLASSES.ADDRESS_BOOK)
 
   openInsDashboard(dashboard)
-  walker.open(ADDRESS_BOOK, 'ins-address-book')
+  walker.open(ADDRESS_BOOK, ADDRESS_BOOK_SESSION_ENDPOINTS.list)
   searchWorstCaseWhenChosen(walker, options)
   const saved = addAddress(walker, name)
 
@@ -250,7 +259,7 @@ export const addressBookSession = (options) => {
 
   const found = walker.open(
     addedAddressSearchPath(name),
-    'ins-address-book-search'
+    ADDRESS_BOOK_SESSION_ENDPOINTS.search
   )
   const addressId = addressIdFrom(hrefsOf(found))
 
@@ -260,7 +269,10 @@ export const addressBookSession = (options) => {
     return
   }
 
-  const viewed = walker.open(`${ADDRESS_BOOK}/${addressId}`, 'ins-address-view')
+  const viewed = walker.open(
+    `${ADDRESS_BOOK}/${addressId}`,
+    ADDRESS_BOOK_SESSION_ENDPOINTS.view
+  )
 
   check(viewed, {
     'address viewed': (page) =>
@@ -315,7 +327,7 @@ export const ensurePerfAddress = ({
   const search = () =>
     session.open(
       addedAddressSearchPath(address.name),
-      'ins-address-book-search'
+      ADDRESS_BOOK_SESSION_ENDPOINTS.search
     )
 
   if (addressIdFrom(hrefsOf(search())) !== '') {
@@ -327,7 +339,7 @@ export const ensurePerfAddress = ({
   session.submitForm(
     form,
     addAddressAnswers(address, address.name),
-    'ins-address-add-save'
+    ADDRESS_BOOK_SESSION_ENDPOINTS.addSave
   )
 
   if (addressIdFrom(hrefsOf(search())) === '') {

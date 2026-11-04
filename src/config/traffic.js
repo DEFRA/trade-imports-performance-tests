@@ -1,3 +1,5 @@
+import { ADDRESS_BOOK_SESSION_ENDPOINTS } from '../lib/address-book.js'
+
 const LIVE_ANIMALS_PAGES_PER_NOTIFICATION = 40
 const LIVE_ANIMALS_SESSION_MINUTES = 20
 const PLANTS_PAGES_PER_NOTIFICATION = 50
@@ -69,7 +71,11 @@ const RESILIENCE_SOMETIMES_RATE = 0.5
 const MIN_ERROR_STATUS = 500
 const MAX_ERROR_STATUS = 599
 
-export const ADDRESS_BOOK_SESSION_PAGES = 13
+/** The page requests an INS session makes on opening: the sign-in plus the dashboard. */
+export const SIGN_IN_AND_DASHBOARD_PAGES = 2
+export const ADDRESS_BOOK_SESSION_PAGES =
+  SIGN_IN_AND_DASHBOARD_PAGES +
+  Object.keys(ADDRESS_BOOK_SESSION_ENDPOINTS).length
 export const SECONDS_PER_MINUTE = 60
 const SIGN_IN_PAGES_WITHOUT_WAIT = 1
 export const SECONDS_PER_HOUR = 3600
