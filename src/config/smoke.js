@@ -1,3 +1,4 @@
+import { INS_PAGES } from './endpoints.js'
 import { journeyEndpoints } from './journey-endpoints.js'
 import { arrivalScenarios } from './traffic.js'
 
@@ -52,21 +53,6 @@ export const JOURNEYS = Object.freeze({
   })
 })
 
-const ADDRESS_BOOK_ENDPOINTS = [
-  'sign-in',
-  'ins-dashboard',
-  'ins-address-book',
-  'ins-address-book-search',
-  'ins-address-type',
-  'ins-address-type-save',
-  'ins-address-add-save',
-  'ins-address-view',
-  'ins-address-edit',
-  'ins-address-edit-save',
-  'ins-address-delete',
-  'ins-address-delete-save'
-]
-
 const journeyScenario = (journeyKey, exec) => ({
   exec,
   endpoints: journeyEndpoints(journeyKey, JOURNEYS[journeyKey].endpointPrefix)
@@ -79,7 +65,7 @@ export const SCENARIOS = Object.freeze({
   }),
   'ins-address-book': Object.freeze({
     exec: 'insAddressBook',
-    endpoints: ADDRESS_BOOK_ENDPOINTS
+    endpoints: INS_PAGES
   }),
   'live-animals': Object.freeze(journeyScenario('live-animals', 'liveAnimals')),
   'high-risk-plants': Object.freeze(

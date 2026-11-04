@@ -9,7 +9,7 @@ const { PAGE, API, UPLOAD, STUB } = ENDPOINT_KINDS
 
 const ofKind = (kind, names) => names.map((name) => [name, kind])
 
-const INS_PAGES = [
+export const INS_PAGES = Object.freeze([
   'sign-in',
   'ins-dashboard',
   'ins-address-book',
@@ -22,7 +22,7 @@ const INS_PAGES = [
   'ins-address-edit-save',
   'ins-address-delete',
   'ins-address-delete-save'
-]
+])
 
 const ANIMALS_PAGES = [
   'animals-dashboard',
