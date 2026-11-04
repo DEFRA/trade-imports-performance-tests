@@ -1,6 +1,7 @@
 import { sleep } from 'k6'
 
 import { READINESS } from '../config/smoke.js'
+import { ADDRESS_BOOK } from '../lib/address-book.js'
 import { createBrowserSession } from './browser-session.js'
 import { serviceHttp } from './service-http.js'
 
@@ -47,7 +48,7 @@ const insAddressBookAnswers = ({ insUrl, localhostAlias, credentials }) => {
     staleRedirects: ignoreStaleRedirects,
     extraTags: READINESS_TAGS
   })
-  const page = session.open('/address-book', 'ins-address-book')
+  const page = session.open(ADDRESS_BOOK, 'ins-address-book')
 
   return page.status === HTTP_OK && page.heading === 'Address book'
 }
