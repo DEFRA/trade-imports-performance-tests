@@ -24,7 +24,7 @@ describe('reference-data and read-model endpoints', () => {
 
 describe('ENDPOINTS', () => {
   test.each(Object.entries(ENDPOINTS))(
-    '%s is a page or an api call',
+    '%s has a known endpoint kind',
     (_name, kind) => {
       expect(Object.values(ENDPOINT_KINDS)).toContain(kind)
     }
