@@ -3,12 +3,7 @@ import { Gauge } from 'k6/metrics'
 
 import { targetsFrom } from '../config/background-volume.js'
 import { PERF_ADDRESS } from '../config/smoke.js'
-import {
-  ADDED_ADDRESS,
-  ADDRESS_TYPES,
-  addAddressAnswers,
-  addressBookListPath
-} from '../lib/address-book.js'
+import { ADDRESS_TYPES, addressBookListPath } from '../lib/address-book.js'
 import {
   addressCountFrom,
   backgroundAddressName,
@@ -17,7 +12,7 @@ import {
   volumeLine
 } from '../lib/background-volume.js'
 import { createBrowserSession } from './browser-session.js'
-import { chooseTypeAndOpenAddFormInSession } from './front-door.js'
+import { addAddressInSession, landedOnAddedTypeTab } from './front-door.js'
 import { READINESS_TAGS, ignoreStaleRedirects } from './readiness.js'
 import { serviceHttp } from './service-http.js'
 
@@ -177,19 +172,11 @@ export const addBackgroundAddress = ({
     credentials,
     staleRedirects
   })
-  const form = chooseTypeAndOpenAddFormInSession(session)
-  const saved = session.submitForm(
-    form,
-    addAddressAnswers(
-      { ...PERF_ADDRESS, addressLine1: `${index + 1} Background Road` },
-      backgroundAddressName(index)
-    ),
-    'ins-address-add-save'
+  const saved = addAddressInSession(
+    session,
+    { ...PERF_ADDRESS, addressLine1: `${index + 1} Background Road` },
+    backgroundAddressName(index)
   )
 
-  check(saved, {
-    'background address added': (page) =>
-      page.status === HTTP_OK &&
-      page.url.endsWith(addressBookListPath(ADDED_ADDRESS.addressType))
-  })
+  check(saved, { 'background address added': landedOnAddedTypeTab })
 }

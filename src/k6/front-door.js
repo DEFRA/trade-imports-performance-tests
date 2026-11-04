@@ -137,46 +137,58 @@ export const dashboardOnlySession = (options) => {
 }
 
 /**
- * Opens the add-address form through the INS address type page, choosing the
- * type the suite adds addresses as.
+ * Adds an address through the INS address type page and add-address form,
+ * with the type and use the suite adds addresses with.
  *
- * Posts the address type page and returns the form it leads to.
- *
- * @param {{ open: Function, submit: Function }} walker - A walker, or the same two calls on a session.
- * @returns {object} The add-address form page.
+ * @param {{ open: Function, submit: Function }} requests - `open` and `submit` from a walker.
+ * @param {Record<string, string>} address - The address's field answers.
+ * @param {string} name - The name to save the address under.
+ * @returns {object} The page the add-address save lands on.
  */
-export const chooseTypeAndOpenAddForm = ({ open, submit }) => {
+export const addAddressThrough = ({ open, submit }, address, name) => {
   const typePage = open(
     ADDRESS_TYPE_START_PATH,
     ADDRESS_BOOK_SESSION_ENDPOINTS.typePage
   )
-
-  return submit(
+  const form = submit(
     typePage,
     { addressType: ADDED_ADDRESS.addressType },
     ADDRESS_BOOK_SESSION_ENDPOINTS.typeSave
   )
-}
 
-/**
- * Posts the address type page on a browser session and returns the add-address
- * form, choosing the type the suite adds addresses as.
- *
- * @param {{ open: Function, submitForm: Function }} session - A browser session.
- * @returns {object} The add-address form page.
- */
-export const chooseTypeAndOpenAddFormInSession = (session) =>
-  chooseTypeAndOpenAddForm({ open: session.open, submit: session.submitForm })
-
-const addAddress = (walker, name) => {
-  const form = chooseTypeAndOpenAddForm(walker)
-
-  return walker.submit(
+  return submit(
     form,
-    addAddressAnswers(PERF_ADDRESS, name),
+    addAddressAnswers(address, name),
     ADDRESS_BOOK_SESSION_ENDPOINTS.addSave
   )
 }
+
+/**
+ * Adds an address on a browser session through the INS address type page and
+ * add-address form, with the type and use the suite adds addresses with.
+ *
+ * @param {{ open: Function, submitForm: Function }} session - A browser session.
+ * @param {Record<string, string>} address - The address's field answers.
+ * @param {string} name - The name to save the address under.
+ * @returns {object} The page the add-address save lands on.
+ */
+export const addAddressInSession = (session, address, name) =>
+  addAddressThrough(
+    { open: session.open, submit: session.submitForm },
+    address,
+    name
+  )
+
+/**
+ * Checks that an add-address save landed on the tab of the type the suite
+ * adds addresses with.
+ *
+ * @param {{ status: number, url: string }} page - The page the save landed on.
+ * @returns {boolean} True when the page answered 200 on that tab.
+ */
+export const landedOnAddedTypeTab = (page) =>
+  page.status === HTTP_OK &&
+  page.url.endsWith(addressBookListPath(ADDED_ADDRESS.addressType))
 
 const editAddress = (walker, addressId) => {
   const editedTown = 'Dundee'
@@ -248,13 +260,11 @@ export const addressBookSession = (options) => {
   openInsDashboard(dashboard)
   walker.open(ADDRESS_BOOK, ADDRESS_BOOK_SESSION_ENDPOINTS.list)
   searchWorstCaseWhenChosen(walker, options)
-  const saved = addAddress(walker, name)
+  const saved = addAddressThrough(walker, PERF_ADDRESS, name)
 
   check(saved, {
     'address added': (page) =>
-      page.status === HTTP_OK &&
-      page.url.endsWith(addressBookListPath(ADDED_ADDRESS.addressType)) &&
-      textOf(page).includes(name)
+      landedOnAddedTypeTab(page) && textOf(page).includes(name)
   })
 
   const found = walker.open(
@@ -334,13 +344,7 @@ export const ensurePerfAddress = ({
     return
   }
 
-  const form = chooseTypeAndOpenAddFormInSession(session)
-
-  session.submitForm(
-    form,
-    addAddressAnswers(address, address.name),
-    ADDRESS_BOOK_SESSION_ENDPOINTS.addSave
-  )
+  addAddressInSession(session, address, address.name)
 
   if (addressIdFrom(hrefsOf(search())) === '') {
     throw new Error('Could not make the performance-test address')
