@@ -5,7 +5,8 @@ import {
   firstOption,
   hasField,
   selectOptions,
-  slashDateText
+  slashDateText,
+  speciesUnderCode
 } from './form-fill.js'
 
 const IDENTITY = { vu: 3, iteration: 7 }
@@ -112,6 +113,17 @@ describe('hasField', () => {
   test('tells whether the form has the input', () => {
     expect(hasField([text('arrivalTime')], 'arrivalTime')).toBe(true)
     expect(hasField([text('arrivalTime')], 'arrivalDate')).toBe(false)
+  })
+})
+
+describe('speciesUnderCode', () => {
+  test('keeps only the species under the code', () => {
+    expect(
+      speciesUnderCode(
+        ['0102|Bos taurus', '05111000|Bos taurus', '01022100|Bos taurus'],
+        '0102'
+      )
+    ).toEqual(['0102|Bos taurus'])
   })
 })
 
