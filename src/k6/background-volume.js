@@ -35,13 +35,13 @@ const totalOf = (url, datastore) => {
   const response = serviceHttp.get(url, { tags: READINESS_TAGS })
 
   if (response.status !== HTTP_OK) {
-    throw unreadableVolumeError(datastore)
+    throw unreadableVolumeError(datastore, `status ${response.status}`)
   }
 
   const total = response.json('totalElements')
 
   if (!Number.isInteger(total)) {
-    throw unreadableVolumeError(datastore)
+    throw unreadableVolumeError(datastore, `totalElements ${total}`)
   }
 
   return total
@@ -60,13 +60,14 @@ const tabAddressCount = (session, addressType) => {
     )
   }
 
-  const tabCount = addressCountFrom({
-    heading: page.heading,
-    labelText: page.html.find(RESULTS_LABEL).text()
-  })
+  const labelText = page.html.find(RESULTS_LABEL).text()
+  const tabCount = addressCountFrom({ heading: page.heading, labelText })
 
   if (tabCount === undefined) {
-    throw unreadableVolumeError('address-book', addressType)
+    throw unreadableVolumeError(
+      'address-book',
+      `${addressType} heading "${page.heading}", results label "${labelText}"`
+    )
   }
 
   return tabCount
