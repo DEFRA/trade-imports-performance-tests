@@ -9,7 +9,7 @@ import {
   isChosen
 } from '../config/traffic.js'
 import {
-  ADDED_ADDRESS,
+  ADDED_ADDRESS_TYPE,
   ADDRESS_BOOK,
   ADDRESS_BOOK_SESSION_ENDPOINTS,
   ADDRESS_TYPE_START_PATH,
@@ -33,8 +33,8 @@ const hrefsOf = (page) =>
 
 const textOf = (page) => page.html?.find('body').text() ?? ''
 
-const addedAddressSearchPath = (searchTerm) =>
-  addressBookListPath(ADDED_ADDRESS.addressType, { searchTerm })
+const addedTypeSearchPath = (searchTerm) =>
+  addressBookListPath(ADDED_ADDRESS_TYPE, { searchTerm })
 
 const valuesOf = (page) =>
   Object.fromEntries(
@@ -152,7 +152,7 @@ export const addAddressThrough = ({ open, submit }, address, name) => {
   )
   const form = submit(
     typePage,
-    { addressType: ADDED_ADDRESS.addressType },
+    { addressType: ADDED_ADDRESS_TYPE },
     ADDRESS_BOOK_SESSION_ENDPOINTS.typeSave
   )
 
@@ -188,7 +188,7 @@ export const addAddressInSession = (session, address, name) =>
  */
 export const landedOnAddedTypeTab = (page) =>
   page.status === HTTP_OK &&
-  page.url.endsWith(addressBookListPath(ADDED_ADDRESS.addressType))
+  page.url.endsWith(addressBookListPath(ADDED_ADDRESS_TYPE))
 
 const editAddress = (walker, addressId) => {
   const editedTown = 'Dundee'
@@ -223,7 +223,7 @@ const searchWorstCaseWhenChosen = (walker, { iteration, model }) => {
   }
 
   const searched = walker.open(
-    addedAddressSearchPath(worstCaseSearchTerm(WORST_CASE_SEARCH_LENGTH)),
+    addedTypeSearchPath(worstCaseSearchTerm(WORST_CASE_SEARCH_LENGTH)),
     ADDRESS_BOOK_SESSION_ENDPOINTS.worstCaseSearch
   )
 
@@ -268,7 +268,7 @@ export const addressBookSession = (options) => {
   })
 
   const found = walker.open(
-    addedAddressSearchPath(name),
+    addedTypeSearchPath(name),
     ADDRESS_BOOK_SESSION_ENDPOINTS.search
   )
   const addressId = addressIdFrom(hrefsOf(found))
@@ -336,7 +336,7 @@ export const ensurePerfAddress = ({
   })
   const search = () =>
     session.open(
-      addedAddressSearchPath(address.name),
+      addedTypeSearchPath(address.name),
       ADDRESS_BOOK_SESSION_ENDPOINTS.search
     )
 

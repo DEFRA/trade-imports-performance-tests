@@ -8,10 +8,7 @@ export const ADDRESS_TYPES = Object.freeze({
 
 export const ADDRESS_TYPE_START_PATH = `${ADDRESS_BOOK}/add/address-type?start=true`
 
-export const ADDED_ADDRESS = Object.freeze({
-  addressType: ADDRESS_TYPES.ORIGIN_OR_CONSIGNOR,
-  use: 'PLACE_OF_ORIGIN'
-})
+export const ADDED_ADDRESS_TYPE = ADDRESS_TYPES.ORIGIN_OR_CONSIGNOR
 
 /**
  * The endpoint name of each address-book request an address-book session
@@ -42,7 +39,7 @@ export const ADDRESS_BOOK_SESSION_ENDPOINTS = Object.freeze({
 export const addAddressAnswers = (address, name) => ({
   ...address,
   name,
-  uses: ADDED_ADDRESS.use
+  uses: 'PLACE_OF_ORIGIN'
 })
 
 /**
