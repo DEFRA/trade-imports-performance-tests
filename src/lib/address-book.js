@@ -34,12 +34,12 @@ export const ADDRESS_BOOK_SESSION_ENDPOINTS = Object.freeze({
  *
  * @param {Record<string, string>} address - The address's field answers.
  * @param {string} name - The name to save the address under.
- * @returns {Record<string, string>} The address's answers under the name, with the use the suite ticks.
+ * @returns {Record<string, string>} The address's answers under the name, with the role the suite ticks.
  */
 export const addAddressAnswers = (address, name) => ({
   ...address,
   name,
-  uses: 'PLACE_OF_ORIGIN'
+  roles: 'PLACE_OF_ORIGIN'
 })
 
 /**

@@ -257,7 +257,7 @@ npm run test:docker-compose:background-volume   # workspace Docker stack
 
 Every run states the volume it started with: `Background volume at start: live-animals 12 of 42000, high-risk-plants 9 of 34000, dashboard-read-model 12, address-book 3 of 500`. It also records each count in the `background_volume` metric. The background run also logs `Background volume at end: ...` and `Created this run: ...`. `Created this run` leaves out the dashboard read model, because the run does not write to it: the read model fills from the journeys' events, after the run.
 
-An address held under uses of more than one tab is listed on each of those tabs, so the address-book figure counts it once for every tab it is listed on.
+An address holds roles from one tab only, so it is listed on one tab and the address-book figure counts it once.
 
 Before any measurement, a run waits for the animals backend, the plants backend, the INS backend (the dashboard read model) and the address book to answer a read, then logs `Indexes: built ...`. Each of those services builds its indexes at start-up before it answers a request (Spring Data auto-index-creation), so an answer means its indexes are built. A service that never answers fails the run in `setup()` before anything is measured. This confirms the indexes that exist are built. It adds none.
 

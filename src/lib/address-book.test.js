@@ -27,7 +27,7 @@ describe('addAddressAnswers', () => {
     ).toEqual({
       name: 'New name',
       postcode: 'SW1A 1AA',
-      uses: 'PLACE_OF_ORIGIN'
+      roles: 'PLACE_OF_ORIGIN'
     })
   })
 })
