@@ -10,7 +10,7 @@ import {
 } from '../config/traffic.js'
 import {
   ADDED_ADDRESS_TYPE,
-  ADDRESS_BOOK,
+  ADDRESS_BOOK_PATH,
   ADDRESS_BOOK_SESSION_ENDPOINTS,
   ADDRESS_TYPE_START_PATH,
   addAddressAnswers,
@@ -27,7 +27,7 @@ const MS_PER_SECOND = 1000
 
 const hrefsOf = (page) =>
   page.html
-    ?.find(`a[href^="${ADDRESS_BOOK}/"]`)
+    ?.find(`a[href^="${ADDRESS_BOOK_PATH}/"]`)
     .toArray()
     .map((link) => link.attr('href')) ?? []
 
@@ -193,7 +193,7 @@ export const landedOnAddedTypeTab = (page) =>
 const editAddress = (walker, addressId) => {
   const editedTown = 'Dundee'
   const form = walker.open(
-    `${ADDRESS_BOOK}/${addressId}/edit`,
+    `${ADDRESS_BOOK_PATH}/${addressId}/edit`,
     ADDRESS_BOOK_SESSION_ENDPOINTS.edit
   )
 
@@ -206,7 +206,7 @@ const editAddress = (walker, addressId) => {
 
 const deleteAddress = (walker, addressId) => {
   const confirmation = walker.open(
-    `${ADDRESS_BOOK}/${addressId}/delete`,
+    `${ADDRESS_BOOK_PATH}/${addressId}/delete`,
     ADDRESS_BOOK_SESSION_ENDPOINTS.delete
   )
 
@@ -258,7 +258,7 @@ export const addressBookSession = (options) => {
   const walker = dashboard.withClass(TRAFFIC_CLASSES.ADDRESS_BOOK)
 
   openInsDashboard(dashboard)
-  walker.open(ADDRESS_BOOK, ADDRESS_BOOK_SESSION_ENDPOINTS.list)
+  walker.open(ADDRESS_BOOK_PATH, ADDRESS_BOOK_SESSION_ENDPOINTS.list)
   searchWorstCaseWhenChosen(walker, options)
   const saved = addAddressThrough(walker, PERF_ADDRESS, name)
 
@@ -280,7 +280,7 @@ export const addressBookSession = (options) => {
   }
 
   const viewed = walker.open(
-    `${ADDRESS_BOOK}/${addressId}`,
+    `${ADDRESS_BOOK_PATH}/${addressId}`,
     ADDRESS_BOOK_SESSION_ENDPOINTS.view
   )
 
@@ -293,7 +293,7 @@ export const addressBookSession = (options) => {
 
   check(edited, {
     'address edited': (page) =>
-      page.status === HTTP_OK && page.url.endsWith(ADDRESS_BOOK)
+      page.status === HTTP_OK && page.url.endsWith(ADDRESS_BOOK_PATH)
   })
 
   const deleted = deleteAddress(walker, addressId)
@@ -301,7 +301,7 @@ export const addressBookSession = (options) => {
   check(deleted, {
     'address deleted': (page) =>
       page.status === HTTP_OK &&
-      !hrefsOf(page).includes(`${ADDRESS_BOOK}/${addressId}`)
+      !hrefsOf(page).includes(`${ADDRESS_BOOK_PATH}/${addressId}`)
   })
 
   recordSession(secondsSince(startedAt))

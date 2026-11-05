@@ -17,14 +17,11 @@ import { READINESS_TAGS, ignoreStaleRedirects } from './readiness.js'
 import { serviceHttp } from './service-http.js'
 
 const HTTP_OK = 200
-const RESULTS_LABEL = '[data-testid="address-book-results-label"]'
 
 const backgroundVolumeGauge = new Gauge('background_volume')
 
 const unreadableVolumeError = (datastore, detail) =>
-  new Error(
-    `Could not read the background volume of ${datastore}${detail ? ` (${detail})` : ''}`
-  )
+  new Error(`Could not read the background volume of ${datastore} (${detail})`)
 
 const totalOf = (url, datastore) => {
   const response = serviceHttp.get(url, { tags: READINESS_TAGS })
@@ -43,6 +40,7 @@ const totalOf = (url, datastore) => {
 }
 
 const tabAddressCount = (session, addressType) => {
+  const resultsLabel = '[data-testid="address-book-results-label"]'
   const page = session.open(
     addressBookListPath(addressType),
     'ins-address-book'
@@ -55,7 +53,7 @@ const tabAddressCount = (session, addressType) => {
     )
   }
 
-  const labelText = page.html.find(RESULTS_LABEL).text()
+  const labelText = page.html.find(resultsLabel).text()
   const tabCount = addressCountFrom({ heading: page.heading, labelText })
 
   if (tabCount === undefined) {

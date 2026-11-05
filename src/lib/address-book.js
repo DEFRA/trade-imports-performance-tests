@@ -1,4 +1,4 @@
-export const ADDRESS_BOOK = '/address-book'
+export const ADDRESS_BOOK_PATH = '/address-book'
 
 export const ADDRESS_TYPES = Object.freeze({
   ORIGIN_OR_CONSIGNOR: 'ORIGIN_OR_CONSIGNOR',
@@ -6,9 +6,10 @@ export const ADDRESS_TYPES = Object.freeze({
   BRANCH: 'BRANCH'
 })
 
-export const ADDRESS_TYPE_START_PATH = `${ADDRESS_BOOK}/add/address-type?start=true`
+export const ADDRESS_TYPE_START_PATH = `${ADDRESS_BOOK_PATH}/add/address-type?start=true`
 
 export const ADDED_ADDRESS_TYPE = ADDRESS_TYPES.ORIGIN_OR_CONSIGNOR
+export const ADDED_ROLE = 'PLACE_OF_ORIGIN'
 
 /**
  * The endpoint name of each address-book request an address-book session
@@ -38,7 +39,7 @@ export const ADDRESS_BOOK_SESSION_ENDPOINTS = Object.freeze({
 export const addAddressAnswers = (address, name) => ({
   ...address,
   name,
-  roles: 'PLACE_OF_ORIGIN'
+  roles: ADDED_ROLE
 })
 
 /**
@@ -48,7 +49,7 @@ export const addAddressAnswers = (address, name) => ({
  * @returns {string} The id, or an empty string when the page lists no address.
  */
 export const addressIdFrom = (hrefs) => {
-  const addressHref = new RegExp(`^${ADDRESS_BOOK}/([^/?#]+)$`)
+  const addressHref = new RegExp(`^${ADDRESS_BOOK_PATH}/([^/?#]+)$`)
 
   return hrefs.map((href) => addressHref.exec(href)?.[1]).find(Boolean) ?? ''
 }
@@ -71,7 +72,7 @@ export const worstCaseSearchTerm = (length) =>
  * @returns {string} The path, with the tab first and then the encoded search term when one is given.
  */
 export const addressBookListPath = (addressType, { searchTerm } = {}) => {
-  const tabPath = `${ADDRESS_BOOK}?addressType=${addressType}`
+  const tabPath = `${ADDRESS_BOOK_PATH}?addressType=${addressType}`
 
   return searchTerm === undefined
     ? tabPath

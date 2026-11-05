@@ -90,7 +90,7 @@ The run waits for the stack to be functionally ready (up to 5 minutes). Ready no
 
 - `live-animals` and `high-risk-plants` each run one notification across 1 or 2 sessions, in the order a user fills the journey in. Every session signs in afresh through INS, and the last one submits through the declaration page, reads the notification back from the dashboard and hub, then amends it and either cancels the amendment or resubmits it. The first captured save is replayed against the backend
 - `ins-front-door` runs dashboard-only sessions: sign in, then keep checking the INS dashboard
-- `ins-address-book` runs address-book sessions: add an address (choosing Origin or Consignor, whose tab the save lands on and where 'address added' is checked, and ticking Place of origin, which a save requires), find it, view it, edit it and delete it, so the book does not grow
+- `ins-address-book` runs address-book sessions: add an address (choosing Origin or Consignor, whose tab the save lands on and where 'address added' is checked, and ticking the Place of origin role, since a save needs at least one role), find it, view it, edit it and delete it, so the book does not grow
 
 The journeys draw their answers from the pages, not from fixed values: origin, port of entry, transit country, document type, plants category, genus and potato place of landing are each picked at random from the options the page offers. High-risk plants builds notifications of 1 to 50 commodity lines of each of its three commodity types, and live animals uploads 0 to 3 documents, so the smoke run uploads one document through the real cdp-uploader container and waits for its scan. See [Test data](#test-data).
 
