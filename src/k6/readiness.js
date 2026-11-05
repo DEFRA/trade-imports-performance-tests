@@ -1,6 +1,7 @@
 import { sleep } from 'k6'
 
 import { READINESS } from '../config/smoke.js'
+import { traderOrganisationHeaders } from '../config/trader-organisation.js'
 import { ADDRESS_BOOK_PATH } from '../lib/address-book.js'
 import { createBrowserSession } from './browser-session.js'
 import { serviceHttp } from './service-http.js'
@@ -14,8 +15,11 @@ export const READINESS_TAGS = { phase: 'readiness', name: 'readiness' }
 /** A stale-redirect counter that counts nothing, for requests outside the run. */
 export const ignoreStaleRedirects = { add: () => {} }
 
-const readBackend = (url) =>
-  serviceHttp.get(url, { tags: READINESS_TAGS }).status === HTTP_OK
+const readBackend = (url, headers = {}) =>
+  serviceHttp.get(url, { tags: READINESS_TAGS, headers }).status === HTTP_OK
+
+const readTraderBackend = (url) =>
+  readBackend(url, traderOrganisationHeaders())
 
 const referenceDataHasCountries = (url) => {
   const response = serviceHttp.get(`${url}/countries`, { tags: READINESS_TAGS })
@@ -65,9 +69,9 @@ const failedProbes = ({ urls, localhostAlias, credentials }) => {
   const probes = {
     'reference-data read': () => referenceDataHasCountries(urls.referenceData),
     'animals backend read': () =>
-      readBackend(`${urls.animalsBackend}/notifications?page=1`),
+      readTraderBackend(`${urls.animalsBackend}/notifications?page=1`),
     'plants backend read': () =>
-      readBackend(`${urls.plantsBackend}/notifications?page=1`),
+      readTraderBackend(`${urls.plantsBackend}/notifications?page=1`),
     'INS backend read': () =>
       readBackend(`${urls.insBackend}/notifications?page=1`),
     'INS signed-in page': () =>
