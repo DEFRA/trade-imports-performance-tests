@@ -29,3 +29,9 @@ describe('LIVE_ANIMALS_STEPS.draft', () => {
     )
   })
 })
+
+describe('LIVE_ANIMALS_STEPS.reEdit', () => {
+  test('names consignment-details, so the re-edit padding reopens the page the walker would otherwise skip straight past', () => {
+    expect(LIVE_ANIMALS_STEPS.reEdit).toContain('consignment-details')
+  })
+})

@@ -35,11 +35,11 @@ const PARTY_SLUGS = [
 const FRANCE = 'FR'
 const DEFAULT_PORT_OF_ENTRY = 'GB ABD'
 
-const drawnOrElse = (context, formInputs, name, fallback) =>
+const drawnAnswer = (context, formInputs, name, fallback) =>
   pickFrom(context, selectOptions(formInputs, name)) ?? fallback
 
 const originAnswers = (context, page) => ({
-  countryOfOrigin: drawnOrElse(
+  countryOfOrigin: drawnAnswer(
     context,
     page.formInputs,
     'countryOfOrigin',
@@ -116,7 +116,7 @@ const portOfEntry = reachAndSubmit(
   ENDPOINTS['port-of-entry'],
   (context, page) => ({
     arrivalDateAtPort: slashDateText(context.now, ARRIVAL_DAYS_AHEAD),
-    portOfEntry: drawnOrElse(
+    portOfEntry: drawnAnswer(
       context,
       page.formInputs,
       'portOfEntry',
@@ -141,7 +141,7 @@ const transitCountries = {
     const added = walker.submit(
       opened,
       {
-        transitedCountry: drawnOrElse(
+        transitedCountry: drawnAnswer(
           context,
           opened.formInputs,
           'transitedCountry',
@@ -232,6 +232,7 @@ export const LIVE_ANIMALS_STEPS = Object.freeze({
   reEdit: [
     'origin',
     'import-reason',
+    'consignment-details',
     'additional-details',
     'cph-number',
     'port-of-entry'
