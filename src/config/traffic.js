@@ -71,11 +71,13 @@ const RESILIENCE_SOMETIMES_RATE = 0.5
 const MIN_ERROR_STATUS = 500
 const MAX_ERROR_STATUS = 599
 
-/** The page requests an INS session makes on opening: the sign-in plus the dashboard. */
 export const SIGN_IN_AND_DASHBOARD_PAGES = 2
-export const ADDRESS_BOOK_SESSION_PAGES =
+const ADDRESS_BOOK_SESSION_MOST_PAGES =
   SIGN_IN_AND_DASHBOARD_PAGES +
   Object.keys(ADDRESS_BOOK_SESSION_ENDPOINTS).length
+
+const addressBookSessionMeanPages = (model) =>
+  ADDRESS_BOOK_SESSION_MOST_PAGES - 1 + model.addressBook.worstCaseSearchShare
 export const SECONDS_PER_MINUTE = 60
 const SIGN_IN_PAGES_WITHOUT_WAIT = 1
 export const SECONDS_PER_HOUR = 3600
@@ -812,7 +814,7 @@ export const scenarioPagesPerHour = (model) => {
       ins: rates['ins-front-door'] * frontDoor.pagesPerDashboardOnlySession
     },
     'ins-address-book': {
-      ins: rates['ins-address-book'] * ADDRESS_BOOK_SESSION_PAGES
+      ins: rates['ins-address-book'] * addressBookSessionMeanPages(model)
     }
   }
 }
@@ -835,7 +837,7 @@ export const iterationSeconds = (model) => ({
   'ins-front-door':
     model.frontDoor.dashboardOnlySessionMinutes * SECONDS_PER_MINUTE,
   'ins-address-book':
-    ADDRESS_BOOK_SESSION_PAGES * frontDoorThinkSecondsMean(model.frontDoor)
+    ADDRESS_BOOK_SESSION_MOST_PAGES * frontDoorThinkSecondsMean(model.frontDoor)
 })
 
 /**

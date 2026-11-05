@@ -664,7 +664,7 @@ describe('scenarioPagesPerHour', () => {
       'live-animals': { animals: 1760, ins: 396 },
       'high-risk-plants': { plants: 1800, ins: 324 },
       'ins-front-door': { ins: 640 },
-      'ins-address-book': { ins: 260 }
+      'ins-address-book': { ins: 245 }
     })
   })
 })

@@ -542,9 +542,9 @@ As the burst does, the arrival rate steps up for the spike and every user moves 
 | --------------------------------------- | ----------- |
 | `live-animals`                          | 10.23       |
 | `high-risk-plants`                      | 10          |
-| `ins-front-door` and `ins-address-book` | 11.9        |
+| `ins-front-door` and `ins-address-book` | 12.1        |
 
-Page rate does not depend on session length, so the factors are the same at every run length. The 25 RPS session path and the backend rates are derived, as the burst's backend rate is: nothing in the stack is a session API, so the session path is every frontend page plus one backend call a journey page. `setup()` logs what the run applies: `Spike: 10s at the stated capacities: animals 5 RPS (pace x10.23), plants 5 RPS (pace x10), INS front door 5 RPS including sign-in (pace x11.9), session path 25 RPS (derived); recovery judged over the 2m after the 60s allowed`. The one-second view of the recovery is the run's `index.html` and `timeseries.json.gz`.
+Page rate does not depend on session length, so the factors are the same at every run length. The 25 RPS session path and the backend rates are derived, as the burst's backend rate is: nothing in the stack is a session API, so the session path is every frontend page plus one backend call a journey page. `setup()` logs what the run applies: `Spike: 10s at the stated capacities: animals 5 RPS (pace x10.23), plants 5 RPS (pace x10), INS front door 5 RPS including sign-in (pace x12.1), session path 25 RPS (derived); recovery judged over the 2m after the 60s allowed`. The one-second view of the recovery is the run's `index.html` and `timeseries.json.gz`.
 
 ### Endurance and re-authentication
 

@@ -1,4 +1,4 @@
-import { INS_PAGES } from './endpoints.js'
+import { ADDRESS_BOOK_SESSION_ENDPOINTS } from '../lib/address-book.js'
 import { journeyEndpoints } from './journey-endpoints.js'
 import { arrivalScenarios } from './traffic.js'
 
@@ -58,14 +58,21 @@ const journeyScenario = (journeyKey, exec) => ({
   endpoints: journeyEndpoints(journeyKey, JOURNEYS[journeyKey].endpointPrefix)
 })
 
+const SIGN_IN_AND_DASHBOARD_ENDPOINTS = ['sign-in', 'ins-dashboard']
+
 export const SCENARIOS = Object.freeze({
   'ins-front-door': Object.freeze({
     exec: 'insFrontDoor',
-    endpoints: ['sign-in', 'ins-dashboard']
+    endpoints: SIGN_IN_AND_DASHBOARD_ENDPOINTS
   }),
   'ins-address-book': Object.freeze({
     exec: 'insAddressBook',
-    endpoints: INS_PAGES
+    endpoints: [
+      ...new Set([
+        ...SIGN_IN_AND_DASHBOARD_ENDPOINTS,
+        ...Object.values(ADDRESS_BOOK_SESSION_ENDPOINTS)
+      ])
+    ]
   }),
   'live-animals': Object.freeze(journeyScenario('live-animals', 'liveAnimals')),
   'high-risk-plants': Object.freeze(

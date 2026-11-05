@@ -12,8 +12,7 @@ export const ADDED_ADDRESS_TYPE = ADDRESS_TYPES.ORIGIN_OR_CONSIGNOR
 
 /**
  * The endpoint name of each address-book request an address-book session
- * makes after the dashboard, one entry per request. A session makes all of
- * them when its worst-case search is chosen.
+ * makes after the dashboard, one entry per request.
  */
 export const ADDRESS_BOOK_SESSION_ENDPOINTS = Object.freeze({
   list: 'ins-address-book',
