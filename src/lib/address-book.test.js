@@ -13,7 +13,7 @@ import {
 
 describe('ADDRESS_BOOK_SESSION_ENDPOINTS', () => {
   test.each(Object.entries(ADDRESS_BOOK_SESSION_ENDPOINTS))(
-    'the %s request is tagged with %s, an endpoint in the catalogue',
+    'the %s request names %s, an endpoint in the catalogue',
     (_request, endpoint) => {
       expect(Object.keys(ENDPOINTS)).toContain(endpoint)
     }

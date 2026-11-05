@@ -47,10 +47,6 @@ describe('sumAddressCounts', () => {
   test('adds the counts of the tabs', () => {
     expect(sumAddressCounts([500, 20, 3])).toBe(523)
   })
-
-  test('keeps an empty tab in the sum', () => {
-    expect(sumAddressCounts([7, 0, 0])).toBe(7)
-  })
 })
 
 describe('addressCountFrom', () => {

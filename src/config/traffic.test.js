@@ -620,7 +620,7 @@ describe('amendmentPlan', () => {
     )
   })
 
-  test('amends 20 and cancels 1 of 100 notifications at the c-012 defaults', () => {
+  test('amends 20 and cancels 1 of 100 notifications at the default shares', () => {
     const plans = Array.from({ length: 100 }, (_, iteration) =>
       amendmentPlan(iteration, TRAFFIC_DEFAULTS.liveAnimals)
     )
