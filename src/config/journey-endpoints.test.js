@@ -24,9 +24,9 @@ describe('STEP_ENDPOINTS', () => {
     expect(Object.keys(STEP_ENDPOINTS['live-animals'])).toEqual([
       'origin',
       'commodities',
+      'import-reason',
       'consignment-details',
       'identification',
-      'import-reason',
       'additional-details',
       'documents',
       'addresses',
