@@ -14,6 +14,7 @@ import {
 } from '../config/traffic.js'
 import { replaceBodyFrom } from '../lib/capture.js'
 import { journeyIdFrom } from '../lib/redirects.js'
+import { traderOrganisationHeaders } from '../config/trader-organisation.js'
 import { chunkEvenly, reEditPlan } from '../lib/traffic-shape.js'
 import { createBrowserSession } from './browser-session.js'
 import { confirmEventArrival } from './eventing.js'
@@ -44,7 +45,7 @@ const backendParams = (endpoint, headers = {}) => {
   markPhase()
 
   return {
-    headers,
+    headers: { ...traderOrganisationHeaders(), ...headers },
     tags: { endpoint, kind: 'api', name: endpoint }
   }
 }
