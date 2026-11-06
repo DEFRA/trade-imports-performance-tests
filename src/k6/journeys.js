@@ -8,6 +8,7 @@ import { TRAFFIC_CLASSES } from '../config/request-mix.js'
 import {
   amendmentPlan,
   isChosen,
+  SIGN_IN_AND_DASHBOARD_PAGES,
   sessionsFor,
   thinkSecondsMean
 } from '../config/traffic.js'
@@ -16,11 +17,7 @@ import { journeyIdFrom } from '../lib/redirects.js'
 import { chunkEvenly, reEditPlan } from '../lib/traffic-shape.js'
 import { createBrowserSession } from './browser-session.js'
 import { confirmEventArrival } from './eventing.js'
-import {
-  openInsDashboard,
-  SIGN_IN_AND_DASHBOARD_PAGES,
-  secondsSince
-} from './front-door.js'
+import { openInsDashboard, secondsSince } from './front-door.js'
 import { pagePath } from './journey-pages.js'
 import {
   createWalker,

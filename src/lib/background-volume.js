@@ -45,6 +45,15 @@ export const addressCountFrom = ({ heading, labelText }) => {
 }
 
 /**
+ * Adds up the address counts read off the address book's tabs.
+ *
+ * @param {number[]} tabCounts - The count read off each tab.
+ * @returns {number} The sum.
+ */
+export const sumAddressCounts = (tabCounts) =>
+  tabCounts.reduce((sum, count) => sum + count, 0)
+
+/**
  * Names a background address.
  *
  * @param {number} index - The address's number across the background volume, from 0.

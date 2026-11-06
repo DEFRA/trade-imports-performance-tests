@@ -1,6 +1,36 @@
 import { describe, expect, test } from 'vitest'
 
-import { addressIdFrom, worstCaseSearchTerm } from './address-book.js'
+import { ENDPOINTS } from '../config/endpoints.js'
+import {
+  ADDRESS_BOOK_SESSION_ENDPOINTS,
+  ADDRESS_TYPE_START_PATH,
+  ADDRESS_TYPES,
+  addAddressAnswers,
+  addressBookListPath,
+  addressIdFrom,
+  worstCaseSearchTerm
+} from './address-book.js'
+
+describe('ADDRESS_BOOK_SESSION_ENDPOINTS', () => {
+  test.each(Object.entries(ADDRESS_BOOK_SESSION_ENDPOINTS))(
+    'the %s request names %s, an endpoint in the catalogue',
+    (_request, endpoint) => {
+      expect(Object.keys(ENDPOINTS)).toContain(endpoint)
+    }
+  )
+})
+
+describe('addAddressAnswers', () => {
+  test('gives the address fields under the name, with Place of origin ticked', () => {
+    expect(
+      addAddressAnswers({ name: 'Old name', postcode: 'SW1A 1AA' }, 'New name')
+    ).toEqual({
+      name: 'New name',
+      postcode: 'SW1A 1AA',
+      roles: 'PLACE_OF_ORIGIN'
+    })
+  })
+})
 
 describe('worstCaseSearchTerm', () => {
   test('is exactly the length asked and starts with the fixed words', () => {
@@ -19,10 +49,10 @@ describe('worstCaseSearchTerm', () => {
 })
 
 describe('addressIdFrom', () => {
-  test('reads the id of the first address link', () => {
+  test('reads the id of the first address link, passing the start link by', () => {
     expect(
       addressIdFrom([
-        '/address-book/add',
+        ADDRESS_TYPE_START_PATH,
         '/address-book/abc-1',
         '/address-book/xyz'
       ])
@@ -31,9 +61,28 @@ describe('addressIdFrom', () => {
 
   test.each([
     [[]],
-    [['/address-book/add']],
+    [[ADDRESS_TYPE_START_PATH]],
     [['/address-book/abc-1/edit', '/address-book?page=2', '/']]
   ])('returns an empty string when no address is listed: %j', (hrefs) => {
     expect(addressIdFrom(hrefs)).toBe('')
+  })
+})
+
+describe('addressBookListPath', () => {
+  test.each([
+    ['ORIGIN_OR_CONSIGNOR', '/address-book?addressType=ORIGIN_OR_CONSIGNOR'],
+    [
+      'DESTINATION_CONSIGNEE_OR_IMPORTER',
+      '/address-book?addressType=DESTINATION_CONSIGNEE_OR_IMPORTER'
+    ],
+    ['BRANCH', '/address-book?addressType=BRANCH']
+  ])('gives the bare path of the %s tab', (addressType, path) => {
+    expect(addressBookListPath(addressType)).toBe(path)
+  })
+
+  test('adds the encoded search term after the tab', () => {
+    expect(
+      addressBookListPath(ADDRESS_TYPES.BRANCH, { searchTerm: 'Perf & Co' })
+    ).toBe('/address-book?addressType=BRANCH&q=Perf%20%26%20Co')
   })
 })

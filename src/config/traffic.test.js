@@ -620,7 +620,7 @@ describe('amendmentPlan', () => {
     )
   })
 
-  test('amends 20 and cancels 1 of 100 notifications at the c-012 defaults', () => {
+  test('amends 20 and cancels 1 of 100 notifications at the default shares', () => {
     const plans = Array.from({ length: 100 }, (_, iteration) =>
       amendmentPlan(iteration, TRAFFIC_DEFAULTS.liveAnimals)
     )
@@ -664,7 +664,7 @@ describe('scenarioPagesPerHour', () => {
       'live-animals': { animals: 1760, ins: 396 },
       'high-risk-plants': { plants: 1800, ins: 324 },
       'ins-front-door': { ins: 640 },
-      'ins-address-book': { ins: 240 }
+      'ins-address-book': { ins: 245 }
     })
   })
 })
