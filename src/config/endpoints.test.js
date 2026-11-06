@@ -24,7 +24,7 @@ describe('reference-data and read-model endpoints', () => {
 
 describe('ENDPOINTS', () => {
   test.each(Object.entries(ENDPOINTS))(
-    '%s is a page or an api call',
+    '%s has a known endpoint kind',
     (_name, kind) => {
       expect(Object.values(ENDPOINT_KINDS)).toContain(kind)
     }
@@ -34,6 +34,11 @@ describe('ENDPOINTS', () => {
 describe('kindOf', () => {
   test('returns page for a frontend page', () => {
     expect(kindOf('ins-dashboard')).toBe('page')
+  })
+
+  test('returns page for the address type page and its form save', () => {
+    expect(kindOf('ins-address-type')).toBe('page')
+    expect(kindOf('ins-address-type-save')).toBe('page')
   })
 
   test('returns page for an address-book form save', () => {

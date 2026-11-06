@@ -531,7 +531,7 @@ describe('spikeFactors', () => {
 
     expect(factors['live-animals']).toBeCloseTo(10.227, 3)
     expect(factors['high-risk-plants']).toBe(10)
-    expect(factors['ins-front-door']).toBeCloseTo(12.17, 2)
+    expect(factors['ins-front-door']).toBeCloseTo(12.1, 2)
     expect(factors['ins-address-book']).toBe(factors['ins-front-door'])
     expect(Object.keys(factors)).toHaveLength(4)
   })
@@ -687,7 +687,7 @@ describe('designTargetScenarios for spike and recovery', () => {
 
   test.each([
     ['high-risk-plants', 360],
-    ['ins-front-door', 974]
+    ['ins-front-door', 968]
   ])('steps %s to %i an hour for the spike', (scenario, target) => {
     expect(scenariosFor(SHAPES.SPIKE_RECOVERY)[scenario].stages[1]).toEqual({
       duration: '1s',
@@ -845,7 +845,7 @@ describe('profile lines', () => {
         scenarioSet: SCENARIOS
       })
     ).toBe(
-      'Spike: 10s at the stated capacities: animals 5 RPS (pace x10.23), plants 5 RPS (pace x10), INS front door 5 RPS including sign-in (pace x12.17), session path 25 RPS (derived); recovery judged over the 2m after the 60s allowed'
+      'Spike: 10s at the stated capacities: animals 5 RPS (pace x10.23), plants 5 RPS (pace x10), INS front door 5 RPS including sign-in (pace x12.1), session path 25 RPS (derived); recovery judged over the 2m after the 60s allowed'
     )
   })
 
@@ -1070,7 +1070,7 @@ describe('the combined run', () => {
 
       expect(factors['live-animals']).toBeCloseTo(17.045, 3)
       expect(factors['high-risk-plants']).toBeCloseTo(16.667, 3)
-      expect(factors['ins-front-door']).toBeCloseTo(20.284, 3)
+      expect(factors['ins-front-door']).toBeCloseTo(20.169, 3)
     })
 
     test('keeps the stated capacities without the parameter', () => {
@@ -1078,7 +1078,7 @@ describe('the combined run', () => {
 
       expect(factors['live-animals']).toBeCloseTo(10.227, 3)
       expect(factors['high-risk-plants']).toBe(10)
-      expect(factors['ins-front-door']).toBeCloseTo(12.17, 2)
+      expect(factors['ins-front-door']).toBeCloseTo(12.1, 2)
     })
   })
 
@@ -1108,7 +1108,7 @@ describe('the combined run', () => {
     })
 
     test('spikes the front door in the session spike', () => {
-      expect(paceOf('ins-front-door', 'session-spike')).toBeCloseTo(20.284, 3)
+      expect(paceOf('ins-front-door', 'session-spike')).toBeCloseTo(20.169, 3)
     })
   })
 
@@ -1141,8 +1141,8 @@ describe('the combined run', () => {
     })
 
     test('spikes the front door scenarios in the session spike', () => {
-      expect(stageTargetAt(scenarios['ins-front-door'], 10_105)).toBe(1623)
-      expect(stageTargetAt(scenarios['ins-address-book'], 10_105)).toBe(406)
+      expect(stageTargetAt(scenarios['ins-front-door'], 10_105)).toBe(1614)
+      expect(stageTargetAt(scenarios['ins-address-book'], 10_105)).toBe(403)
     })
 
     test('sizes virtual users for the extra iterations of each raised phase', () => {
@@ -1211,7 +1211,7 @@ describe('the combined run', () => {
           scenarioSet: SCENARIOS
         })
       ).toBe(
-        "Combined: live animals alone 30m, then both journeys at 44 and 36 notifications an hour for 30m, a 60s burst at 1.5x, a 10s spike on each journey in turn at its frontend's stated capacity (animals 5 RPS, pace x10.23; plants 5 RPS, pace x10), a 10s session-path spike at 25 RPS across the three frontends' own session stores (animals pace x17.05, plants x16.67, front door x20.28), then high-risk plants alone 30m; 5m settles between"
+        "Combined: live animals alone 30m, then both journeys at 44 and 36 notifications an hour for 30m, a 60s burst at 1.5x, a 10s spike on each journey in turn at its frontend's stated capacity (animals 5 RPS, pace x10.23; plants 5 RPS, pace x10), a 10s session-path spike at 25 RPS across the three frontends' own session stores (animals pace x17.05, plants x16.67, front door x20.17), then high-risk plants alone 30m; 5m settles between"
       )
     })
 

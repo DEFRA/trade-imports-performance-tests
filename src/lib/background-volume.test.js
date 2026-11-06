@@ -5,6 +5,7 @@ import {
   backgroundAddressName,
   createdLine,
   shortfallMessage,
+  sumAddressCounts,
   toCreate,
   volumeLine
 } from './background-volume.js'
@@ -39,6 +40,12 @@ describe('toCreate', () => {
 
   test('is limited by the cap', () => {
     expect(toCreate(42000, 0, 5000)).toBe(5000)
+  })
+})
+
+describe('sumAddressCounts', () => {
+  test('adds the counts of the tabs', () => {
+    expect(sumAddressCounts([500, 20, 3])).toBe(523)
   })
 })
 

@@ -3,39 +3,67 @@ import { Gauge } from 'k6/metrics'
 
 import { targetsFrom } from '../config/background-volume.js'
 import { PERF_ADDRESS } from '../config/smoke.js'
+import { ADDRESS_TYPES, addressBookListPath } from '../lib/address-book.js'
 import {
   addressCountFrom,
   backgroundAddressName,
   shortfallMessage,
+  sumAddressCounts,
   volumeLine
 } from '../lib/background-volume.js'
 import { createBrowserSession } from './browser-session.js'
+import { addAddressInSession, landedOnAddedTypeTab } from './front-door.js'
 import { READINESS_TAGS, ignoreStaleRedirects } from './readiness.js'
 import { serviceHttp } from './service-http.js'
 
 const HTTP_OK = 200
-const ADDRESS_BOOK = '/address-book'
-const RESULTS_LABEL = '[data-testid="address-book-results-label"]'
 
 const backgroundVolumeGauge = new Gauge('background_volume')
 
-const unreadable = (datastore) =>
-  new Error(`Could not read the background volume of ${datastore}`)
+const unreadableVolumeError = (datastore, detail) =>
+  new Error(`Could not read the background volume of ${datastore} (${detail})`)
 
 const totalOf = (url, datastore) => {
   const response = serviceHttp.get(url, { tags: READINESS_TAGS })
 
   if (response.status !== HTTP_OK) {
-    throw unreadable(datastore)
+    throw unreadableVolumeError(datastore, `status ${response.status}`)
   }
 
   const total = response.json('totalElements')
 
   if (!Number.isInteger(total)) {
-    throw unreadable(datastore)
+    throw unreadableVolumeError(datastore, `totalElements ${total}`)
   }
 
   return total
+}
+
+const tabAddressCount = (session, addressType) => {
+  const resultsLabel = '[data-testid="address-book-results-label"]'
+  const page = session.open(
+    addressBookListPath(addressType),
+    'ins-address-book'
+  )
+
+  if (page.status !== HTTP_OK) {
+    throw unreadableVolumeError(
+      'address-book',
+      `${addressType} status ${page.status}`
+    )
+  }
+
+  const labelText = page.html.find(resultsLabel).text()
+  const tabCount = addressCountFrom({ heading: page.heading, labelText })
+
+  if (tabCount === undefined) {
+    throw unreadableVolumeError(
+      'address-book',
+      `${addressType} heading "${page.heading}", results label "${labelText}"`
+    )
+  }
+
+  return tabCount
 }
 
 const addressCount = ({ urls, localhostAlias, credentials }) => {
@@ -46,30 +74,16 @@ const addressCount = ({ urls, localhostAlias, credentials }) => {
     staleRedirects: ignoreStaleRedirects,
     extraTags: READINESS_TAGS
   })
-  const page = session.open(ADDRESS_BOOK, 'ins-address-book')
 
-  if (page.status !== HTTP_OK) {
-    throw unreadable('address-book')
-  }
-
-  const count = addressCountFrom({
-    heading: page.heading,
-    labelText: page.html.find(RESULTS_LABEL).text()
-  })
-
-  if (count === undefined) {
-    throw unreadable('address-book')
-  }
-
-  return count
+  return sumAddressCounts(
+    Object.values(ADDRESS_TYPES).map((addressType) =>
+      tabAddressCount(session, addressType)
+    )
+  )
 }
 
 /**
  * Reads how much background volume each datastore holds.
- *
- * The journey backends and the dashboard read model answer a count over HTTP.
- * The address book is counted from the INS address-book page's results label.
- * Every request carries the readiness tags, so no threshold measures it.
  *
  * @param {object} options - Read settings.
  * @param {Record<string, string>} options.urls - `ins`, `animalsBackend`, `plantsBackend` and `insBackend` base URLs.
@@ -134,10 +148,7 @@ export const requireBackgroundVolume = (volume, backgroundVolume) => {
 }
 
 /**
- * Adds one background address through the INS add-address form.
- *
- * Signs in afresh and waits for nothing. With no picker handshake, the save
- * redirects to the address-book list.
+ * Adds one background address through the INS add-address form, signing in first.
  *
  * @param {object} options - Address settings.
  * @param {Record<string, string>} options.urls - Service base URLs, with `ins`.
@@ -159,19 +170,11 @@ export const addBackgroundAddress = ({
     credentials,
     staleRedirects
   })
-  const form = session.open(`${ADDRESS_BOOK}/add`, 'ins-address-add')
-  const saved = session.submitForm(
-    form,
-    {
-      ...PERF_ADDRESS,
-      name: backgroundAddressName(index),
-      addressLine1: `${index + 1} Background Road`
-    },
-    'ins-address-add-save'
+  const saved = addAddressInSession(
+    session,
+    { ...PERF_ADDRESS, addressLine1: `${index + 1} Background Road` },
+    backgroundAddressName(index)
   )
 
-  check(saved, {
-    'background address added': (page) =>
-      page.status === HTTP_OK && page.url.endsWith(ADDRESS_BOOK)
-  })
+  check(saved, { 'background address added': landedOnAddedTypeTab })
 }
