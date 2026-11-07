@@ -13,7 +13,7 @@ import {
   thinkSecondsMean
 } from '../config/traffic.js'
 import { replaceBodyFrom } from '../lib/capture.js'
-import { journeyIdFrom } from '../lib/redirects.js'
+import { journeyIdFrom, pathOf } from '../lib/redirects.js'
 import { chunkEvenly, reEditPlan } from '../lib/traffic-shape.js'
 import { createBrowserSession } from './browser-session.js'
 import { confirmEventArrival } from './eventing.js'
@@ -176,7 +176,7 @@ const createDraft = (run, walker, dashboard) => {
     'draft created through the frontend': (page) =>
       page.status === HTTP_OK &&
       id !== '' &&
-      page.url.endsWith(`/${run.journey.firstSavePage}`)
+      pathOf(page.url).endsWith(`/${run.journey.firstSavePage}`)
   })
 
   return { created, id }
@@ -333,7 +333,7 @@ const amend = (run, walker, crumb) => {
   check(review, {
     'amendment started': (page) =>
       page.status === HTTP_OK &&
-      page.url.endsWith(pagePath(context, 'notification-view'))
+      pathOf(page.url).endsWith(pagePath(context, 'notification-view'))
   })
 
   if (review.status !== HTTP_OK) {
