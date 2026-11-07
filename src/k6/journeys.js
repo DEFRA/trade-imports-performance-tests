@@ -324,18 +324,19 @@ const cancelAmendment = (run, context) => {
 const amend = (run, walker, crumb) => {
   const amending = walker.withClass(TRAFFIC_CLASSES.AMENDMENT)
   const context = contextFor(run, amending, run.id, AMENDMENT_SUFFIX)
-  const hub = amending.post(
+  const review = amending.post(
     `${context.base}/amend`,
     { crumb },
     run.shared.amend
   )
 
-  check(hub, {
+  check(review, {
     'amendment started': (page) =>
-      page.status === HTTP_OK && page.url.endsWith(context.base)
+      page.status === HTTP_OK &&
+      page.url.endsWith(pagePath(context, 'notification-view'))
   })
 
-  if (hub.status !== HTTP_OK) {
+  if (review.status !== HTTP_OK) {
     return
   }
 
