@@ -4,12 +4,11 @@ import { Counter } from 'k6/metrics'
 import { DATASTORES, indexesBuiltLine } from '../config/background-volume.js'
 import { mixTargetLine } from '../config/request-mix.js'
 import {
-  IDENTITY,
   JOURNEYS,
   PERF_ADDRESS,
   SCENARIOS,
   SETUP_TIMEOUT,
-  resolvePassword,
+  signInCredentials,
   notificationSplits,
   smokeScenarios
 } from '../config/smoke.js'
@@ -70,10 +69,7 @@ const environment = resolveEnvironment(__ENV)
 const ceilings = resolveRecordedCeilings(__ENV, environment)
 const requiredStubProfile = resolveRequiredStubProfile(__ENV)
 const localhostAlias = resolveLocalhostAlias(__ENV)
-const credentials = {
-  crn: IDENTITY.crn,
-  password: resolvePassword(__ENV)
-}
+const credentials = signInCredentials(__ENV)
 const model = resolveTrafficModel(__ENV, SMOKE_PROFILE)
 const staleRedirects = new Counter('stale_concurrency_redirects')
 

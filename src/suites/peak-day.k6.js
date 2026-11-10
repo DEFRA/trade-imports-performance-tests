@@ -14,11 +14,10 @@ import {
   peakDayScenarios
 } from '../config/peak-day.js'
 import {
-  IDENTITY,
   JOURNEYS,
   PERF_ADDRESS,
   SETUP_TIMEOUT,
-  resolvePassword
+  signInCredentials
 } from '../config/smoke.js'
 import { resolveRecordedCeilings } from '../config/stub-ceilings.js'
 import { STUBBED_INTEGRATIONS } from '../config/stub-profiles.js'
@@ -73,10 +72,7 @@ const model = resolveTrafficModel(
 )
 const ceilings = resolveRecordedCeilings(__ENV, environment)
 const localhostAlias = resolveLocalhostAlias(__ENV)
-const credentials = {
-  crn: IDENTITY.crn,
-  password: resolvePassword(__ENV)
-}
+const credentials = signInCredentials(__ENV)
 const staleRedirects = new Counter('stale_concurrency_redirects')
 
 const animals = JOURNEYS['live-animals']
