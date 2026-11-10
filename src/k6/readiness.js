@@ -39,7 +39,9 @@ const traderBackendAnswers = (url, organisationId) =>
 
 const referenceDataHasCountries = (url) => {
   try {
-    const response = serviceHttp.get(`${url}/countries`, { tags: READINESS_TAGS })
+    const response = serviceHttp.get(`${url}/countries`, {
+      tags: READINESS_TAGS
+    })
 
     if (response.status !== HTTP_OK) {
       return { ok: false, detail: String(response.status) }
