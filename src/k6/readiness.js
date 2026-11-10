@@ -15,53 +15,81 @@ export const READINESS_TAGS = { phase: 'readiness', name: 'readiness' }
 /** A stale-redirect counter that counts nothing, for requests outside the run. */
 export const ignoreStaleRedirects = { add: () => {} }
 
-const readBackend = (url, headers = {}) =>
-  serviceHttp.get(url, { tags: READINESS_TAGS, headers }).status === HTTP_OK
+const probeResult = (probe) => {
+  try {
+    return probe()
+  } catch (error) {
+    return { ok: false, detail: error.message }
+  }
+}
 
-const readTraderBackend = (url) =>
-  readBackend(url, traderOrganisationHeaders())
+const backendAnswers = (url, headers = {}) => {
+  try {
+    const response = serviceHttp.get(url, { tags: READINESS_TAGS, headers })
+    const status = response.status
+
+    return { ok: status === HTTP_OK, detail: String(status) }
+  } catch (error) {
+    return { ok: false, detail: error.message }
+  }
+}
+
+const traderBackendAnswers = (url, organisationId) =>
+  backendAnswers(url, traderOrganisationHeaders(organisationId))
 
 const referenceDataHasCountries = (url) => {
-  const response = serviceHttp.get(`${url}/countries`, { tags: READINESS_TAGS })
+  try {
+    const response = serviceHttp.get(`${url}/countries`, { tags: READINESS_TAGS })
 
-  return (
-    response.status === HTTP_OK &&
-    Array.isArray(response.json()) &&
-    response.json().length > 0
-  )
+    if (response.status !== HTTP_OK) {
+      return { ok: false, detail: String(response.status) }
+    }
+
+    const countries = response.json()
+
+    if (!Array.isArray(countries) || countries.length === 0) {
+      return { ok: false, detail: 'empty countries list' }
+    }
+
+    return { ok: true }
+  } catch (error) {
+    return { ok: false, detail: error.message }
+  }
 }
 
 const insSignsIn = ({ insUrl, localhostAlias, credentials }) => {
-  const session = createBrowserSession({
-    baseUrl: insUrl,
-    localhostAlias,
-    credentials,
-    staleRedirects: ignoreStaleRedirects,
-    extraTags: READINESS_TAGS
-  })
-  const page = session.open('/', 'ins-dashboard')
+  try {
+    const session = createBrowserSession({
+      baseUrl: insUrl,
+      localhostAlias,
+      credentials,
+      staleRedirects: ignoreStaleRedirects,
+      extraTags: READINESS_TAGS
+    })
+    const page = session.open('/', 'ins-dashboard')
+    const ok = page.status === HTTP_OK && page.heading === 'Dashboard'
 
-  return page.status === HTTP_OK && page.heading === 'Dashboard'
+    return { ok, detail: ok ? undefined : `status ${page.status}` }
+  } catch (error) {
+    return { ok: false, detail: error.message }
+  }
 }
 
 const insAddressBookAnswers = ({ insUrl, localhostAlias, credentials }) => {
-  const session = createBrowserSession({
-    baseUrl: insUrl,
-    localhostAlias,
-    credentials,
-    staleRedirects: ignoreStaleRedirects,
-    extraTags: READINESS_TAGS
-  })
-  const page = session.open(ADDRESS_BOOK_PATH, 'ins-address-book')
-
-  return page.status === HTTP_OK && page.heading === 'Address book'
-}
-
-const attempt = (probe) => {
   try {
-    return probe()
-  } catch {
-    return false
+    const session = createBrowserSession({
+      baseUrl: insUrl,
+      localhostAlias,
+      credentials,
+      staleRedirects: ignoreStaleRedirects,
+      extraTags: READINESS_TAGS
+    })
+    const page = session.open(ADDRESS_BOOK_PATH, 'ins-address-book')
+    const ok = page.status === HTTP_OK && page.heading === 'Address book'
+
+    return { ok, detail: ok ? undefined : `status ${page.status}` }
+  } catch (error) {
+    return { ok: false, detail: error.message }
   }
 }
 
@@ -69,11 +97,17 @@ const failedProbes = ({ urls, localhostAlias, credentials }) => {
   const probes = {
     'reference-data read': () => referenceDataHasCountries(urls.referenceData),
     'animals backend read': () =>
-      readTraderBackend(`${urls.animalsBackend}/notifications?page=1`),
+      traderBackendAnswers(
+        `${urls.animalsBackend}/notifications?page=1`,
+        credentials.organisationId
+      ),
     'plants backend read': () =>
-      readTraderBackend(`${urls.plantsBackend}/notifications?page=1`),
+      traderBackendAnswers(
+        `${urls.plantsBackend}/notifications?page=1`,
+        credentials.organisationId
+      ),
     'INS backend read': () =>
-      readBackend(`${urls.insBackend}/notifications?page=1`),
+      backendAnswers(`${urls.insBackend}/notifications?page=1`),
     'INS signed-in page': () =>
       insSignsIn({ insUrl: urls.ins, localhostAlias, credentials }),
     'address book read': () =>
@@ -81,8 +115,11 @@ const failedProbes = ({ urls, localhostAlias, credentials }) => {
   }
 
   return Object.entries(probes)
-    .filter(([, probe]) => !attempt(probe))
-    .map(([name]) => name)
+    .map(([name, probe]) => ({ name, ...probeResult(probe) }))
+    .filter((result) => !result.ok)
+    .map((result) =>
+      result.detail ? `${result.name} (${result.detail})` : result.name
+    )
 }
 
 /**
@@ -97,7 +134,7 @@ const failedProbes = ({ urls, localhostAlias, credentials }) => {
  * @param {object} options - Readiness settings.
  * @param {Record<string, string>} options.urls - `ins`, `animalsBackend`, `plantsBackend`, `insBackend` and `referenceData` base URLs.
  * @param {string} options.localhostAlias - The host that stands in for `localhost` in redirects.
- * @param {{ crn: string, password: string }} options.credentials - The stub identity to sign in with.
+ * @param {{ crn: string, password: string, organisationId: string }} options.credentials - The stub identity to sign in with.
  */
 export const waitForReadiness = ({ urls, localhostAlias, credentials }) => {
   const deadline = Date.now() + READINESS.timeoutSeconds * MS_PER_SECOND

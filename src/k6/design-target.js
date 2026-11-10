@@ -35,13 +35,12 @@ import {
 } from '../config/design-target.js'
 import { mixTargetLine } from '../config/request-mix.js'
 import {
-  IDENTITY,
   JOURNEYS,
   PERF_ADDRESS,
   SCENARIOS,
   SETUP_TIMEOUT,
   notificationSplits,
-  resolvePassword
+  signInCredentials
 } from '../config/smoke.js'
 import {
   resilienceProfileLine,
@@ -239,7 +238,7 @@ export const createDesignTargetRun = ({ shape, env }) => {
   const ceilings = resolveRecordedCeilings(env, environment)
   const localhostAlias = resolveLocalhostAlias(env)
   const toxiproxyUrl = resolveToxiproxyUrl(env, environment)
-  const credentials = { crn: IDENTITY.crn, password: resolvePassword(env) }
+  const credentials = signInCredentials(env)
   const staleRedirects = new Counter('stale_concurrency_redirects')
   const urls = resolveUrls(env)
   const animals = JOURNEYS['live-animals']

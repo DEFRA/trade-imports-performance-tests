@@ -7,7 +7,7 @@ import {
   resolveCeilingModel,
   resolveDefraIdClient
 } from '../config/stub-ceilings.js'
-import { IDENTITY, SETUP_TIMEOUT, resolvePassword } from '../config/smoke.js'
+import { SETUP_TIMEOUT, signInCredentials } from '../config/smoke.js'
 import {
   SLA_PROFILE,
   STUBBED_INTEGRATIONS,
@@ -35,10 +35,7 @@ import {
 
 const environment = resolveEnvironment(__ENV)
 const requiredStubProfile = resolveRequiredStubProfile(__ENV) ?? SLA_PROFILE
-const credentials = {
-  crn: IDENTITY.crn,
-  password: resolvePassword(__ENV)
-}
+const credentials = signInCredentials(__ENV)
 const model = resolveCeilingModel(__ENV)
 const groups = resolveCeilingGroups(__ENV)
 const { scenarios, stepScenarios, ladders } = ceilingScenarios(model, groups)

@@ -1,15 +1,11 @@
 import { describe, expect, test } from 'vitest'
 
-import {
-  TRADER_ORGANISATION_ID,
-  TRADER_ORGANISATION_ID_HEADER,
-  traderOrganisationHeaders
-} from './trader-organisation.js'
+import { traderOrganisationHeaders } from './trader-organisation.js'
 
 describe('traderOrganisationHeaders', () => {
-  test('sends the default E2E organisation id in trader headers', () => {
-    expect(traderOrganisationHeaders()).toEqual({
-      [TRADER_ORGANISATION_ID_HEADER]: TRADER_ORGANISATION_ID
+  test('returns the Trade-Imports-Organisation-Id header carrying the E2E stub user organisation 5900001', () => {
+    expect(traderOrganisationHeaders('5900001')).toEqual({
+      'Trade-Imports-Organisation-Id': '5900001'
     })
   })
 })

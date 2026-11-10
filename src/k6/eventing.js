@@ -24,7 +24,6 @@ import {
   settleLine,
   trackBacklog
 } from '../lib/eventing.js'
-import { traderOrganisationHeaders } from '../config/trader-organisation.js'
 import { READINESS_TAGS } from './readiness.js'
 import { serviceHttp } from './service-http.js'
 
@@ -47,9 +46,9 @@ const drainSecondsGauge = new Gauge('eventing_backlog_drain_seconds')
 const drained = new Rate('eventing_backlog_drained')
 const peakPerSecondGauge = new Gauge('service_bus_peak_per_second')
 
-const readBody = (url, headers = {}) => {
+const readBody = (url) => {
   try {
-    const response = serviceHttp.get(url, { tags: READINESS_TAGS, headers })
+    const response = serviceHttp.get(url, { tags: READINESS_TAGS })
 
     return response.status === HTTP_OK ? response.json() : null
   } catch {
@@ -147,8 +146,7 @@ export const confirmEventArrival = ({
   referenceNumber
 }) => {
   const events = readBody(
-    `${backendUrl}/notifications/${referenceNumber}/outbox-events`,
-    traderOrganisationHeaders()
+    `${backendUrl}/notifications/${referenceNumber}/outbox-events`
   )
   const startedAt = Date.now()
 
