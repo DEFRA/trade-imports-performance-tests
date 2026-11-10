@@ -9,11 +9,10 @@ import {
   targetsFrom
 } from '../config/background-volume.js'
 import {
-  IDENTITY,
   JOURNEYS,
   PERF_ADDRESS,
   SETUP_TIMEOUT,
-  resolvePassword
+  signInCredentials
 } from '../config/smoke.js'
 import { resolveRecordedCeilings } from '../config/stub-ceilings.js'
 import { STUBBED_INTEGRATIONS } from '../config/stub-profiles.js'
@@ -53,10 +52,7 @@ import {
 const environment = resolveEnvironment(__ENV)
 const ceilings = resolveRecordedCeilings(__ENV, environment)
 const localhostAlias = resolveLocalhostAlias(__ENV)
-const credentials = {
-  crn: IDENTITY.crn,
-  password: resolvePassword(__ENV)
-}
+const credentials = signInCredentials(__ENV)
 const model = resolveTrafficModel(__ENV, BACKGROUND_VOLUME_PROFILE)
 const staleRedirects = new Counter('stale_concurrency_redirects')
 

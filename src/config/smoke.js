@@ -4,7 +4,22 @@ import { arrivalScenarios } from './traffic.js'
 
 const DEFAULT_STUB_PASSWORD = 'Password123'
 
-export const IDENTITY = Object.freeze({ crn: '2100010101' })
+export const IDENTITY = Object.freeze({
+  crn: '2100010101',
+  organisationId: '5900001'
+})
+
+/**
+ * The stub identity each suite signs in with, including its organisation.
+ *
+ * @param {Record<string, string | undefined>} env - k6's `__ENV`, or any map of environment variables.
+ * @returns {{ crn: string, password: string, organisationId: string }}
+ */
+export const signInCredentials = (env) => ({
+  crn: IDENTITY.crn,
+  password: resolvePassword(env),
+  organisationId: IDENTITY.organisationId
+})
 
 export const MAX_REDIRECT_HOPS = 10
 
