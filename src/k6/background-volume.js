@@ -3,6 +3,7 @@ import { Gauge } from 'k6/metrics'
 
 import { targetsFrom } from '../config/background-volume.js'
 import { PERF_ADDRESS } from '../config/smoke.js'
+import { traderOrganisationHeaders } from '../config/trader-organisation.js'
 import { ADDRESS_TYPES, addressBookListPath } from '../lib/address-book.js'
 import {
   addressCountFrom,
@@ -23,8 +24,8 @@ const backgroundVolumeGauge = new Gauge('background_volume')
 const unreadableVolumeError = (datastore, detail) =>
   new Error(`Could not read the background volume of ${datastore} (${detail})`)
 
-const totalOf = (url, datastore) => {
-  const response = serviceHttp.get(url, { tags: READINESS_TAGS })
+const totalOf = (url, datastore, headers = {}) => {
+  const response = serviceHttp.get(url, { tags: READINESS_TAGS, headers })
 
   if (response.status !== HTTP_OK) {
     throw unreadableVolumeError(datastore, `status ${response.status}`)
@@ -88,7 +89,7 @@ const addressCount = ({ urls, localhostAlias, credentials }) => {
  * @param {object} options - Read settings.
  * @param {Record<string, string>} options.urls - `ins`, `animalsBackend`, `plantsBackend` and `insBackend` base URLs.
  * @param {string} options.localhostAlias - The host that stands in for `localhost` in redirects.
- * @param {{ crn: string, password: string }} options.credentials - The stub identity to sign in with.
+ * @param {{ crn: string, password: string, organisationId: string }} options.credentials - The stub identity to sign in with. The dashboard read model is counted for its organisation.
  * @returns {Record<string, number>} The count in each datastore.
  * @throws {Error} When a datastore's count cannot be read.
  */
@@ -107,7 +108,8 @@ export const measureBackgroundVolume = ({
   ),
   'dashboard-read-model': totalOf(
     `${urls.insBackend}/notifications?page=1`,
-    'dashboard-read-model'
+    'dashboard-read-model',
+    traderOrganisationHeaders(credentials.organisationId)
   ),
   'address-book': addressCount({ urls, localhostAlias, credentials })
 })

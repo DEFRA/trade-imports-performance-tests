@@ -543,7 +543,8 @@ export const notificationJourney = (options) => {
     confirmEventArrival({
       backendUrl: run.urls.backend,
       insBackendUrl: options.insBackendUrl,
-      referenceNumber: run.id
+      referenceNumber: run.id,
+      organisationId: run.credentials.organisationId
     })
   }
 
