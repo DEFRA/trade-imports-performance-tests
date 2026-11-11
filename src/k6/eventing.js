@@ -24,6 +24,7 @@ import {
   settleLine,
   trackBacklog
 } from '../lib/eventing.js'
+import { traderOrganisationHeaders } from '../config/trader-organisation.js'
 import { READINESS_TAGS } from './readiness.js'
 import { serviceHttp } from './service-http.js'
 
@@ -46,9 +47,9 @@ const drainSecondsGauge = new Gauge('eventing_backlog_drain_seconds')
 const drained = new Rate('eventing_backlog_drained')
 const peakPerSecondGauge = new Gauge('service_bus_peak_per_second')
 
-const readBody = (url) => {
+const readBody = (url, headers = {}) => {
   try {
-    const response = serviceHttp.get(url, { tags: READINESS_TAGS })
+    const response = serviceHttp.get(url, { tags: READINESS_TAGS, headers })
 
     return response.status === HTTP_OK ? response.json() : null
   } catch {
@@ -106,12 +107,18 @@ const readNow = ({ urls }) => ({
  */
 export const readEventingStart = ({ urls }) => readNow({ urls })
 
-const awaitArrival = ({ insBackendUrl, referenceNumber, version }) => {
+const awaitArrival = ({
+  insBackendUrl,
+  referenceNumber,
+  organisationId,
+  version
+}) => {
   const deadline = Date.now() + ARRIVAL_TIMEOUT_SECONDS * MS_PER_SECOND
   const hasReached = () =>
     hasArrived(
       readBody(
-        `${insBackendUrl}/notifications?referenceNumber=${referenceNumber}`
+        `${insBackendUrl}/notifications?referenceNumber=${referenceNumber}`,
+        traderOrganisationHeaders(organisationId)
       ),
       version
     )
@@ -139,11 +146,13 @@ const awaitArrival = ({ insBackendUrl, referenceNumber, version }) => {
  * @param {string} options.backendUrl - The journey backend's base URL.
  * @param {string} options.insBackendUrl - The INS backend's base URL, which holds the read model.
  * @param {string} options.referenceNumber - The notification's reference number.
+ * @param {string} options.organisationId - The organisation that raised the notification.
  */
 export const confirmEventArrival = ({
   backendUrl,
   insBackendUrl,
-  referenceNumber
+  referenceNumber,
+  organisationId
 }) => {
   const events = readBody(
     `${backendUrl}/notifications/${referenceNumber}/outbox-events`
@@ -163,7 +172,12 @@ export const confirmEventArrival = ({
     return
   }
 
-  const arrived = awaitArrival({ insBackendUrl, referenceNumber, version })
+  const arrived = awaitArrival({
+    insBackendUrl,
+    referenceNumber,
+    organisationId,
+    version
+  })
 
   eventArrivals.add(arrived)
 

@@ -109,7 +109,10 @@ const failedProbes = ({ urls, localhostAlias, credentials }) => {
         credentials.organisationId
       ),
     'INS backend read': () =>
-      backendAnswers(`${urls.insBackend}/notifications?page=1`),
+      traderBackendAnswers(
+        `${urls.insBackend}/notifications?page=1`,
+        credentials.organisationId
+      ),
     'INS signed-in page': () =>
       insSignsIn({ insUrl: urls.ins, localhostAlias, credentials }),
     'address book read': () =>
