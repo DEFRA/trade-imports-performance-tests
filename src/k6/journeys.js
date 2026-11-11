@@ -13,7 +13,8 @@ import {
   thinkSecondsMean
 } from '../config/traffic.js'
 import { replaceBodyFrom } from '../lib/capture.js'
-import { journeyIdFrom } from '../lib/redirects.js'
+import { journeyIdFrom, pathOf } from '../lib/redirects.js'
+import { traderOrganisationHeaders } from '../config/trader-organisation.js'
 import { chunkEvenly, reEditPlan } from '../lib/traffic-shape.js'
 import { createBrowserSession } from './browser-session.js'
 import { confirmEventArrival } from './eventing.js'
@@ -40,11 +41,11 @@ const CANCEL_AMEND_PAGES = 2
 const RESUBMIT_AMEND_PAGES = 3
 const AMENDMENT_SUFFIX = '-A'
 
-const backendParams = (endpoint, headers = {}) => {
+const backendParams = (organisationId, endpoint, headers = {}) => {
   markPhase()
 
   return {
-    headers,
+    headers: { ...traderOrganisationHeaders(organisationId), ...headers },
     tags: { endpoint, kind: 'api', name: endpoint }
   }
 }
@@ -64,20 +65,20 @@ const capturedBodyFrom = (fulfilments, list) => {
   }
 }
 
-const replayCapturedSave = ({ journey, backendUrl, id }) => {
+const replayCapturedSave = ({ journey, backendUrl, id, organisationId }) => {
   const prefix = journey.endpointPrefix
   const notificationUrl = `${backendUrl}/notifications/${id}`
 
   const fulfilments = recorded(
     serviceHttp.get(
       `${notificationUrl}/fulfilments`,
-      backendParams(`${prefix}-backend-fulfilments`)
+      backendParams(organisationId, `${prefix}-backend-fulfilments`)
     )
   )
   const list = recorded(
     serviceHttp.get(
       `${backendUrl}/notifications?referenceNumber=${id}`,
-      backendParams(`${prefix}-backend-list`)
+      backendParams(organisationId, `${prefix}-backend-list`)
     )
   )
 
@@ -107,7 +108,7 @@ const replayCapturedSave = ({ journey, backendUrl, id }) => {
     serviceHttp.put(
       notificationUrl,
       JSON.stringify(body),
-      backendParams(`${prefix}-backend-replace`, JSON_HEADERS)
+      backendParams(organisationId, `${prefix}-backend-replace`, JSON_HEADERS)
     )
   )
 
@@ -176,7 +177,7 @@ const createDraft = (run, walker, dashboard) => {
     'draft created through the frontend': (page) =>
       page.status === HTTP_OK &&
       id !== '' &&
-      page.url.endsWith(`/${run.journey.firstSavePage}`)
+      pathOf(page.url).endsWith(`/${run.journey.firstSavePage}`)
   })
 
   return { created, id }
@@ -225,7 +226,8 @@ const runDraftChunk = (run, context, chunk, landed, replayAfterFirst) => {
   replayCapturedSave({
     journey: run.journey,
     backendUrl: run.urls.backend,
-    id: run.id
+    id: run.id,
+    organisationId: run.credentials.organisationId
   })
 
   return runSteps(context, rest, undefined)
@@ -324,18 +326,19 @@ const cancelAmendment = (run, context) => {
 const amend = (run, walker, crumb) => {
   const amending = walker.withClass(TRAFFIC_CLASSES.AMENDMENT)
   const context = contextFor(run, amending, run.id, AMENDMENT_SUFFIX)
-  const hub = amending.post(
+  const review = amending.post(
     `${context.base}/amend`,
     { crumb },
     run.shared.amend
   )
 
-  check(hub, {
+  check(review, {
     'amendment started': (page) =>
-      page.status === HTTP_OK && page.url.endsWith(context.base)
+      page.status === HTTP_OK &&
+      pathOf(page.url).endsWith(pagePath(context, 'notification-view'))
   })
 
-  if (hub.status !== HTTP_OK) {
+  if (review.status !== HTTP_OK) {
     return
   }
 
@@ -502,7 +505,7 @@ const prepareRun = (options) => {
  * @param {object} options.model - A resolved traffic model.
  * @param {string} options.backendUrl - The journey backend's base URL.
  * @param {{ ins: string, frontend: string }} options.urls - The INS and journey frontend base URLs.
- * @param {{ crn: string, password: string }} options.credentials - The stub identity to sign in with.
+ * @param {{ crn: string, password: string, organisationId: string }} options.credentials - The stub identity to sign in with.
  * @param {string} options.localhostAlias - The host that stands in for `localhost` in redirects.
  * @param {{ add: (value: number) => void }} options.staleRedirects - Counts handled stale-concurrency redirects.
  * @param {string} options.addressName - The name of the address the pickers choose.
