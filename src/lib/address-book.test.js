@@ -5,6 +5,8 @@ import {
   ADDRESS_BOOK_SESSION_ENDPOINTS,
   ADDRESS_TYPE_START_PATH,
   ADDRESS_TYPES,
+  DECLARED_ROLES_BY_ADDRESS_TYPE,
+  SESSION_ADDRESS_TYPE,
   addAddressAnswers,
   addressBookListPath,
   addressIdFrom,
@@ -21,14 +23,47 @@ describe('ADDRESS_BOOK_SESSION_ENDPOINTS', () => {
 })
 
 describe('addAddressAnswers', () => {
-  test('gives the address fields under the name, with Place of origin ticked', () => {
+  test('gives the address fields under the name, ticking every role declared for the sending type', () => {
     expect(
-      addAddressAnswers({ name: 'Old name', postcode: 'SW1A 1AA' }, 'New name')
+      addAddressAnswers(
+        { name: 'Old name', postcode: 'SW1A 1AA' },
+        'New name',
+        ADDRESS_TYPES.ORIGIN_OR_CONSIGNOR
+      )
     ).toEqual({
       name: 'New name',
       postcode: 'SW1A 1AA',
-      roles: 'PLACE_OF_ORIGIN'
+      roles: ['PLACE_OF_ORIGIN', 'CONSIGNOR']
     })
+  })
+
+  test('gives the address fields under the name, ticking every role declared for the receiving type', () => {
+    expect(
+      addAddressAnswers(
+        { name: 'Old name', postcode: 'SW1A 1AA' },
+        'New name',
+        ADDRESS_TYPES.DESTINATION_CONSIGNEE_OR_IMPORTER
+      )
+    ).toEqual({
+      name: 'New name',
+      postcode: 'SW1A 1AA',
+      roles: ['CONSIGNEE', 'IMPORTER', 'PLACE_OF_DESTINATION']
+    })
+  })
+})
+
+describe('DECLARED_ROLES_BY_ADDRESS_TYPE', () => {
+  test.each(Object.keys(DECLARED_ROLES_BY_ADDRESS_TYPE))(
+    'declares roles for %s, one of ADDRESS_TYPES',
+    (addressType) => {
+      expect(Object.values(ADDRESS_TYPES)).toContain(addressType)
+    }
+  )
+
+  test('declares at least one role for the type the address-book session and background filler add under', () => {
+    expect(
+      DECLARED_ROLES_BY_ADDRESS_TYPE[SESSION_ADDRESS_TYPE].length
+    ).toBeGreaterThan(0)
   })
 })
 
@@ -84,5 +119,24 @@ describe('addressBookListPath', () => {
     expect(
       addressBookListPath(ADDRESS_TYPES.BRANCH, { searchTerm: 'Perf & Co' })
     ).toBe('/address-book?addressType=BRANCH&q=Perf%20%26%20Co')
+  })
+
+  test('adds the role between the tab and the encoded search term', () => {
+    expect(
+      addressBookListPath(ADDRESS_TYPES.ORIGIN_OR_CONSIGNOR, {
+        role: 'CONSIGNOR',
+        searchTerm: 'Perf & Co'
+      })
+    ).toBe(
+      '/address-book?addressType=ORIGIN_OR_CONSIGNOR&role=CONSIGNOR&q=Perf%20%26%20Co'
+    )
+  })
+
+  test('adds the role after the bare tab when no search term is given', () => {
+    expect(
+      addressBookListPath(ADDRESS_TYPES.ORIGIN_OR_CONSIGNOR, {
+        role: 'CONSIGNOR'
+      })
+    ).toBe('/address-book?addressType=ORIGIN_OR_CONSIGNOR&role=CONSIGNOR')
   })
 })
