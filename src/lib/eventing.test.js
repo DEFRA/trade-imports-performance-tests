@@ -33,7 +33,7 @@ describe('forwardedCountFrom', () => {
   test('reads the COUNT measurement', () => {
     expect(
       forwardedCountFrom({
-        name: 'notification.sqs.messages',
+        name: 'notification.message',
         measurements: [{ statistic: 'COUNT', value: 12 }]
       })
     ).toBe(12)

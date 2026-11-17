@@ -731,7 +731,7 @@ A total delta on the read model would not do: it also holds drafts and every oth
 
 ### How the Service Bus stand-in is counted
 
-The gateway's `notification.sqs.messages` counters are enabled and readable at `/metrics/notification.sqs.messages`. The run reads the v0.1.0 and v0.2.0 forwarded counts in `setup()`, and again at the end once the path has settled: the backlog (`GET /queue/notifications`, visible plus in flight) is at or below where it started and the v0.1.0 count has not changed across two reads 2 seconds apart, for up to 120 seconds. The difference is the gauge `service_bus_forwarded`, tagged `schema_version`, counted against `external_events_published`.
+The gateway's `notification.message` counters are enabled and readable at `/metrics/notification.message`. The run reads the v0.1.0 and v0.2.0 forwarded counts in `setup()`, and again at the end once the path has settled: the backlog (`GET /queue/notifications`, visible plus in flight) is at or below where it started and the v0.1.0 count has not changed across two reads 2 seconds apart, for up to 120 seconds. The difference is the gauge `service_bus_forwarded`, tagged `schema_version`, counted against `external_events_published`.
 
 The gateway sends every event to Service Bus twice, once as v0.1.0 and once as v0.2.0 (finding req-061, out of scope here). The report counts what arrives and says so: 644 events forwarded is 1,288 messages.
 

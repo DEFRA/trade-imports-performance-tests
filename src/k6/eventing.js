@@ -60,7 +60,7 @@ const readBody = (url, headers = {}) => {
 const readForwardedCount = ({ urls, version }) =>
   forwardedCountFrom(
     readBody(
-      `${urls.gateway}/metrics/notification.sqs.messages?tag=outcome:forwarded&tag=schemaVersion:${version}`
+      `${urls.gateway}/metrics/notification.message?tag=outcome:forwarded&tag=schema.version:${version}`
     )
   )
 

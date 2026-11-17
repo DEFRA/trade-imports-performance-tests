@@ -22,7 +22,7 @@ const isCount = (value) => Number.isInteger(value) && value >= 0
 
 /**
  * Reads the forwarded count out of the gateway's actuator answer for one
- * `notification.sqs.messages` counter.
+ * `notification.message` counter.
  *
  * @param {{ measurements?: Array<{ statistic: string, value: number }> } | null | undefined} body - The parsed JSON.
  * @returns {number | null} The counter's value, or null when the answer has no count.
