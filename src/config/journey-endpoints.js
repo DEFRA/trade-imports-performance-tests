@@ -40,8 +40,7 @@ export const STEP_ENDPOINTS = Object.freeze({
       ...page(ANIMALS, 'transit-countries'),
       add: `${ANIMALS}-transit-countries-add`
     },
-    transporters: page(ANIMALS, 'transporters'),
-    contact: page(ANIMALS, 'contact')
+    transporters: page(ANIMALS, 'transporters')
   }),
   'high-risk-plants': Object.freeze({
     'commodity-type': page(PLANTS, 'commodity-type'),
