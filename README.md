@@ -441,14 +441,14 @@ For every page request it handles, `trade-imports-animals-frontend` and `trade-i
 
 A page request is every request except `GET /health`, `GET /favicon.ico`, the static assets and `/call-counts` itself. The frontend keeps running totals for each route and serves them at `GET /call-counts`; `DELETE /call-counts` clears them. Two environment variables switch the counts on:
 
-| Variable                       | Default                               | Effect                                                                                                |
-| ------------------------------ | ------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `CALL_COUNTS_ENDPOINT_ENABLED` | on in the workspace stack, off on CDP | Serves `/call-counts`, which needs no sign-in                                                         |
-| `CALL_COUNTS_METRICS_ENABLED`  | off locally, on on CDP                | Writes one EMF document per page request: `BackendCalls` and `SessionResolutions`, `RequestKind=page` |
+| Variable                       | Default                               | Effect                                                                                                                             |
+| ------------------------------ | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `CALL_COUNTS_ENDPOINT_ENABLED` | on in the workspace stack, off on CDP | Serves `/call-counts`, which needs no sign-in                                                                                      |
+| `CALL_COUNTS_METRICS_ENABLED`  | off locally, on on CDP                | Writes one EMF document per page request: `page.request.backend.calls` and `page.request.session.resolutions`, `request.kind=page` |
 
-`BackendCalls` counts every call the frontend makes through its backend client, which includes the calls the upload page makes to cdp-uploader: the frontend routes those through the same client. So a journey that uploads a document reads higher than one backend call a page, and the `backendCallsPerPage` design target of 1 is the figure the report measures that against rather than a description of what a page does today.
+`page.request.backend.calls` counts every call the frontend makes through its backend client, which includes the calls the upload page makes to cdp-uploader: the frontend routes those through the same client. So a journey that uploads a document reads higher than one backend call a page, and the `backendCallsPerPage` design target of 1 is the figure the report measures that against rather than a description of what a page does today.
 
-Switching the endpoint on in a CDP environment is `cdp-app-config`, which a person changes. Until then the report reads the same ratios from CloudWatch: `Sum` over `SampleCount` of `BackendCalls` and of `SessionResolutions` gives the ratio a page.
+Switching the endpoint on in a CDP environment is `cdp-app-config`, which a person changes. Until then the report reads the same ratios from CloudWatch: `Sum` over `SampleCount` of `page.request.backend.calls` and of `page.request.session.resolutions` gives the ratio a page.
 
 Smoke, every design-target suite and peak day clear the counts at the end of `setup()`, after every set-up read, and read them first thing in `teardown()`. For each journey they log its ratios against D1, D2 and D3 and record gauges:
 

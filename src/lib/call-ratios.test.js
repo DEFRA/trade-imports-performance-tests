@@ -160,7 +160,7 @@ describe('notMeasuredLine', () => {
         status: 404
       })
     ).toBe(
-      'Call ratio live-animals: not measured here: trade-imports-animals-frontend does not expose /call-counts. On the platform the external call report reads its BackendCalls and SessionResolutions from CloudWatch'
+      'Call ratio live-animals: not measured here: trade-imports-animals-frontend does not expose /call-counts. On the platform the external call report reads its page.request.backend.calls and page.request.session.resolutions from CloudWatch'
     )
   })
 
