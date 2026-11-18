@@ -2,5 +2,13 @@
   "$schema": "https://github.com/IBM/audit-ci/raw/main/docs/schema.json",
   "high": true,
   "report-type": "summary",
-  "allowlist": []
+  "allowlist": [
+    {
+      "GHSA-fc5q-39xc-vjpf": {
+        "active": true,
+        "notes": "picomatch ReDoS through repeated extglobs. Reached only through dev tooling (vitest, vite, tinyglobby, neostandard), never at runtime, and no picomatch release fixes it yet. Owner: Amir Naveed",
+        "expiry": "2027-02-17"
+      }
+    }
+  ]
 }
