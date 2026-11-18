@@ -1,5 +1,8 @@
 import { PAGE_REQUEST_METRICS } from '../config/call-ratios.js'
-import { EXTERNAL_CALL_STATISTICS } from '../config/external-calls.js'
+import {
+  EXTERNAL_CALL_STATISTICS,
+  METRIC_SCHEMES
+} from '../config/external-calls.js'
 import { PROFILES, QUANTILES } from '../config/stub-profiles.js'
 import { subMetricKey } from '../config/thresholds.js'
 
@@ -57,6 +60,31 @@ const pageRequestQueries = ({ service }, index, period) =>
     }
   }))
 
+const externalCallQueries = (
+  { service, dependency, operation, scheme },
+  index,
+  period
+) => {
+  const names = METRIC_SCHEMES[scheme]
+
+  return EXTERNAL_CALL_STATISTICS.map(({ key, metric, stat }) => ({
+    Id: queryId(index, key),
+    ReturnData: true,
+    MetricStat: {
+      Metric: {
+        Namespace: service,
+        MetricName: names[metric],
+        Dimensions: [
+          { Name: names.dependency, Value: dependency },
+          { Name: names.operation, Value: operation }
+        ]
+      },
+      Period: period,
+      Stat: stat
+    }
+  }))
+}
+
 /**
  * Builds the CloudWatch `GetMetricData` request for a run's external calls.
  *
@@ -65,7 +93,7 @@ const pageRequestQueries = ({ service }, index, period) =>
  * statistic comes back as one datapoint.
  *
  * @param {object} options - The request.
- * @param {Array<{ service: string, dependency: string, operation: string }>} options.externalCalls - The calls to read.
+ * @param {Array<{ service: string, dependency: string, operation: string, scheme: string }>} options.externalCalls - The calls to read, each by the metric and dimension names its `METRIC_SCHEMES` entry gives.
  * @param {string} options.runStartedAt - The run's start, as an ISO date-time.
  * @param {string} options.runEndedAt - The run's end, as an ISO date-time.
  * @param {Array<{ journey: string, service: string }>} [options.pageRequestServices] - The frontends whose per-page-request counts to read too.
@@ -98,23 +126,8 @@ export const metricDataRequest = ({
     EndTime: new Date(end).toISOString(),
     ScanBy: 'TimestampAscending',
     MetricDataQueries: [
-      ...externalCalls.flatMap(({ service, dependency, operation }, index) =>
-        EXTERNAL_CALL_STATISTICS.map(({ key, metric, stat }) => ({
-          Id: queryId(index, key),
-          ReturnData: true,
-          MetricStat: {
-            Metric: {
-              Namespace: service,
-              MetricName: metric,
-              Dimensions: [
-                { Name: 'Dependency', Value: dependency },
-                { Name: 'Operation', Value: operation }
-              ]
-            },
-            Period: period,
-            Stat: stat
-          }
-        }))
+      ...externalCalls.flatMap((externalCall, index) =>
+        externalCallQueries(externalCall, index, period)
       ),
       ...pageRequestServices.flatMap((pageRequestService, index) =>
         pageRequestQueries(pageRequestService, index, period)

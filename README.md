@@ -375,39 +375,37 @@ The verdict is reported, never gated: it does not fail the run. The stub-ceiling
 
 The stubs can only be as realistic as the figures behind them. So every INS service that calls a system outside the boundary measures each call, and a load run's report reads the figures back.
 
-Each service writes one CloudWatch Embedded Metric Format (EMF) document for each call. The metric names, dimensions and values are the same in every service:
+Each service publishes to CloudWatch, in a namespace that is its CDP name, a duration and a failure metric for each call, with one dimension set naming the dependency and the operation. Services publish them under one of two schemes, and `METRIC_SCHEMES` in `src/config/external-calls.js` holds the names of each:
 
-| Part                   | Value                                                                                                                                       |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Namespace              | The service's CDP name, for example `trade-imports-reference-data`                                                                          |
-| Dimensions             | Exactly one set: `Dependency` and `Operation`                                                                                               |
-| `ExternalCallDuration` | Milliseconds, one raw value for each call. CloudWatch gives `p50`, `p95` and `p99` from the raw values, and `SampleCount` is the call count |
-| `ExternalCallFailure`  | Count, 1 for a failed call and 0 for a successful one. Its `Average` is the error rate                                                      |
-| `Outcome`              | A property: `success` or `failure`                                                                                                          |
-| `Interface`            | A property: the volumetrics section 9.3 SYN ID, left out where 9.3 gives none                                                               |
+| Scheme   | Services                                                                                        | Duration metric          | Failure metric          | Dimensions                |
+| -------- | ----------------------------------------------------------------------------------------------- | ------------------------ | ----------------------- | ------------------------- |
+| `pascal` | `trade-imports-ins-frontend`, `trade-imports-animals-frontend`, `trade-imports-plants-frontend` | `ExternalCallDuration`   | `ExternalCallFailure`   | `Dependency`, `Operation` |
+| `dotted` | `trade-imports-reference-data`, `trade-imports-dynamics-gateway`                                | `external.call.duration` | `external.call.failure` | `dependency`, `operation` |
 
-These are the calls, and their names. Use the strings exactly:
+In both schemes the duration is in milliseconds, one raw value for each call, so CloudWatch gives `p50`, `p95` and `p99` from the raw values and `SampleCount` is the call count. The failure metric is 1 for a failed call and 0 for a successful one, so its `Average` is the error rate. A `pascal` service also writes the properties `Outcome` (`success` or `failure`) and `Interface` (the volumetrics section 9.3 SYN ID, left out where 9.3 gives none).
 
-| Service (namespace)                                                                             | Dependency          | Operation                  | Interface |
-| ----------------------------------------------------------------------------------------------- | ------------------- | -------------------------- | --------- |
-| `trade-imports-ins-frontend`, `trade-imports-animals-frontend`, `trade-imports-plants-frontend` | `defra-id`          | `openid-configuration`     | none      |
-| the same three                                                                                  | `defra-id`          | `jwks`                     | `SYN-12`  |
-| the same three                                                                                  | `defra-id`          | `token-exchange`           | `SYN-11`  |
-| the same three                                                                                  | `defra-id`          | `token-refresh`            | `SYN-13`  |
-| `trade-imports-reference-data`                                                                  | `trade-token`       | `client-credentials-token` | `SYN-19`  |
-| `trade-imports-reference-data`                                                                  | `mdm`               | `get-countries`            | `SYN-19`  |
-| `trade-imports-reference-data`                                                                  | `mdm`               | `get-ports-of-entry`       | `SYN-19`  |
-| `trade-imports-dynamics-gateway`                                                                | `azure-service-bus` | `send-message`             | none      |
+These are the calls, and their names. Use the strings exactly. Each row of `EXTERNAL_CALLS` names its scheme, and the report reads the row by that scheme's names:
+
+| Service (namespace)                                                                             | Scheme   | Dependency          | Operation                  | Interface |
+| ----------------------------------------------------------------------------------------------- | -------- | ------------------- | -------------------------- | --------- |
+| `trade-imports-ins-frontend`, `trade-imports-animals-frontend`, `trade-imports-plants-frontend` | `pascal` | `defra-id`          | `openid-configuration`     | none      |
+| the same three                                                                                  | `pascal` | `defra-id`          | `jwks`                     | `SYN-12`  |
+| the same three                                                                                  | `pascal` | `defra-id`          | `token-exchange`           | `SYN-11`  |
+| the same three                                                                                  | `pascal` | `defra-id`          | `token-refresh`            | `SYN-13`  |
+| `trade-imports-reference-data`                                                                  | `dotted` | `trade-token`       | `client-credentials-token` | `SYN-19`  |
+| `trade-imports-reference-data`                                                                  | `dotted` | `mdm`               | `get-countries`            | `SYN-19`  |
+| `trade-imports-reference-data`                                                                  | `dotted` | `mdm`               | `get-ports-of-entry`       | `SYN-19`  |
+| `trade-imports-dynamics-gateway`                                                                | `dotted` | `azure-service-bus` | `send-message`             | none      |
 
 The dependency is the integration id of the stub profile, so a measured row joins to its profile with no mapping. A call counts as failed when it rejects or throws, or, for reference-data, when the answer's status is 400 or above. Nothing is measured in stub mode, because no call is made.
 
-Each Grafana widget reads one statistic for a namespace, `Dependency` and `Operation`:
+Each Grafana widget reads one statistic for a namespace, dependency and operation, from the metric of the service's scheme:
 
-| Widget        | Metric                 | Statistic           |
-| ------------- | ---------------------- | ------------------- |
-| p50, p95, p99 | `ExternalCallDuration` | `p50`, `p95`, `p99` |
-| Call count    | `ExternalCallDuration` | `SampleCount`       |
-| Error rate    | `ExternalCallFailure`  | `Average`           |
+| Widget        | Metric          | Statistic           |
+| ------------- | --------------- | ------------------- |
+| p50, p95, p99 | duration metric | `p50`, `p95`, `p99` |
+| Call count    | duration metric | `SampleCount`       |
+| Error rate    | failure metric  | `Average`           |
 
 The widgets are built on the CDP platform, not in this repository.
 

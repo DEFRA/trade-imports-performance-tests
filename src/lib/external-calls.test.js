@@ -70,23 +70,75 @@ describe('metricDataRequest', () => {
         Stat: 'p50'
       }
     })
-    const mdmErrorRate = MetricDataQueries.find(
-      ({ Id }) => Id === `c${MDM_INDEX}_errorrate`
-    )
-    expect(mdmErrorRate.MetricStat.Metric).toEqual({
-      Namespace: 'trade-imports-reference-data',
-      MetricName: 'ExternalCallFailure',
-      Dimensions: [
-        { Name: 'Dependency', Value: 'mdm' },
-        { Name: 'Operation', Value: 'get-countries' }
-      ]
-    })
-    expect(mdmErrorRate.MetricStat.Stat).toBe('Average')
     expect(
       MetricDataQueries.find(({ Id }) => Id === `c${MDM_INDEX}_calls`)
         .MetricStat.Stat
     ).toBe('SampleCount')
   })
+
+  test('names a pascal-scheme call by ExternalCallDuration and ExternalCallFailure with Dependency and Operation dimensions', () => {
+    const queries = request().MetricDataQueries.filter(({ Id }) =>
+      Id.startsWith('c0_')
+    )
+
+    expect(queries.map(({ MetricStat }) => MetricStat.Metric)).toEqual([
+      ...Array(4).fill({
+        Namespace: 'trade-imports-ins-frontend',
+        MetricName: 'ExternalCallDuration',
+        Dimensions: [
+          { Name: 'Dependency', Value: 'defra-id' },
+          { Name: 'Operation', Value: 'openid-configuration' }
+        ]
+      }),
+      {
+        Namespace: 'trade-imports-ins-frontend',
+        MetricName: 'ExternalCallFailure',
+        Dimensions: [
+          { Name: 'Dependency', Value: 'defra-id' },
+          { Name: 'Operation', Value: 'openid-configuration' }
+        ]
+      }
+    ])
+  })
+
+  test.each([
+    ['trade-imports-reference-data', 'mdm', 'get-countries'],
+    ['trade-imports-dynamics-gateway', 'azure-service-bus', 'send-message']
+  ])(
+    'names a dotted-scheme call of %s by external.call.duration and external.call.failure with dependency and operation dimensions',
+    (service, dependency, operation) => {
+      const index = EXTERNAL_CALLS.findIndex(
+        (call) => call.service === service && call.operation === operation
+      )
+      const queries = request().MetricDataQueries.filter(({ Id }) =>
+        Id.startsWith(`c${index}_`)
+      )
+      const dimensions = [
+        { Name: 'dependency', Value: dependency },
+        { Name: 'operation', Value: operation }
+      ]
+
+      expect(queries.map(({ MetricStat }) => MetricStat.Metric)).toEqual([
+        ...Array(4).fill({
+          Namespace: service,
+          MetricName: 'external.call.duration',
+          Dimensions: dimensions
+        }),
+        {
+          Namespace: service,
+          MetricName: 'external.call.failure',
+          Dimensions: dimensions
+        }
+      ])
+      expect(queries.map(({ MetricStat }) => MetricStat.Stat)).toEqual([
+        'p50',
+        'p95',
+        'p99',
+        'SampleCount',
+        'Average'
+      ])
+    }
+  )
 
   test('gives every query a unique id CloudWatch accepts', () => {
     const ids = request().MetricDataQueries.map(({ Id }) => Id)
