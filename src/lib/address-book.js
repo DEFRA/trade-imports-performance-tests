@@ -19,7 +19,8 @@ export const DECLARED_ROLES_BY_ADDRESS_TYPE = Object.freeze({
     'CONSIGNEE',
     'IMPORTER',
     'PLACE_OF_DESTINATION'
-  ])
+  ]),
+  [ADDRESS_TYPES.BRANCH]: Object.freeze(['BRANCH_ADDRESS'])
 })
 
 /**

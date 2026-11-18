@@ -65,6 +65,15 @@ describe('DECLARED_ROLES_BY_ADDRESS_TYPE', () => {
       DECLARED_ROLES_BY_ADDRESS_TYPE[SESSION_ADDRESS_TYPE].length
     ).toBeGreaterThan(0)
   })
+
+  test.each(Object.values(ADDRESS_TYPES))(
+    'declares the roles %s carries, so a setup adding under every declared type reaches it',
+    (addressType) => {
+      expect(
+        DECLARED_ROLES_BY_ADDRESS_TYPE[addressType]?.length ?? 0
+      ).toBeGreaterThan(0)
+    }
+  )
 })
 
 describe('worstCaseSearchTerm', () => {
