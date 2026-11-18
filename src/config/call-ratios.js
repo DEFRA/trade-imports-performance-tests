@@ -58,9 +58,9 @@ export const DERIVED_CALL_RATIOS = freezeDeep({
  * and the two counts.
  */
 export const PAGE_REQUEST_METRICS = freezeDeep({
-  dimension: { Name: 'RequestKind', Value: 'page' },
-  backendCalls: 'BackendCalls',
-  sessionResolutions: 'SessionResolutions'
+  dimension: { Name: 'request.kind', Value: 'page' },
+  backendCalls: 'page.request.backend.calls',
+  sessionResolutions: 'page.request.session.resolutions'
 })
 
 export const PAGE_REQUEST_SERVICES = freezeDeep(

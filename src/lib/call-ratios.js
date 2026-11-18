@@ -149,7 +149,7 @@ const HTTP_NOT_FOUND = 404
  */
 export const notMeasuredLine = ({ journey, service, status }) =>
   status === HTTP_NOT_FOUND
-    ? `Call ratio ${journey}: not measured here: ${service} does not expose /call-counts. On the platform the external call report reads its BackendCalls and SessionResolutions from CloudWatch`
+    ? `Call ratio ${journey}: not measured here: ${service} does not expose /call-counts. On the platform the external call report reads its page.request.backend.calls and page.request.session.resolutions from CloudWatch`
     : `Call ratio ${journey}: not measured here: could not read /call-counts: status ${status}`
 
 /**
