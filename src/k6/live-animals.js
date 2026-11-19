@@ -182,7 +182,11 @@ const openingRunFromTransporter = {
 
     page = walker.submit(page, { action: 'continue' }, documents.save)
 
-    page = walker.reach(page, pagePath(context, 'addresses'), ENDPOINTS.addresses.open)
+    page = walker.reach(
+      page,
+      pagePath(context, 'addresses'),
+      ENDPOINTS.addresses.open
+    )
 
     return saved(
       'opening-run-from-transporter',
