@@ -8,8 +8,20 @@ export const ADDRESS_TYPES = Object.freeze({
 
 export const ADDRESS_TYPE_START_PATH = `${ADDRESS_BOOK_PATH}/add/address-type?start=true`
 
-export const ADDED_ADDRESS_TYPE = ADDRESS_TYPES.ORIGIN_OR_CONSIGNOR
-export const ADDED_ROLE = 'PLACE_OF_ORIGIN'
+export const SESSION_ADDRESS_TYPE = ADDRESS_TYPES.ORIGIN_OR_CONSIGNOR
+
+export const DECLARED_ROLES_BY_ADDRESS_TYPE = Object.freeze({
+  [ADDRESS_TYPES.ORIGIN_OR_CONSIGNOR]: Object.freeze([
+    'PLACE_OF_ORIGIN',
+    'CONSIGNOR'
+  ]),
+  [ADDRESS_TYPES.DESTINATION_CONSIGNEE_OR_IMPORTER]: Object.freeze([
+    'CONSIGNEE',
+    'IMPORTER',
+    'PLACE_OF_DESTINATION'
+  ]),
+  [ADDRESS_TYPES.BRANCH]: Object.freeze(['BRANCH_ADDRESS'])
+})
 
 /**
  * The endpoint name of each address-book request an address-book session
@@ -34,12 +46,13 @@ export const ADDRESS_BOOK_SESSION_ENDPOINTS = Object.freeze({
  *
  * @param {Record<string, string>} address - The address's field answers.
  * @param {string} name - The name to save the address under.
- * @returns {Record<string, string>} The address's answers under the name, with the role the suite ticks.
+ * @param {string} addressType - One of the {@link ADDRESS_TYPES} the add is made under.
+ * @returns {Record<string, string | string[]>} The address's answers under the name, ticking every role {@link DECLARED_ROLES_BY_ADDRESS_TYPE} pairs with `addressType`.
  */
-export const addAddressAnswers = (address, name) => ({
+export const addAddressAnswers = (address, name, addressType) => ({
   ...address,
   name,
-  roles: ADDED_ROLE
+  roles: DECLARED_ROLES_BY_ADDRESS_TYPE[addressType]
 })
 
 /**
@@ -68,13 +81,15 @@ export const worstCaseSearchTerm = (length) =>
  *
  * @param {string} addressType - One of the {@link ADDRESS_TYPES}.
  * @param {object} [options] - List settings.
+ * @param {string} [options.role] - A role to narrow the tab to, under the `role` parameter the tab declares.
  * @param {string} [options.searchTerm] - A free-text search to apply on that tab.
- * @returns {string} The path, with the tab first and then the encoded search term when one is given.
+ * @returns {string} The path: the tab, then the role narrowing when one is given, then the encoded search term when one is given.
  */
-export const addressBookListPath = (addressType, { searchTerm } = {}) => {
+export const addressBookListPath = (addressType, { role, searchTerm } = {}) => {
   const tabPath = `${ADDRESS_BOOK_PATH}?addressType=${addressType}`
+  const rolePath = role === undefined ? tabPath : `${tabPath}&role=${role}`
 
   return searchTerm === undefined
-    ? tabPath
-    : `${tabPath}&q=${encodeURIComponent(searchTerm)}`
+    ? rolePath
+    : `${rolePath}&q=${encodeURIComponent(searchTerm)}`
 }

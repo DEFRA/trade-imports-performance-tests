@@ -23,100 +23,85 @@ const probeResult = (probe) => {
   }
 }
 
-const backendAnswers = (url, headers = {}) => {
-  try {
-    const response = serviceHttp.get(url, { tags: READINESS_TAGS, headers })
-    const status = response.status
+const traderNotificationsAnswer = (baseUrl, organisationId) => {
+  const response = serviceHttp.get(`${baseUrl}/notifications?page=1`, {
+    tags: READINESS_TAGS,
+    headers: traderOrganisationHeaders(organisationId)
+  })
+  const status = response.status
 
-    return { ok: status === HTTP_OK, detail: String(status) }
-  } catch (error) {
-    return { ok: false, detail: error.message }
-  }
+  return { ok: status === HTTP_OK, detail: String(status) }
 }
-
-const traderBackendAnswers = (url, organisationId) =>
-  backendAnswers(url, traderOrganisationHeaders(organisationId))
 
 const referenceDataHasCountries = (url) => {
-  try {
-    const response = serviceHttp.get(`${url}/countries`, {
-      tags: READINESS_TAGS
-    })
+  const response = serviceHttp.get(`${url}/countries`, {
+    tags: READINESS_TAGS
+  })
 
-    if (response.status !== HTTP_OK) {
-      return { ok: false, detail: String(response.status) }
-    }
-
-    const countries = response.json()
-
-    if (!Array.isArray(countries) || countries.length === 0) {
-      return { ok: false, detail: 'empty countries list' }
-    }
-
-    return { ok: true }
-  } catch (error) {
-    return { ok: false, detail: error.message }
+  if (response.status !== HTTP_OK) {
+    return { ok: false, detail: String(response.status) }
   }
+
+  const countries = response.json()
+
+  if (!Array.isArray(countries) || countries.length === 0) {
+    return { ok: false, detail: 'empty countries list' }
+  }
+
+  return { ok: true }
 }
 
-const insSignsIn = ({ insUrl, localhostAlias, credentials }) => {
-  try {
-    const session = createBrowserSession({
-      baseUrl: insUrl,
-      localhostAlias,
-      credentials,
-      staleRedirects: ignoreStaleRedirects,
-      extraTags: READINESS_TAGS
-    })
-    const page = session.open('/', 'ins-dashboard')
-    const ok = page.status === HTTP_OK && page.heading === 'Dashboard'
+const insPageAnswers = ({
+  insUrl,
+  localhostAlias,
+  credentials,
+  path,
+  pageName,
+  heading
+}) => {
+  const session = createBrowserSession({
+    baseUrl: insUrl,
+    localhostAlias,
+    credentials,
+    staleRedirects: ignoreStaleRedirects,
+    extraTags: READINESS_TAGS
+  })
+  const page = session.open(path, pageName)
+  const ok = page.status === HTTP_OK && page.heading === heading
 
-    return { ok, detail: ok ? undefined : `status ${page.status}` }
-  } catch (error) {
-    return { ok: false, detail: error.message }
-  }
-}
-
-const insAddressBookAnswers = ({ insUrl, localhostAlias, credentials }) => {
-  try {
-    const session = createBrowserSession({
-      baseUrl: insUrl,
-      localhostAlias,
-      credentials,
-      staleRedirects: ignoreStaleRedirects,
-      extraTags: READINESS_TAGS
-    })
-    const page = session.open(ADDRESS_BOOK_PATH, 'ins-address-book')
-    const ok = page.status === HTTP_OK && page.heading === 'Address book'
-
-    return { ok, detail: ok ? undefined : `status ${page.status}` }
-  } catch (error) {
-    return { ok: false, detail: error.message }
-  }
+  return { ok, detail: ok ? undefined : `status ${page.status}` }
 }
 
 const failedProbes = ({ urls, localhostAlias, credentials }) => {
   const probes = {
     'reference-data read': () => referenceDataHasCountries(urls.referenceData),
     'animals backend read': () =>
-      traderBackendAnswers(
-        `${urls.animalsBackend}/notifications?page=1`,
+      traderNotificationsAnswer(
+        urls.animalsBackend,
         credentials.organisationId
       ),
     'plants backend read': () =>
-      traderBackendAnswers(
-        `${urls.plantsBackend}/notifications?page=1`,
-        credentials.organisationId
-      ),
+      traderNotificationsAnswer(urls.plantsBackend, credentials.organisationId),
     'INS backend read': () =>
-      traderBackendAnswers(
-        `${urls.insBackend}/notifications?page=1`,
-        credentials.organisationId
-      ),
+      traderNotificationsAnswer(urls.insBackend, credentials.organisationId),
     'INS signed-in page': () =>
-      insSignsIn({ insUrl: urls.ins, localhostAlias, credentials }),
+      insPageAnswers({
+        insUrl: urls.ins,
+        localhostAlias,
+        credentials,
+        path: '/',
+        pageName: 'ins-dashboard',
+        heading: 'Dashboard'
+      }),
     'address book read': () =>
-      insAddressBookAnswers({ insUrl: urls.ins, localhostAlias, credentials })
+      insPageAnswers({
+        insUrl: urls.ins,
+        localhostAlias,
+        credentials,
+        path: ADDRESS_BOOK_PATH,
+        pageName: 'ins-address-book',
+        heading: 'Address book'
+      })
   }
 
   return Object.entries(probes)
@@ -128,13 +113,7 @@ const failedProbes = ({ urls, localhostAlias, credentials }) => {
 }
 
 /**
- * Waits until the stack is functionally ready, rather than trusting health endpoints.
- *
- * Ready means a signed-in page, a backend read for each journey, a
- * reference-data read, a read of the dashboard read model and a read of the
- * address book all succeed in one pass. Each service that owns a datastore
- * builds its indexes before it answers, so a pass also means the indexes are
- * built. Throws when the timeout passes.
+ * Waits until the stack is functionally ready. Throws when the timeout passes.
  *
  * @param {object} options - Readiness settings.
  * @param {Record<string, string>} options.urls - `ins`, `animalsBackend`, `plantsBackend`, `insBackend` and `referenceData` base URLs.

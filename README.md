@@ -86,11 +86,11 @@ npm run test:docker-compose
 
 This runs `src/suites/smoke.k6.js` from source against the trade imports workspace stack, which must already be running. Start it with `tim docker up`, not `tim docker dev`. `up` is production-like: template caching is on and sign-in goes through the Defra ID stub. `dev` turns caching off, so it measures something other than CDP. The build loop's gate runs this same suite against a `--dev` stack, so its timings are not production-like; the pull-request run in `smoke.yml` is the production-like one.
 
-The run waits for the stack to be functionally ready (up to 5 minutes). Ready now includes the INS backend (the dashboard read model) and the address book answering a read, and the run then logs `Indexes: built ...`, because each of those services builds its indexes before it answers. It makes sure the `Perf Test Holding` address exists in the address book, searching the Origin and Consignor tab for it, logs `Background volume at start: ...` with each datastore's count, then runs 4 open-model scenarios at once for a 2 minute smoke window. Each starts iterations at a stated rate, so a slowing service keeps receiving the load it would in production. The smoke profile pre-allocates 5 virtual users across the 4 scenarios and can grow to 10 if the service slows:
+The run waits for the stack to be functionally ready (up to 5 minutes), rather than trusting health endpoints alone. Ready means a signed-in INS page, a backend notifications read for each journey, a reference-data read, a scoped read of the dashboard read model and a read of the address book all succeed in one pass. Each service that owns a datastore builds its indexes before it answers, so a pass also means those indexes are built; the run then logs `Indexes: built ...`. It makes sure the `Perf Test Holding` address is findable under every role the journeys' party pickers filter by, searching each of the Origin and Consignor; the Destination, Consignee and Importer; and the Branch tabs narrowed to each of its roles, and adding a record under any address type that is short one, so the book holds one `Perf Test Holding` record per tab, logs `Background volume at start: ...` with each datastore's count, then runs 4 open-model scenarios at once for a 2 minute smoke window. Each starts iterations at a stated rate, so a slowing service keeps receiving the load it would in production. The smoke profile pre-allocates 5 virtual users across the 4 scenarios and can grow to 10 if the service slows:
 
 - `live-animals` and `high-risk-plants` each run one notification across 1 or 2 sessions, in the order a user fills the journey in. Every session signs in afresh through INS, and the last one submits through the declaration page, reads the notification back from the dashboard and hub, then amends it and either cancels the amendment or resubmits it. The first captured save is replayed against the backend
 - `ins-front-door` runs dashboard-only sessions: sign in, then keep checking the INS dashboard
-- `ins-address-book` runs address-book sessions: add an address (choosing Origin or Consignor, whose tab the save lands on and where 'address added' is checked, and ticking the Place of origin role, since a save needs at least one role), find it, view it, edit it and delete it, so the book does not grow
+- `ins-address-book` runs address-book sessions: add an address (choosing Origin or Consignor, whose tab the save lands on and where 'address added' is checked, and ticking every role declared for that type, since a save needs at least one role), find it, view it, edit it and delete it, so the book does not grow
 
 The journeys draw their answers from the pages, not from fixed values: origin, port of entry, transit country, document type, plants category, genus and potato place of landing are each picked at random from the options the page offers. High-risk plants builds notifications of 1 to 50 commodity lines of each of its three commodity types, and live animals uploads 0 to 3 documents, so the smoke run uploads one document through the real cdp-uploader container and waits for its scan. See [Test data](#test-data).
 
@@ -239,7 +239,7 @@ The targets are one year at the 2025 baseline: 42,000 live-animals notifications
 
 The animals backend, plants backend, INS backend and address book each set `spring.data.mongodb.auto-index-creation: true` in `src/main/resources/application.yml` and create no index any other way. Each builds its indexes at start-up, before it answers a read. That is why a run counts its indexes as built once every service has answered.
 
-Everything is created through the frontends' own save routes, as the one stubbed user. Each notification is one run of the same journey driver as journey traffic, with the same commodity types, commodity lines, origins, species, amendment shares and cancelled shares, so the volume is varied as journey traffic is. Each address is added through the 'Choose an address type' page, choosing Origin or Consignor, and then the INS add-address form, ticking Place of origin, and is named `Background Address <n>`, numbered across the whole background volume, so it never matches the `Perf Test Holding` address the pickers use or the addresses the address-book sessions add. A save lands on the Origin and Consignor tab because Origin or Consignor is the type chosen, and the address is listed and counted there because Place of origin is ticked (a save requires a use). The address book is counted by adding up the results lines of its three tabs.
+Everything is created through the frontends' own save routes, as the one stubbed user. Each notification is one run of the same journey driver as journey traffic, with the same commodity types, commodity lines, origins, species, amendment shares and cancelled shares, so the volume is varied as journey traffic is. Each address is added through the 'Choose an address type' page, choosing Origin or Consignor, and then the INS add-address form, ticking every role declared for that type, and is named `Background Address <n>`, numbered across the whole background volume, so it never matches the `Perf Test Holding` address the pickers use or the addresses the address-book sessions add. A save lands on the Origin and Consignor tab because Origin or Consignor is the type chosen, and the address is listed and counted there because its declared roles are ticked (a save requires a use). The address book is counted by adding up the results lines of its three tabs.
 
 Run it once per environment:
 
@@ -253,7 +253,7 @@ npm run test:docker-compose:background-volume   # workspace Docker stack
 - It is not a measurement. It waits no think time, skips the backend replay of the first save and adds no uploaded documents: the document store's volume is a separate figure (section 5.5 row 4), and uploading a year of files of up to 5MB through cdp-uploader is not what this run is for. The thresholds gate correctness only: failed requests, failed checks and dropped iterations.
 - Creating a year takes hours, not minutes. `backgroundVolume.maxCreatedPerRun` limits what one run creates, so creation can be split across runs, for example `TRAFFIC_MODEL='{"backgroundVolume":{"maxCreatedPerRun":5000}}'`. A run that cannot finish its batch in `backgroundVolume.maxDuration` fails on dropped iterations, and the next run carries on.
 - Where a CDP environment's notification expiry sweep is on, the sweep removes background notifications and the volume shrinks. The next background run tops it up.
-- The dashboard read model holds only what the journeys publish. Live animals publishes events and high-risk plants does not yet (pbe-022), so the read model will hold fewer than the sum of the two targets. Each run reports the real figure and claims no target for it.
+- The dashboard read model holds only what the journeys publish, counted for the stub identity's organisation. Live animals publishes events and high-risk plants does not yet (pbe-022), so the read model will hold fewer than the sum of the two targets. Each run reports the real figure and claims no target for it.
 
 Every run states the volume it started with: `Background volume at start: live-animals 12 of 42000, high-risk-plants 9 of 34000, dashboard-read-model 12, address-book 3 of 500`. It also records each count in the `background_volume` metric. The background run also logs `Background volume at end: ...` and `Created this run: ...`. `Created this run` leaves out the dashboard read model, because the run does not write to it: the read model fills from the journeys' events, after the run.
 
@@ -375,39 +375,37 @@ The verdict is reported, never gated: it does not fail the run. The stub-ceiling
 
 The stubs can only be as realistic as the figures behind them. So every INS service that calls a system outside the boundary measures each call, and a load run's report reads the figures back.
 
-Each service writes one CloudWatch Embedded Metric Format (EMF) document for each call. The metric names, dimensions and values are the same in every service:
+Each service publishes to CloudWatch, in a namespace that is its CDP name, a duration and a failure metric for each call, with one dimension set naming the dependency and the operation. Services publish them under one of two schemes, and `METRIC_SCHEMES` in `src/config/external-calls.js` holds the names of each:
 
-| Part                   | Value                                                                                                                                       |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Namespace              | The service's CDP name, for example `trade-imports-reference-data`                                                                          |
-| Dimensions             | Exactly one set: `Dependency` and `Operation`                                                                                               |
-| `ExternalCallDuration` | Milliseconds, one raw value for each call. CloudWatch gives `p50`, `p95` and `p99` from the raw values, and `SampleCount` is the call count |
-| `ExternalCallFailure`  | Count, 1 for a failed call and 0 for a successful one. Its `Average` is the error rate                                                      |
-| `Outcome`              | A property: `success` or `failure`                                                                                                          |
-| `Interface`            | A property: the volumetrics section 9.3 SYN ID, left out where 9.3 gives none                                                               |
+| Scheme   | Services                                                                                        | Duration metric          | Failure metric          | Dimensions                |
+| -------- | ----------------------------------------------------------------------------------------------- | ------------------------ | ----------------------- | ------------------------- |
+| `pascal` | `trade-imports-ins-frontend`, `trade-imports-animals-frontend`, `trade-imports-plants-frontend` | `ExternalCallDuration`   | `ExternalCallFailure`   | `Dependency`, `Operation` |
+| `dotted` | `trade-imports-reference-data`, `trade-imports-dynamics-gateway`                                | `external.call.duration` | `external.call.failure` | `dependency`, `operation` |
 
-These are the calls, and their names. Use the strings exactly:
+In both schemes the duration is in milliseconds, one raw value for each call, so CloudWatch gives `p50`, `p95` and `p99` from the raw values and `SampleCount` is the call count. The failure metric is 1 for a failed call and 0 for a successful one, so its `Average` is the error rate. A `pascal` service also writes the properties `Outcome` (`success` or `failure`) and `Interface` (the volumetrics section 9.3 SYN ID, left out where 9.3 gives none).
 
-| Service (namespace)                                                                             | Dependency          | Operation                  | Interface |
-| ----------------------------------------------------------------------------------------------- | ------------------- | -------------------------- | --------- |
-| `trade-imports-ins-frontend`, `trade-imports-animals-frontend`, `trade-imports-plants-frontend` | `defra-id`          | `openid-configuration`     | none      |
-| the same three                                                                                  | `defra-id`          | `jwks`                     | `SYN-12`  |
-| the same three                                                                                  | `defra-id`          | `token-exchange`           | `SYN-11`  |
-| the same three                                                                                  | `defra-id`          | `token-refresh`            | `SYN-13`  |
-| `trade-imports-reference-data`                                                                  | `trade-token`       | `client-credentials-token` | `SYN-19`  |
-| `trade-imports-reference-data`                                                                  | `mdm`               | `get-countries`            | `SYN-19`  |
-| `trade-imports-reference-data`                                                                  | `mdm`               | `get-ports-of-entry`       | `SYN-19`  |
-| `trade-imports-dynamics-gateway`                                                                | `azure-service-bus` | `send-message`             | none      |
+These are the calls, and their names. Use the strings exactly. `SCHEME_BY_SERVICE` names each service's scheme, and the report reads each row of `EXTERNAL_CALLS` by the names of its service's scheme:
+
+| Service (namespace)                                                                             | Scheme   | Dependency          | Operation                  | Interface |
+| ----------------------------------------------------------------------------------------------- | -------- | ------------------- | -------------------------- | --------- |
+| `trade-imports-ins-frontend`, `trade-imports-animals-frontend`, `trade-imports-plants-frontend` | `pascal` | `defra-id`          | `openid-configuration`     | none      |
+| the same three                                                                                  | `pascal` | `defra-id`          | `jwks`                     | `SYN-12`  |
+| the same three                                                                                  | `pascal` | `defra-id`          | `token-exchange`           | `SYN-11`  |
+| the same three                                                                                  | `pascal` | `defra-id`          | `token-refresh`            | `SYN-13`  |
+| `trade-imports-reference-data`                                                                  | `dotted` | `trade-token`       | `client-credentials-token` | `SYN-19`  |
+| `trade-imports-reference-data`                                                                  | `dotted` | `mdm`               | `get-countries`            | `SYN-19`  |
+| `trade-imports-reference-data`                                                                  | `dotted` | `mdm`               | `get-ports-of-entry`       | `SYN-19`  |
+| `trade-imports-dynamics-gateway`                                                                | `dotted` | `azure-service-bus` | `send-message`             | none      |
 
 The dependency is the integration id of the stub profile, so a measured row joins to its profile with no mapping. A call counts as failed when it rejects or throws, or, for reference-data, when the answer's status is 400 or above. Nothing is measured in stub mode, because no call is made.
 
-Each Grafana widget reads one statistic for a namespace, `Dependency` and `Operation`:
+Each Grafana widget reads one statistic for a namespace, dependency and operation, from the metric of the service's scheme:
 
-| Widget        | Metric                 | Statistic           |
-| ------------- | ---------------------- | ------------------- |
-| p50, p95, p99 | `ExternalCallDuration` | `p50`, `p95`, `p99` |
-| Call count    | `ExternalCallDuration` | `SampleCount`       |
-| Error rate    | `ExternalCallFailure`  | `Average`           |
+| Widget        | Metric          | Statistic           |
+| ------------- | --------------- | ------------------- |
+| p50, p95, p99 | duration metric | `p50`, `p95`, `p99` |
+| Call count    | duration metric | `SampleCount`       |
+| Error rate    | failure metric  | `Average`           |
 
 The widgets are built on the CDP platform, not in this repository.
 
@@ -421,8 +419,11 @@ The report never changes the run's exit code. When it cannot read the figures it
 - The runner has no AWS CLI, as with the `grafana/k6` image `k6-design-target` and `k6-cdp` use: read the figures in Grafana for the run window.
 - The CloudWatch query failed: see the run log.
 
+A call CloudWatch holds no datapoints for gets a line naming the metric, dimensions and namespace it was read by, so a name that does not match what the service publishes shows in the log rather than as a missing row:
+
 ```
 External call: trade-imports-reference-data mdm get-countries (SYN-19) p50 98ms, p95 460ms, p99 880ms over 240 calls, 0.42% failed, beside stub profile sla targets p50 100ms, p95 400ms, p99 1000ms
+External call: trade-imports-reference-data mdm get-ports-of-entry (SYN-19) not measured: no external.call.duration datapoints by dependency=mdm, operation=get-ports-of-entry in namespace trade-imports-reference-data
 External calls: not measured: Local runs have no CloudWatch: the services' figures exist only in CDP
 ```
 
@@ -731,7 +732,7 @@ A total delta on the read model would not do: it also holds drafts and every oth
 
 ### How the Service Bus stand-in is counted
 
-The gateway's `notification.sqs.messages` counters are enabled and readable at `/metrics/notification.sqs.messages`. The run reads the v0.1.0 and v0.2.0 forwarded counts in `setup()`, and again at the end once the path has settled: the backlog (`GET /queue/notifications`, visible plus in flight) is at or below where it started and the v0.1.0 count has not changed across two reads 2 seconds apart, for up to 120 seconds. The difference is the gauge `service_bus_forwarded`, tagged `schema_version`, counted against `external_events_published`.
+The gateway's `notification.message` counters are enabled and readable at `/metrics/notification.message`. The run reads the v0.1.0 and v0.2.0 forwarded counts in `setup()`, and again at the end once the path has settled: the backlog (`GET /queue/notifications`, visible plus in flight) is at or below where it started and the v0.1.0 count has not changed across two reads 2 seconds apart, for up to 120 seconds. The difference is the gauge `service_bus_forwarded`, tagged `schema_version`, counted against `external_events_published`.
 
 The gateway sends every event to Service Bus twice, once as v0.1.0 and once as v0.2.0 (finding req-061, out of scope here). The report counts what arrives and says so: 644 events forwarded is 1,288 messages.
 

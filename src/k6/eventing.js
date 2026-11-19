@@ -9,13 +9,14 @@ import {
   SETTLE_POLL_SECONDS,
   SETTLE_TIMEOUT_SECONDS
 } from '../config/eventing.js'
+import { traderOrganisationHeaders } from '../config/trader-organisation.js'
 import {
   INITIAL_BACKLOG_STATE,
   backlogDepthFrom,
   differentInstancesLine,
   eventingWatchLine,
   externalEventCount,
-  forwardedCountFrom,
+  meterCountFrom,
   forwardedDelta,
   hasArrived,
   isSettled,
@@ -24,7 +25,6 @@ import {
   settleLine,
   trackBacklog
 } from '../lib/eventing.js'
-import { traderOrganisationHeaders } from '../config/trader-organisation.js'
 import { READINESS_TAGS } from './readiness.js'
 import { serviceHttp } from './service-http.js'
 
@@ -51,16 +51,22 @@ const readBody = (url, headers = {}) => {
   try {
     const response = serviceHttp.get(url, { tags: READINESS_TAGS, headers })
 
-    return response.status === HTTP_OK ? response.json() : null
-  } catch {
+    if (response.status !== HTTP_OK) {
+      console.log(`Read refused: ${url} (status ${response.status})`)
+      return null
+    }
+
+    return response.json()
+  } catch (error) {
+    console.log(`Read failed: ${url} (${error.message})`)
     return null
   }
 }
 
 const readForwardedCount = ({ urls, version }) =>
-  forwardedCountFrom(
+  meterCountFrom(
     readBody(
-      `${urls.gateway}/metrics/notification.sqs.messages?tag=outcome:forwarded&tag=schemaVersion:${version}`
+      `${urls.gateway}/metrics/notification.message?tag=outcome:forwarded&tag=schema.version:${version}`
     )
   )
 
