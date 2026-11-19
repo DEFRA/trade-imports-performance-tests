@@ -76,37 +76,43 @@ describe('metricDataRequest', () => {
     ).toBe('SampleCount')
   })
 
-  test('names a pascal-scheme call by ExternalCallDuration and ExternalCallFailure with Dependency and Operation dimensions', () => {
-    const queries = request().MetricDataQueries.filter(({ Id }) =>
-      Id.startsWith('c0_')
-    )
-
-    expect(queries.map(({ MetricStat }) => MetricStat.Metric)).toEqual([
-      ...Array(4).fill({
-        Namespace: 'trade-imports-ins-frontend',
-        MetricName: 'ExternalCallDuration',
-        Dimensions: [
-          { Name: 'Dependency', Value: 'defra-id' },
-          { Name: 'Operation', Value: 'openid-configuration' }
-        ]
-      }),
-      {
-        Namespace: 'trade-imports-ins-frontend',
-        MetricName: 'ExternalCallFailure',
-        Dimensions: [
-          { Name: 'Dependency', Value: 'defra-id' },
-          { Name: 'Operation', Value: 'openid-configuration' }
-        ]
-      }
-    ])
-  })
-
   test.each([
-    ['trade-imports-reference-data', 'mdm', 'get-countries'],
-    ['trade-imports-dynamics-gateway', 'azure-service-bus', 'send-message']
+    [
+      'trade-imports-ins-frontend',
+      'defra-id',
+      'openid-configuration',
+      ['ExternalCallDuration', 'ExternalCallFailure', 'Dependency', 'Operation']
+    ],
+    [
+      'trade-imports-reference-data',
+      'mdm',
+      'get-countries',
+      [
+        'external.call.duration',
+        'external.call.failure',
+        'dependency',
+        'operation'
+      ]
+    ],
+    [
+      'trade-imports-dynamics-gateway',
+      'azure-service-bus',
+      'send-message',
+      [
+        'external.call.duration',
+        'external.call.failure',
+        'dependency',
+        'operation'
+      ]
+    ]
   ])(
-    'names a dotted-scheme call of %s by external.call.duration and external.call.failure with dependency and operation dimensions',
-    (service, dependency, operation) => {
+    'names the %s %s %s call by the metric and dimension names of its scheme',
+    (
+      service,
+      dependency,
+      operation,
+      [durationMetric, failureMetric, dependencyName, operationName]
+    ) => {
       const index = EXTERNAL_CALLS.findIndex(
         (call) => call.service === service && call.operation === operation
       )
@@ -114,19 +120,19 @@ describe('metricDataRequest', () => {
         Id.startsWith(`c${index}_`)
       )
       const dimensions = [
-        { Name: 'dependency', Value: dependency },
-        { Name: 'operation', Value: operation }
+        { Name: dependencyName, Value: dependency },
+        { Name: operationName, Value: operation }
       ]
 
       expect(queries.map(({ MetricStat }) => MetricStat.Metric)).toEqual([
         ...Array(4).fill({
           Namespace: service,
-          MetricName: 'external.call.duration',
+          MetricName: durationMetric,
           Dimensions: dimensions
         }),
         {
           Namespace: service,
-          MetricName: 'external.call.failure',
+          MetricName: failureMetric,
           Dimensions: dimensions
         }
       ])
@@ -415,10 +421,34 @@ describe('externalCallReport', () => {
 })
 
 describe('externalCallLines', () => {
-  test('gives one line for each measured call, beside its stub profile', () => {
+  test('gives one line for each call: a measured call beside its stub profile, and a call with no datapoints by the metric, dimensions and namespace it was read by', () => {
     expect(externalCallLines(report())).toEqual([
-      'External call: trade-imports-reference-data mdm get-countries (SYN-19) p50 98ms, p95 460ms, p99 880ms over 240 calls, 0.42% failed, beside stub profile sla targets p50 100ms, p95 400ms, p99 1000ms'
+      'External call: trade-imports-reference-data mdm get-countries (SYN-19) p50 98ms, p95 460ms, p99 880ms over 240 calls, 0.42% failed, beside stub profile sla targets p50 100ms, p95 400ms, p99 1000ms',
+      'External call: trade-imports-reference-data mdm get-ports-of-entry (SYN-19) not measured: no external.call.duration datapoints by dependency=mdm, operation=get-ports-of-entry in namespace trade-imports-reference-data'
     ])
+  })
+
+  test('names the PascalCase metric and dimensions for a frontend call with no datapoints', () => {
+    expect(
+      externalCallLines(
+        report({
+          externalCalls: EXTERNAL_CALLS.slice(0, 1),
+          metricResults: resultsFor({})
+        })
+      )
+    ).toEqual([
+      'External call: trade-imports-ins-frontend defra-id openid-configuration not measured: no ExternalCallDuration datapoints by Dependency=defra-id, Operation=openid-configuration in namespace trade-imports-ins-frontend'
+    ])
+  })
+
+  test('says a call was not called when CloudWatch counted 0 calls', () => {
+    const [line] = externalCallLines(
+      report({ metricResults: resultsFor({ c0_calls: [0] }) })
+    )
+
+    expect(line).toBe(
+      'External call: trade-imports-reference-data mdm get-countries (SYN-19) not measured: no calls over the run window'
+    )
   })
 
   test('says when the suite reported no stub profile, and leaves out an absent interface', () => {
@@ -462,12 +492,6 @@ describe('externalCallLines', () => {
     expect(row.errorRate).toBeNull()
     expect(line).not.toContain('0.00% failed')
     expect(line).toContain('error rate not measured')
-  })
-
-  test('says when no call was measured over the run window', () => {
-    expect(
-      externalCallLines(report({ metricResults: resultsFor({}) }))
-    ).toEqual(['External calls: none measured over the run window'])
   })
 
   test('says why the figures were not read', () => {

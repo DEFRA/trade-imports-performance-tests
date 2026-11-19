@@ -3,7 +3,8 @@ import { describe, expect, test } from 'vitest'
 import {
   EXTERNAL_CALLS,
   EXTERNAL_CALL_STATISTICS,
-  METRIC_SCHEMES
+  METRIC_SCHEMES,
+  SCHEME_BY_SERVICE
 } from './external-calls.js'
 import { STUBBED_INTEGRATIONS } from './stub-profiles.js'
 
@@ -12,34 +13,30 @@ const defraIdRows = (service) => [
     service,
     dependency: 'defra-id',
     operation: 'openid-configuration',
-    interfaceId: null,
-    scheme: 'pascal'
+    interfaceId: null
   },
   {
     service,
     dependency: 'defra-id',
     operation: 'jwks',
-    interfaceId: 'SYN-12',
-    scheme: 'pascal'
+    interfaceId: 'SYN-12'
   },
   {
     service,
     dependency: 'defra-id',
     operation: 'token-exchange',
-    interfaceId: 'SYN-11',
-    scheme: 'pascal'
+    interfaceId: 'SYN-11'
   },
   {
     service,
     dependency: 'defra-id',
     operation: 'token-refresh',
-    interfaceId: 'SYN-13',
-    scheme: 'pascal'
+    interfaceId: 'SYN-13'
   }
 ]
 
 describe('EXTERNAL_CALLS', () => {
-  test('is the 16 calls the services measure, in order, each with the scheme its service publishes', () => {
+  test('is the 16 calls the services measure, in order', () => {
     expect(EXTERNAL_CALLS).toEqual([
       ...defraIdRows('trade-imports-ins-frontend'),
       ...defraIdRows('trade-imports-animals-frontend'),
@@ -48,29 +45,25 @@ describe('EXTERNAL_CALLS', () => {
         service: 'trade-imports-reference-data',
         dependency: 'trade-token',
         operation: 'client-credentials-token',
-        interfaceId: 'SYN-19',
-        scheme: 'dotted'
+        interfaceId: 'SYN-19'
       },
       {
         service: 'trade-imports-reference-data',
         dependency: 'mdm',
         operation: 'get-countries',
-        interfaceId: 'SYN-19',
-        scheme: 'dotted'
+        interfaceId: 'SYN-19'
       },
       {
         service: 'trade-imports-reference-data',
         dependency: 'mdm',
         operation: 'get-ports-of-entry',
-        interfaceId: 'SYN-19',
-        scheme: 'dotted'
+        interfaceId: 'SYN-19'
       },
       {
         service: 'trade-imports-dynamics-gateway',
         dependency: 'azure-service-bus',
         operation: 'send-message',
-        interfaceId: null,
-        scheme: 'dotted'
+        interfaceId: null
       }
     ])
     expect(EXTERNAL_CALLS).toHaveLength(16)
@@ -95,15 +88,31 @@ describe('EXTERNAL_CALLS', () => {
     }
   })
 
-  test('names only schemes METRIC_SCHEMES holds', () => {
-    for (const { scheme } of EXTERNAL_CALLS) {
-      expect(Object.keys(METRIC_SCHEMES)).toContain(scheme)
+  test('is frozen', () => {
+    expect(Object.isFrozen(EXTERNAL_CALLS)).toBe(true)
+    expect(Object.isFrozen(EXTERNAL_CALLS[0])).toBe(true)
+  })
+})
+
+describe('SCHEME_BY_SERVICE', () => {
+  test('names the PascalCase scheme for the frontends and the dotted scheme for reference-data and dynamics-gateway', () => {
+    expect(SCHEME_BY_SERVICE).toEqual({
+      'trade-imports-ins-frontend': 'pascal',
+      'trade-imports-animals-frontend': 'pascal',
+      'trade-imports-plants-frontend': 'pascal',
+      'trade-imports-reference-data': 'dotted',
+      'trade-imports-dynamics-gateway': 'dotted'
+    })
+  })
+
+  test('names a METRIC_SCHEMES entry for every service in EXTERNAL_CALLS', () => {
+    for (const { service } of EXTERNAL_CALLS) {
+      expect(Object.keys(METRIC_SCHEMES)).toContain(SCHEME_BY_SERVICE[service])
     }
   })
 
   test('is frozen', () => {
-    expect(Object.isFrozen(EXTERNAL_CALLS)).toBe(true)
-    expect(Object.isFrozen(EXTERNAL_CALLS[0])).toBe(true)
+    expect(Object.isFrozen(SCHEME_BY_SERVICE)).toBe(true)
   })
 })
 

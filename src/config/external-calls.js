@@ -41,6 +41,18 @@ const FRONTENDS = Object.freeze([
   'trade-imports-plants-frontend'
 ])
 
+/**
+ * The `METRIC_SCHEMES` entry each service publishes its external calls with,
+ * keyed by its CDP service name.
+ */
+export const SCHEME_BY_SERVICE = Object.freeze({
+  'trade-imports-ins-frontend': 'pascal',
+  'trade-imports-animals-frontend': 'pascal',
+  'trade-imports-plants-frontend': 'pascal',
+  'trade-imports-reference-data': 'dotted',
+  'trade-imports-dynamics-gateway': 'dotted'
+})
+
 const DEFRA_ID_OPERATIONS = Object.freeze([
   { operation: 'openid-configuration', interfaceId: null },
   { operation: 'jwks', interfaceId: 'SYN-12' },
@@ -53,16 +65,15 @@ const defraIdCalls = FRONTENDS.flatMap((service) =>
     service,
     dependency: 'defra-id',
     operation,
-    interfaceId,
-    scheme: 'pascal'
+    interfaceId
   }))
 )
 
 /**
  * Every call an INS service makes to a system outside the boundary, and so
  * every call the services measure. `service` is the CDP service name, which is
- * also the CloudWatch namespace it publishes to, and `scheme` names the
- * `METRIC_SCHEMES` entry it publishes with. The strings are the services'
+ * also the CloudWatch namespace it publishes to, and its `SCHEME_BY_SERVICE`
+ * entry gives the metric names. The strings are the services'
  * contract: each service emits exactly these dependency and operation names, and
  * `dependency` is the integration id of its stub profile.
  */
@@ -72,28 +83,24 @@ export const EXTERNAL_CALLS = freezeDeep([
     service: 'trade-imports-reference-data',
     dependency: 'trade-token',
     operation: 'client-credentials-token',
-    interfaceId: 'SYN-19',
-    scheme: 'dotted'
+    interfaceId: 'SYN-19'
   },
   {
     service: 'trade-imports-reference-data',
     dependency: 'mdm',
     operation: 'get-countries',
-    interfaceId: 'SYN-19',
-    scheme: 'dotted'
+    interfaceId: 'SYN-19'
   },
   {
     service: 'trade-imports-reference-data',
     dependency: 'mdm',
     operation: 'get-ports-of-entry',
-    interfaceId: 'SYN-19',
-    scheme: 'dotted'
+    interfaceId: 'SYN-19'
   },
   {
     service: 'trade-imports-dynamics-gateway',
     dependency: 'azure-service-bus',
     operation: 'send-message',
-    interfaceId: null,
-    scheme: 'dotted'
+    interfaceId: null
   }
 ])

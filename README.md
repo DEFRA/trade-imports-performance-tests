@@ -384,7 +384,7 @@ Each service publishes to CloudWatch, in a namespace that is its CDP name, a dur
 
 In both schemes the duration is in milliseconds, one raw value for each call, so CloudWatch gives `p50`, `p95` and `p99` from the raw values and `SampleCount` is the call count. The failure metric is 1 for a failed call and 0 for a successful one, so its `Average` is the error rate. A `pascal` service also writes the properties `Outcome` (`success` or `failure`) and `Interface` (the volumetrics section 9.3 SYN ID, left out where 9.3 gives none).
 
-These are the calls, and their names. Use the strings exactly. Each row of `EXTERNAL_CALLS` names its scheme, and the report reads the row by that scheme's names:
+These are the calls, and their names. Use the strings exactly. `SCHEME_BY_SERVICE` names each service's scheme, and the report reads each row of `EXTERNAL_CALLS` by the names of its service's scheme:
 
 | Service (namespace)                                                                             | Scheme   | Dependency          | Operation                  | Interface |
 | ----------------------------------------------------------------------------------------------- | -------- | ------------------- | -------------------------- | --------- |
@@ -419,8 +419,11 @@ The report never changes the run's exit code. When it cannot read the figures it
 - The runner has no AWS CLI, as with the `grafana/k6` image `k6-design-target` and `k6-cdp` use: read the figures in Grafana for the run window.
 - The CloudWatch query failed: see the run log.
 
+A call CloudWatch holds no datapoints for gets a line naming the metric, dimensions and namespace it was read by, so a name that does not match what the service publishes shows in the log rather than as a missing row:
+
 ```
 External call: trade-imports-reference-data mdm get-countries (SYN-19) p50 98ms, p95 460ms, p99 880ms over 240 calls, 0.42% failed, beside stub profile sla targets p50 100ms, p95 400ms, p99 1000ms
+External call: trade-imports-reference-data mdm get-ports-of-entry (SYN-19) not measured: no external.call.duration datapoints by dependency=mdm, operation=get-ports-of-entry in namespace trade-imports-reference-data
 External calls: not measured: Local runs have no CloudWatch: the services' figures exist only in CDP
 ```
 

@@ -10,7 +10,7 @@ import {
   eventingWatchLine,
   eventingWatchSummary,
   externalEventCount,
-  forwardedCountFrom,
+  meterCountFrom,
   forwardedDelta,
   hasArrived,
   isSettled,
@@ -29,10 +29,10 @@ const AMENDED =
 const CANCELLED =
   'uk.gov.defra.imports.notification.NotificationAmendmentCancelled'
 
-describe('forwardedCountFrom', () => {
+describe('meterCountFrom', () => {
   test('reads the COUNT measurement', () => {
     expect(
-      forwardedCountFrom({
+      meterCountFrom({
         name: 'notification.message',
         measurements: [{ statistic: 'COUNT', value: 12 }]
       })
@@ -46,7 +46,7 @@ describe('forwardedCountFrom', () => {
     [{ measurements: [{ statistic: 'VALUE', value: 3 }] }],
     [{ measurements: [{ statistic: 'COUNT', value: 'many' }] }]
   ])('is null for %j', (body) => {
-    expect(forwardedCountFrom(body)).toBeNull()
+    expect(meterCountFrom(body)).toBeNull()
   })
 })
 

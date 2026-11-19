@@ -26,7 +26,7 @@ const isCount = (value) => Number.isInteger(value) && value >= 0
  * @param {{ measurements?: Array<{ statistic: string, value: number }> } | null | undefined} body - The parsed JSON.
  * @returns {number | null} The counter's value, or null when the answer has no count.
  */
-export const forwardedCountFrom = (body) => {
+export const meterCountFrom = (body) => {
   const count = body?.measurements?.find(
     ({ statistic }) => statistic === 'COUNT'
   )?.value
