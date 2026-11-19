@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest'
 
 import {
   blankFieldAnswers,
+  checkboxValues,
   firstOption,
   hasField,
   selectOptions,
@@ -12,6 +13,7 @@ import {
 const IDENTITY = { vu: 3, iteration: 7 }
 
 const text = (name, value = '', type = 'text') => ({ name, type, value })
+const checkbox = (name, value) => ({ name, type: 'checkbox', value })
 
 describe('firstOption', () => {
   test('skips the empty placeholder', () => {
@@ -113,6 +115,24 @@ describe('hasField', () => {
   test('tells whether the form has the input', () => {
     expect(hasField([text('arrivalTime')], 'arrivalTime')).toBe(true)
     expect(hasField([text('arrivalTime')], 'arrivalDate')).toBe(false)
+  })
+})
+
+describe('checkboxValues', () => {
+  test('reads the ticked values of the checkboxes sharing the given name, ignoring other fields', () => {
+    const inputs = [
+      checkbox('roles', 'CONSIGNOR'),
+      checkbox('roles', 'IMPORTER'),
+      text('name', 'Perf Test Holding')
+    ]
+
+    expect(checkboxValues(inputs, 'roles')).toEqual(['CONSIGNOR', 'IMPORTER'])
+  })
+
+  test('returns an empty list when the form has no checkbox of that name', () => {
+    expect(
+      checkboxValues([text('name', 'Perf Test Holding')], 'roles')
+    ).toEqual([])
   })
 })
 

@@ -4,7 +4,11 @@ import { Gauge } from 'k6/metrics'
 import { targetsFrom } from '../config/background-volume.js'
 import { PERF_ADDRESS } from '../config/smoke.js'
 import { traderOrganisationHeaders } from '../config/trader-organisation.js'
-import { ADDRESS_TYPES, addressBookListPath } from '../lib/address-book.js'
+import {
+  ADDRESS_TYPES,
+  SESSION_ADDRESS_TYPE,
+  addressBookListPath
+} from '../lib/address-book.js'
 import {
   addressCountFrom,
   backgroundAddressName,
@@ -13,7 +17,7 @@ import {
   volumeLine
 } from '../lib/background-volume.js'
 import { createBrowserSession } from './browser-session.js'
-import { addAddressInSession, landedOnAddedTypeTab } from './front-door.js'
+import { addAddressInSession, landedOnAddressTypeTab } from './front-door.js'
 import { READINESS_TAGS, ignoreStaleRedirects } from './readiness.js'
 import { serviceHttp } from './service-http.js'
 
@@ -175,8 +179,12 @@ export const addBackgroundAddress = ({
   const saved = addAddressInSession(
     session,
     { ...PERF_ADDRESS, addressLine1: `${index + 1} Background Road` },
-    backgroundAddressName(index)
+    backgroundAddressName(index),
+    SESSION_ADDRESS_TYPE
   )
 
-  check(saved, { 'background address added': landedOnAddedTypeTab })
+  check(saved, {
+    'background address added': (page) =>
+      landedOnAddressTypeTab(page, SESSION_ADDRESS_TYPE)
+  })
 }
