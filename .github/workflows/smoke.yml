@@ -99,7 +99,7 @@ jobs:
 
       - name: Upload the report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: smoke-report
           path: perf-reports/
@@ -111,7 +111,7 @@ jobs:
 
       - name: Upload stack logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: stack-logs
           path: stack-logs.txt
