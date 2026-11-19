@@ -42,14 +42,14 @@ jobs:
           done
 
       - name: Check out the workspace
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: DEFRA/trade-imports-workspace
           ref: ${{ steps.refs.outputs.trade-imports-workspace }}
           path: workspace
 
       - name: Check out the performance tests
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: DEFRA/trade-imports-performance-tests
           ref: ${{ steps.refs.outputs.trade-imports-performance-tests }}
