@@ -19,6 +19,7 @@ import {
   addressIdFrom,
   worstCaseSearchTerm
 } from '../lib/address-book.js'
+import { checkboxValues } from '../lib/form-fill.js'
 import { createBrowserSession } from './browser-session.js'
 import { createWalker, recordSession } from './pages.js'
 import { READINESS_TAGS, ignoreStaleRedirects } from './readiness.js'
@@ -145,6 +146,7 @@ export const dashboardOnlySession = (options) => {
  * @param {string} name - The name to save the address under.
  * @param {string} addressType - One of the {@link ADDRESS_TYPES} to add under; ticks the roles {@link DECLARED_ROLES_BY_ADDRESS_TYPE} pairs with it.
  * @returns {object} The page the add-address save lands on.
+ * @throws {Error} Naming the address type, the roles the add form does not offer and the roles it does, when it does not offer every role {@link DECLARED_ROLES_BY_ADDRESS_TYPE} pairs with it.
  */
 export const addAddressThrough = (
   { open, submit },
@@ -162,6 +164,16 @@ export const addAddressThrough = (
     ADDRESS_BOOK_SESSION_ENDPOINTS.typeSave
   )
 
+  const offeredRoles = checkboxValues(form.formInputs, 'roles')
+  const notOffered = DECLARED_ROLES_BY_ADDRESS_TYPE[addressType].filter(
+    (role) => !offeredRoles.includes(role)
+  )
+  if (notOffered.length > 0) {
+    throw new Error(
+      `The add form for "${addressType}" does not offer ${notOffered.join(', ')} — it offers ${offeredRoles.join(', ')}`
+    )
+  }
+
   return submit(
     form,
     addAddressAnswers(address, name, addressType),
@@ -178,6 +190,7 @@ export const addAddressThrough = (
  * @param {string} name - The name to save the address under.
  * @param {string} addressType - One of the {@link ADDRESS_TYPES} to add under; ticks the roles {@link DECLARED_ROLES_BY_ADDRESS_TYPE} pairs with it.
  * @returns {object} The page the add-address save lands on.
+ * @throws {Error} Naming the address type, the roles the add form does not offer and the roles it does, when it does not offer every role {@link DECLARED_ROLES_BY_ADDRESS_TYPE} pairs with it.
  */
 export const addAddressInSession = (session, address, name, addressType) =>
   addAddressThrough(
@@ -188,15 +201,14 @@ export const addAddressInSession = (session, address, name, addressType) =>
   )
 
 /**
- * Checks that an add-address save landed on the tab of
- * {@link SESSION_ADDRESS_TYPE}.
+ * Checks that an add-address save landed on the given address type's tab.
  *
  * @param {{ status: number, url: string }} page - The page the save landed on.
+ * @param {string} addressType - The address type whose tab the save should have landed on.
  * @returns {boolean} True when the page answered 200 on that tab.
  */
-export const landedOnSessionAddressTypeTab = (page) =>
-  page.status === HTTP_OK &&
-  page.url.endsWith(addressBookListPath(SESSION_ADDRESS_TYPE))
+export const landedOnAddressTypeTab = (page, addressType) =>
+  page.status === HTTP_OK && page.url.endsWith(addressBookListPath(addressType))
 
 const editAddress = (walker, addressId) => {
   const editedTown = 'Dundee'
@@ -277,7 +289,8 @@ export const addressBookSession = (options) => {
 
   check(saved, {
     'address added': (page) =>
-      landedOnSessionAddressTypeTab(page) && textOf(page).includes(name)
+      landedOnAddressTypeTab(page, SESSION_ADDRESS_TYPE) &&
+      textOf(page).includes(name)
   })
 
   const found = walker.open(
@@ -338,6 +351,9 @@ const missingRolesOf = ({ open, addressType, name }) =>
 const missingRoleMessage = (addressType, roles) =>
   `${addressType}: ${roles.join(', ')}`
 
+const addressTypeRefusalMessage = ({ addressType, status, heading }) =>
+  `${addressType}: save answered ${status} "${heading}"`
+
 /**
  * Makes an address findable under every role the suite declares.
  *
@@ -349,7 +365,7 @@ const missingRoleMessage = (addressType, roles) =>
  * @param {{ open: Function, submit: Function }} requests - `open` and `submit` from a walker.
  * @param {Record<string, string>} address - The address's field answers.
  * @param {string} name - The name to search for and, where added, save the address under.
- * @throws {Error} Naming the address type and the roles still missing, when a declared role is not found after the add.
+ * @throws {Error} Naming, for each address type still missing a role after the add, either the roles still missing or the status and heading of the page the save landed on, when it did not land on that type's tab.
  */
 export const makeEveryDeclaredRoleFindable = (
   { open, submit },
@@ -361,8 +377,21 @@ export const makeEveryDeclaredRoleFindable = (
     (addressType) => missingRolesOf({ open, addressType, name }).length > 0
   )
 
+  const refusals = []
   for (const addressType of typesNeedingAnAdd) {
-    addAddressThrough({ open, submit }, address, name, addressType)
+    const saved = addAddressThrough(
+      { open, submit },
+      address,
+      name,
+      addressType
+    )
+    if (!landedOnAddressTypeTab(saved, addressType)) {
+      refusals.push({
+        addressType,
+        status: saved.status,
+        heading: saved.heading
+      })
+    }
   }
 
   console.log(
@@ -378,11 +407,15 @@ export const makeEveryDeclaredRoleFindable = (
     }))
     .filter(({ roles }) => roles.length > 0)
 
-  if (stillMissing.length > 0) {
+  if (stillMissing.length > 0 || refusals.length > 0) {
+    const messages = [
+      ...stillMissing.map(({ addressType, roles }) =>
+        missingRoleMessage(addressType, roles)
+      ),
+      ...refusals.map(addressTypeRefusalMessage)
+    ]
     throw new Error(
-      `Could not make the performance-test address found by every declared role: ${stillMissing
-        .map(({ addressType, roles }) => missingRoleMessage(addressType, roles))
-        .join('; ')}`
+      `Could not make the performance-test address found by every declared role: ${messages.join('; ')}`
     )
   }
 }
@@ -396,7 +429,7 @@ export const makeEveryDeclaredRoleFindable = (
  * @param {string} options.localhostAlias - The host that stands in for `localhost` in redirects.
  * @param {{ crn: string, password: string }} options.credentials - The stub identity to sign in with.
  * @param {typeof PERF_ADDRESS} options.address - The address to make findable.
- * @throws {Error} Naming the address type and the roles still missing, when a declared role is not found after the add.
+ * @throws {Error} Naming, for each address type still missing a role after the add, either the roles still missing or the status and heading of the page the save landed on, when it did not land on that type's tab.
  */
 export const ensurePerfAddress = ({
   insUrl,

@@ -98,6 +98,18 @@ export const hasField = (formInputs, name) =>
   formInputs.some((input) => input.name === name)
 
 /**
+ * Reads the ticked values of the checkboxes sharing a given name.
+ *
+ * @param {Array<{ name: string, type: string, value: string }>} formInputs - The form's inputs, as read off the page.
+ * @param {string} name - The checkboxes' shared name.
+ * @returns {string[]} Their values, in page order.
+ */
+export const checkboxValues = (formInputs, name) =>
+  formInputs
+    .filter((input) => input.name === name && input.type === 'checkbox')
+    .map((input) => input.value)
+
+/**
  * Keeps the species choices listed under one commodity code.
  *
  * @param {string[]} speciesValues - Species checkbox values, each `<commodity code>|<Latin name>`.
