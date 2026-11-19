@@ -15,7 +15,7 @@ import {
   differentInstancesLine,
   eventingWatchLine,
   externalEventCount,
-  forwardedCountFrom,
+  meterCountFrom,
   forwardedDelta,
   hasArrived,
   isSettled,
@@ -58,9 +58,9 @@ const readBody = (url, headers = {}) => {
 }
 
 const readForwardedCount = ({ urls, version }) =>
-  forwardedCountFrom(
+  meterCountFrom(
     readBody(
-      `${urls.gateway}/metrics/notification.sqs.messages?tag=outcome:forwarded&tag=schemaVersion:${version}`
+      `${urls.gateway}/metrics/notification.message?tag=outcome:forwarded&tag=schema.version:${version}`
     )
   )
 

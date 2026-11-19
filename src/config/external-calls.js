@@ -1,19 +1,38 @@
 import { freezeDeep } from './traffic.js'
 
-export const DURATION_METRIC = 'ExternalCallDuration'
-export const FAILURE_METRIC = 'ExternalCallFailure'
+/**
+ * The CloudWatch metric and dimension names each way of publishing external
+ * calls uses. The frontends publish `pascal`. reference-data and
+ * dynamics-gateway publish `dotted`: Micrometer meter names, with the meter's
+ * tags as the dimensions.
+ */
+export const METRIC_SCHEMES = freezeDeep({
+  pascal: {
+    duration: 'ExternalCallDuration',
+    failure: 'ExternalCallFailure',
+    dependency: 'Dependency',
+    operation: 'Operation'
+  },
+  dotted: {
+    duration: 'external.call.duration',
+    failure: 'external.call.failure',
+    dependency: 'dependency',
+    operation: 'operation'
+  }
+})
 
 /**
- * The statistics the report reads for each external call, and the CloudWatch
- * metric and statistic each comes from. `SampleCount` of the duration is the
- * call count, and `Average` of the failure metric is the error rate.
+ * The statistics the report reads for each external call, and the metric of
+ * the call's scheme and the statistic each comes from. `SampleCount` of the
+ * duration is the call count, and `Average` of the failure metric is the error
+ * rate.
  */
 export const EXTERNAL_CALL_STATISTICS = Object.freeze([
-  { key: 'p50Ms', metric: DURATION_METRIC, stat: 'p50' },
-  { key: 'p95Ms', metric: DURATION_METRIC, stat: 'p95' },
-  { key: 'p99Ms', metric: DURATION_METRIC, stat: 'p99' },
-  { key: 'calls', metric: DURATION_METRIC, stat: 'SampleCount' },
-  { key: 'errorRate', metric: FAILURE_METRIC, stat: 'Average' }
+  { key: 'p50Ms', metric: 'duration', stat: 'p50' },
+  { key: 'p95Ms', metric: 'duration', stat: 'p95' },
+  { key: 'p99Ms', metric: 'duration', stat: 'p99' },
+  { key: 'calls', metric: 'duration', stat: 'SampleCount' },
+  { key: 'errorRate', metric: 'failure', stat: 'Average' }
 ])
 
 const FRONTENDS = Object.freeze([
@@ -21,6 +40,18 @@ const FRONTENDS = Object.freeze([
   'trade-imports-animals-frontend',
   'trade-imports-plants-frontend'
 ])
+
+/**
+ * The `METRIC_SCHEMES` entry each service publishes its external calls with,
+ * keyed by its CDP service name.
+ */
+export const SCHEME_BY_SERVICE = Object.freeze({
+  'trade-imports-ins-frontend': 'pascal',
+  'trade-imports-animals-frontend': 'pascal',
+  'trade-imports-plants-frontend': 'pascal',
+  'trade-imports-reference-data': 'dotted',
+  'trade-imports-dynamics-gateway': 'dotted'
+})
 
 const DEFRA_ID_OPERATIONS = Object.freeze([
   { operation: 'openid-configuration', interfaceId: null },
@@ -41,7 +72,8 @@ const defraIdCalls = FRONTENDS.flatMap((service) =>
 /**
  * Every call an INS service makes to a system outside the boundary, and so
  * every call the services measure. `service` is the CDP service name, which is
- * also the CloudWatch namespace it publishes to. The strings are the services'
+ * also the CloudWatch namespace it publishes to, and its `SCHEME_BY_SERVICE`
+ * entry gives the metric names. The strings are the services'
  * contract: each service emits exactly these dependency and operation names, and
  * `dependency` is the integration id of its stub profile.
  */
