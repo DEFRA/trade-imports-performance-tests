@@ -267,12 +267,12 @@ const submitFromReview = (run, context, checkName, submission) => {
     [checkName]: (page) =>
       view.status === HTTP_OK &&
       page.status === HTTP_OK &&
-      page.url.endsWith('/confirmation')
+      pathOf(page.url).endsWith('/confirmation')
   })
 
   if (
     confirmation.status === HTTP_OK &&
-    confirmation.url.endsWith('/confirmation')
+    pathOf(confirmation.url).endsWith('/confirmation')
   ) {
     recordSubmission(submission)
   }
