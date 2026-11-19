@@ -55,11 +55,23 @@ jobs:
           ref: ${{ steps.refs.outputs.trade-imports-performance-tests }}
           path: perftests
 
+      - name: Set up Node for tim
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: workspace/tim/package-lock.json
+
+      - name: Install tim
+        working-directory: workspace/tim
+        run: npm ci
+
       - name: Start stack
         working-directory: workspace
         env:
           BRANCH: ${{ inputs.branch }}
-        run: ./scripts/stack/run-stack.sh --branch "$BRANCH"
+          TIM_NO_AUTO_PULL: '1'
+        run: node tim/src/cli.js docker up --workspace "$PWD" --branch "$BRANCH"
 
       - name: Make the results bucket
         env:
