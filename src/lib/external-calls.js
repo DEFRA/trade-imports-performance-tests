@@ -1,5 +1,9 @@
 import { PAGE_REQUEST_METRICS } from '../config/call-ratios.js'
-import { EXTERNAL_CALL_STATISTICS } from '../config/external-calls.js'
+import {
+  EXTERNAL_CALL_STATISTICS,
+  METRIC_SCHEMES,
+  SCHEME_BY_SERVICE
+} from '../config/external-calls.js'
 import { PROFILES, QUANTILES } from '../config/stub-profiles.js'
 import { subMetricKey } from '../config/thresholds.js'
 
@@ -57,6 +61,33 @@ const pageRequestQueries = ({ service }, index, period) =>
     }
   }))
 
+const metricNamesOf = (service) => METRIC_SCHEMES[SCHEME_BY_SERVICE[service]]
+
+const externalCallQueries = (
+  { service, dependency, operation },
+  index,
+  period
+) => {
+  const names = metricNamesOf(service)
+
+  return EXTERNAL_CALL_STATISTICS.map(({ key, metric, stat }) => ({
+    Id: queryId(index, key),
+    ReturnData: true,
+    MetricStat: {
+      Metric: {
+        Namespace: service,
+        MetricName: names[metric],
+        Dimensions: [
+          { Name: names.dependency, Value: dependency },
+          { Name: names.operation, Value: operation }
+        ]
+      },
+      Period: period,
+      Stat: stat
+    }
+  }))
+}
+
 /**
  * Builds the CloudWatch `GetMetricData` request for a run's external calls.
  *
@@ -65,7 +96,7 @@ const pageRequestQueries = ({ service }, index, period) =>
  * statistic comes back as one datapoint.
  *
  * @param {object} options - The request.
- * @param {Array<{ service: string, dependency: string, operation: string }>} options.externalCalls - The calls to read.
+ * @param {Array<{ service: string, dependency: string, operation: string }>} options.externalCalls - The calls to read, each by the metric and dimension names its service's `SCHEME_BY_SERVICE` entry gives.
  * @param {string} options.runStartedAt - The run's start, as an ISO date-time.
  * @param {string} options.runEndedAt - The run's end, as an ISO date-time.
  * @param {Array<{ journey: string, service: string }>} [options.pageRequestServices] - The frontends whose per-page-request counts to read too.
@@ -98,23 +129,8 @@ export const metricDataRequest = ({
     EndTime: new Date(end).toISOString(),
     ScanBy: 'TimestampAscending',
     MetricDataQueries: [
-      ...externalCalls.flatMap(({ service, dependency, operation }, index) =>
-        EXTERNAL_CALL_STATISTICS.map(({ key, metric, stat }) => ({
-          Id: queryId(index, key),
-          ReturnData: true,
-          MetricStat: {
-            Metric: {
-              Namespace: service,
-              MetricName: metric,
-              Dimensions: [
-                { Name: 'Dependency', Value: dependency },
-                { Name: 'Operation', Value: operation }
-              ]
-            },
-            Period: period,
-            Stat: stat
-          }
-        }))
+      ...externalCalls.flatMap((externalCall, index) =>
+        externalCallQueries(externalCall, index, period)
       ),
       ...pageRequestServices.flatMap((pageRequestService, index) =>
         pageRequestQueries(pageRequestService, index, period)
@@ -336,26 +352,33 @@ const stubText = (stubProfile) => {
   return `stub profile ${stubProfile.profile} targets ${latencyText(stubProfile.targets)}`
 }
 
-const rowLine = (row) =>
-  `External call: ${row.service} ${row.dependency} ${row.operation}${interfaceSuffix(row.interfaceId)} ${latencyText(row)} over ${row.calls} calls, ${errorRateText(row.errorRate)}, beside ${stubText(row.stubProfile)}`
+const callText = (row) =>
+  `External call: ${row.service} ${row.dependency} ${row.operation}${interfaceSuffix(row.interfaceId)}`
+
+const measuredLine = (row) =>
+  `${callText(row)} ${latencyText(row)} over ${row.calls} calls, ${errorRateText(row.errorRate)}, beside ${stubText(row.stubProfile)}`
+
+const noDatapointsText = ({ service, dependency, operation }) => {
+  const names = metricNamesOf(service)
+
+  return `no ${names.duration} datapoints by ${names.dependency}=${dependency}, ${names.operation}=${operation} in namespace ${service}`
+}
+
+const unmeasuredLine = (row) =>
+  `${callText(row)} not measured: ${row.calls === 0 ? 'no calls over the run window' : noDatapointsText(row)}`
 
 /**
  * Words the external call report as lines for the run log.
  *
  * @param {ReturnType<typeof externalCallReport>} report - The report.
- * @returns {string[]} One line for each call that was measured, or one line saying none was or why the figures were not read.
+ * @returns {string[]} One line for each call: its figures, or why it has none, naming the metric and dimensions it was read by when CloudWatch held no datapoints. One line saying why when the figures were not read at all.
  */
-export const externalCallLines = (report) => {
-  if (report.source === 'unavailable') {
-    return [`External calls: not measured: ${report.unavailableReason}`]
-  }
-
-  const measured = report.rows.filter((row) => row.calls)
-
-  return measured.length === 0
-    ? ['External calls: none measured over the run window']
-    : measured.map(rowLine)
-}
+export const externalCallLines = (report) =>
+  report.source === 'unavailable'
+    ? [`External calls: not measured: ${report.unavailableReason}`]
+    : report.rows.map((row) =>
+        row.calls ? measuredLine(row) : unmeasuredLine(row)
+      )
 
 const HTML_ESCAPES = {
   '&': '&amp;',
