@@ -58,7 +58,7 @@ jobs:
       - name: Set up Node for tim
         uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
           cache-dependency-path: workspace/tim/package-lock.json
 
