@@ -84,6 +84,17 @@ describe('metricDataRequest', () => {
       ['ExternalCallDuration', 'ExternalCallFailure', 'Dependency', 'Operation']
     ],
     [
+      'trade-imports-animals-frontend',
+      'defra-id',
+      'token-exchange',
+      [
+        'external.call.duration',
+        'external.call.failure',
+        'dependency',
+        'operation'
+      ]
+    ],
+    [
       'trade-imports-reference-data',
       'mdm',
       'get-countries',
@@ -197,8 +208,8 @@ describe('metricDataRequest', () => {
       MetricStat: {
         Metric: {
           Namespace: 'trade-imports-animals-frontend',
-          MetricName: 'BackendCalls',
-          Dimensions: [{ Name: 'RequestKind', Value: 'page' }]
+          MetricName: 'page.request.backend.calls',
+          Dimensions: [{ Name: 'request.kind', Value: 'page' }]
         },
         Period: 480,
         Stat: 'Sum'
@@ -206,7 +217,7 @@ describe('metricDataRequest', () => {
     })
     expect(pageQueries[1].MetricStat.Stat).toBe('SampleCount')
     expect(pageQueries[2].MetricStat.Metric.MetricName).toBe(
-      'SessionResolutions'
+      'page.request.session.resolutions'
     )
     expect(pageQueries[3].MetricStat.Metric.Namespace).toBe(
       'trade-imports-plants-frontend'

@@ -51,7 +51,7 @@ describe('call ratio configuration', () => {
 
   test('names the per-page-request metric dimension', () => {
     expect(PAGE_REQUEST_METRICS.dimension).toEqual({
-      Name: 'RequestKind',
+      Name: 'request.kind',
       Value: 'page'
     })
   })
