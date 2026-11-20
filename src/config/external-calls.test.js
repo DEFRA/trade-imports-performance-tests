@@ -95,10 +95,10 @@ describe('EXTERNAL_CALLS', () => {
 })
 
 describe('SCHEME_BY_SERVICE', () => {
-  test('names the PascalCase scheme for the frontends and the dotted scheme for reference-data and dynamics-gateway', () => {
+  test('names the PascalCase scheme for ins-frontend and plants-frontend and the dotted scheme for animals-frontend, reference-data and dynamics-gateway', () => {
     expect(SCHEME_BY_SERVICE).toEqual({
       'trade-imports-ins-frontend': 'pascal',
-      'trade-imports-animals-frontend': 'pascal',
+      'trade-imports-animals-frontend': 'dotted',
       'trade-imports-plants-frontend': 'pascal',
       'trade-imports-reference-data': 'dotted',
       'trade-imports-dynamics-gateway': 'dotted'
