@@ -377,25 +377,25 @@ The stubs can only be as realistic as the figures behind them. So every INS serv
 
 Each service publishes to CloudWatch, in a namespace that is its CDP name, a duration and a failure metric for each call, with one dimension set naming the dependency and the operation. Services publish them under one of two schemes, and `METRIC_SCHEMES` in `src/config/external-calls.js` holds the names of each:
 
-| Scheme   | Services                                                                                        | Duration metric          | Failure metric          | Dimensions                |
-| -------- | ----------------------------------------------------------------------------------------------- | ------------------------ | ----------------------- | ------------------------- |
-| `pascal` | `trade-imports-ins-frontend`, `trade-imports-animals-frontend`, `trade-imports-plants-frontend` | `ExternalCallDuration`   | `ExternalCallFailure`   | `Dependency`, `Operation` |
-| `dotted` | `trade-imports-reference-data`, `trade-imports-dynamics-gateway`                                | `external.call.duration` | `external.call.failure` | `dependency`, `operation` |
+| Scheme   | Services                                                                                           | Duration metric          | Failure metric          | Dimensions                |
+| -------- | -------------------------------------------------------------------------------------------------- | ------------------------ | ----------------------- | ------------------------- |
+| `pascal` | `trade-imports-ins-frontend`, `trade-imports-plants-frontend`                                      | `ExternalCallDuration`   | `ExternalCallFailure`   | `Dependency`, `Operation` |
+| `dotted` | `trade-imports-animals-frontend`, `trade-imports-reference-data`, `trade-imports-dynamics-gateway` | `external.call.duration` | `external.call.failure` | `dependency`, `operation` |
 
 In both schemes the duration is in milliseconds, one raw value for each call, so CloudWatch gives `p50`, `p95` and `p99` from the raw values and `SampleCount` is the call count. The failure metric is 1 for a failed call and 0 for a successful one, so its `Average` is the error rate. A `pascal` service also writes the properties `Outcome` (`success` or `failure`) and `Interface` (the volumetrics section 9.3 SYN ID, left out where 9.3 gives none).
 
 These are the calls, and their names. Use the strings exactly. `SCHEME_BY_SERVICE` names each service's scheme, and the report reads each row of `EXTERNAL_CALLS` by the names of its service's scheme:
 
-| Service (namespace)                                                                             | Scheme   | Dependency          | Operation                  | Interface |
-| ----------------------------------------------------------------------------------------------- | -------- | ------------------- | -------------------------- | --------- |
-| `trade-imports-ins-frontend`, `trade-imports-animals-frontend`, `trade-imports-plants-frontend` | `pascal` | `defra-id`          | `openid-configuration`     | none      |
-| the same three                                                                                  | `pascal` | `defra-id`          | `jwks`                     | `SYN-12`  |
-| the same three                                                                                  | `pascal` | `defra-id`          | `token-exchange`           | `SYN-11`  |
-| the same three                                                                                  | `pascal` | `defra-id`          | `token-refresh`            | `SYN-13`  |
-| `trade-imports-reference-data`                                                                  | `dotted` | `trade-token`       | `client-credentials-token` | `SYN-19`  |
-| `trade-imports-reference-data`                                                                  | `dotted` | `mdm`               | `get-countries`            | `SYN-19`  |
-| `trade-imports-reference-data`                                                                  | `dotted` | `mdm`               | `get-ports-of-entry`       | `SYN-19`  |
-| `trade-imports-dynamics-gateway`                                                                | `dotted` | `azure-service-bus` | `send-message`             | none      |
+| Service (namespace)                                                                             | Scheme                 | Dependency          | Operation                  | Interface |
+| ----------------------------------------------------------------------------------------------- | ---------------------- | ------------------- | -------------------------- | --------- |
+| `trade-imports-ins-frontend`, `trade-imports-animals-frontend`, `trade-imports-plants-frontend` | each its own, as above | `defra-id`          | `openid-configuration`     | none      |
+| the same three                                                                                  | each its own, as above | `defra-id`          | `jwks`                     | `SYN-12`  |
+| the same three                                                                                  | each its own, as above | `defra-id`          | `token-exchange`           | `SYN-11`  |
+| the same three                                                                                  | each its own, as above | `defra-id`          | `token-refresh`            | `SYN-13`  |
+| `trade-imports-reference-data`                                                                  | `dotted`               | `trade-token`       | `client-credentials-token` | `SYN-19`  |
+| `trade-imports-reference-data`                                                                  | `dotted`               | `mdm`               | `get-countries`            | `SYN-19`  |
+| `trade-imports-reference-data`                                                                  | `dotted`               | `mdm`               | `get-ports-of-entry`       | `SYN-19`  |
+| `trade-imports-dynamics-gateway`                                                                | `dotted`               | `azure-service-bus` | `send-message`             | none      |
 
 The dependency is the integration id of the stub profile, so a measured row joins to its profile with no mapping. A call counts as failed when it rejects or throws, or, for reference-data, when the answer's status is 400 or above. Nothing is measured in stub mode, because no call is made.
 

@@ -84,6 +84,17 @@ describe('metricDataRequest', () => {
       ['ExternalCallDuration', 'ExternalCallFailure', 'Dependency', 'Operation']
     ],
     [
+      'trade-imports-animals-frontend',
+      'defra-id',
+      'token-exchange',
+      [
+        'external.call.duration',
+        'external.call.failure',
+        'dependency',
+        'operation'
+      ]
+    ],
+    [
       'trade-imports-reference-data',
       'mdm',
       'get-countries',

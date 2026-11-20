@@ -2,9 +2,7 @@ import { freezeDeep } from './traffic.js'
 
 /**
  * The CloudWatch metric and dimension names each way of publishing external
- * calls uses. The frontends publish `pascal`. reference-data and
- * dynamics-gateway publish `dotted`: Micrometer meter names, with the meter's
- * tags as the dimensions.
+ * calls uses: `pascal` or `dotted`. `SCHEME_BY_SERVICE` gives each service's.
  */
 export const METRIC_SCHEMES = freezeDeep({
   pascal: {
@@ -47,7 +45,7 @@ const FRONTENDS = Object.freeze([
  */
 export const SCHEME_BY_SERVICE = Object.freeze({
   'trade-imports-ins-frontend': 'pascal',
-  'trade-imports-animals-frontend': 'pascal',
+  'trade-imports-animals-frontend': 'dotted',
   'trade-imports-plants-frontend': 'pascal',
   'trade-imports-reference-data': 'dotted',
   'trade-imports-dynamics-gateway': 'dotted'
