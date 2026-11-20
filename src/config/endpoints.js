@@ -59,8 +59,6 @@ const ANIMALS_PAGES = [
   'animals-transit-countries-save',
   'animals-transporters',
   'animals-transporters-save',
-  'animals-contact',
-  'animals-contact-save',
   'animals-notification-view',
   'animals-declaration',
   'animals-declaration-save',
