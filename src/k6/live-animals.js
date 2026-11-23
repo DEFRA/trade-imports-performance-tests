@@ -166,35 +166,6 @@ const transporters = reachAndSubmit(
   })
 )
 
-const OPENING_RUN_DOCUMENTS_SLUG = 'accompanying-documents'
-
-/** After transport, the opening run visits accompanying documents then the addresses hub before check your answers. */
-const openingRunFromTransporter = {
-  name: 'opening-run-from-transporter',
-  run: (context, landed) => {
-    const { walker } = context
-    const documents = ENDPOINTS.documents
-    let page = walker.reach(
-      landed,
-      pagePath(context, OPENING_RUN_DOCUMENTS_SLUG),
-      documents.open
-    )
-
-    page = walker.submit(page, { action: 'continue' }, documents.save)
-
-    page = walker.reach(
-      page,
-      pagePath(context, 'addresses'),
-      ENDPOINTS.addresses.open
-    )
-
-    return saved(
-      'opening-run-from-transporter',
-      walker.submit(page, { action: 'continue' }, ENDPOINTS.addresses.save)
-    )
-  }
-}
-
 export const LIVE_ANIMALS_STEPS = Object.freeze({
   draft: [
     reachAndSubmit('origin', 'origin', ENDPOINTS.origin, originAnswers),
@@ -246,8 +217,7 @@ export const LIVE_ANIMALS_STEPS = Object.freeze({
     })),
     portOfEntry,
     transitCountries,
-    transporters,
-    openingRunFromTransporter
+    transporters
   ],
   reEdit: [
     'origin',
