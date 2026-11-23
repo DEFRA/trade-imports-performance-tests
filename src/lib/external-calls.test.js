@@ -394,14 +394,20 @@ describe('externalCallReport', () => {
     const [first] = report({
       metricResults: resultsFor({
         c0_p50ms: [98],
+        c0_p95ms: [460],
+        c0_p99ms: [880.4],
         c0_calls: [0],
         c0_errorrate: [0]
       })
     }).rows
 
-    expect(first.calls).toBe(0)
-    expect(first.p50Ms).toBeNull()
-    expect(first.errorRate).toBeNull()
+    expect(first).toMatchObject({
+      calls: 0,
+      p50Ms: null,
+      p95Ms: null,
+      p99Ms: null,
+      errorRate: null
+    })
   })
 
   test('says why the figures are unavailable and leaves every row empty', () => {
@@ -412,8 +418,13 @@ describe('externalCallReport', () => {
     expect(unavailable.source).toBe('unavailable')
     expect(unavailable.unavailableReason).toBe('No AWS CLI')
     for (const row of unavailable.rows) {
-      expect(row.calls).toBeNull()
-      expect(row.p50Ms).toBeNull()
+      expect(row).toMatchObject({
+        calls: null,
+        p50Ms: null,
+        p95Ms: null,
+        p99Ms: null,
+        errorRate: null
+      })
     }
   })
 
