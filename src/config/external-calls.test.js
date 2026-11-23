@@ -37,7 +37,7 @@ const defraIdRows = (service) => [
 ]
 
 describe('EXTERNAL_CALLS', () => {
-  test('is the 16 calls the services measure, in order', () => {
+  test('is the 16 calls to systems outside the INS boundary that the report reads, in order', () => {
     expect(EXTERNAL_CALLS).toEqual([
       ...defraIdRows('trade-imports-ins-frontend'),
       ...defraIdRows('trade-imports-animals-frontend'),

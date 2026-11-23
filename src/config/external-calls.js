@@ -68,8 +68,8 @@ const defraIdCalls = FRONTENDS.flatMap((service) =>
 )
 
 /**
- * Every call an INS service makes to a system outside the boundary, and so
- * every call the services measure. `service` is the CDP service name, which is
+ * The calls to systems outside the INS boundary that the report reads.
+ * `service` is the CDP service name, which is
  * also the CloudWatch namespace it publishes to, and its `SCHEME_BY_SERVICE`
  * entry gives the metric names. The strings are the services'
  * contract: each service emits exactly these dependency and operation names, and
