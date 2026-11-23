@@ -1,6 +1,7 @@
 import {
   CALL_COUNT_JOURNEYS,
-  DERIVED_CALL_RATIOS
+  DERIVED_CALL_RATIOS,
+  PAGE_REQUEST_METRICS
 } from '../config/call-ratios.js'
 import { EXTERNAL_CALLS } from '../config/external-calls.js'
 import { subMetricKey } from '../config/thresholds.js'
@@ -149,7 +150,7 @@ const HTTP_NOT_FOUND = 404
  */
 export const notMeasuredLine = ({ journey, service, status }) =>
   status === HTTP_NOT_FOUND
-    ? `Call ratio ${journey}: not measured here: ${service} does not expose /call-counts. On the platform the external call report reads its page.request.backend.calls and page.request.session.resolutions from CloudWatch`
+    ? `Call ratio ${journey}: not measured here: ${service} does not expose /call-counts. On the platform the external call report reads its ${PAGE_REQUEST_METRICS.backendCalls} and ${PAGE_REQUEST_METRICS.sessionResolutions} from CloudWatch`
     : `Call ratio ${journey}: not measured here: could not read /call-counts: status ${status}`
 
 /**
