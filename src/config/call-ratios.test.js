@@ -3,11 +3,22 @@ import { describe, expect, test } from 'vitest'
 import {
   CALL_COUNTS_PATH,
   CALL_COUNT_JOURNEYS,
+  CALL_COUNT_MEASURES,
+  CALL_RATIOS,
   DERIVED_CALL_RATIOS,
   PAGE_REQUEST_METRICS,
   PAGE_REQUEST_SERVICES
 } from './call-ratios.js'
 import { JOURNEYS } from './smoke.js'
+
+const unfrozenPaths = (value, path = '') =>
+  Object.entries(value).reduce(
+    (paths, [key, child]) =>
+      child && typeof child === 'object'
+        ? [...paths, ...unfrozenPaths(child, `${path}.${key}`)]
+        : paths,
+    Object.isFrozen(value) ? [] : [path || '(root)']
+  )
 
 describe('call ratio configuration', () => {
   test('reads the endpoint the frontends serve', () => {
@@ -56,7 +67,14 @@ describe('call ratio configuration', () => {
     })
   })
 
-  test('is frozen', () => {
-    expect(Object.isFrozen(CALL_COUNT_JOURNEYS['live-animals'])).toBe(true)
+  test.each([
+    ['CALL_COUNT_JOURNEYS', CALL_COUNT_JOURNEYS],
+    ['CALL_COUNT_MEASURES', CALL_COUNT_MEASURES],
+    ['CALL_RATIOS', CALL_RATIOS],
+    ['DERIVED_CALL_RATIOS', DERIVED_CALL_RATIOS],
+    ['PAGE_REQUEST_METRICS', PAGE_REQUEST_METRICS],
+    ['PAGE_REQUEST_SERVICES', PAGE_REQUEST_SERVICES]
+  ])('freezes %s and every value inside it', (_name, value) => {
+    expect(unfrozenPaths(value)).toEqual([])
   })
 })
