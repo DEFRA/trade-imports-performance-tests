@@ -119,9 +119,19 @@ describe('callRatios', () => {
       sessionResolutions: 0
     })
 
-    expect(ratios.backendCallsPerPage).toBeNull()
-    expect(ratios.derived.sessionResolutionsPerPage).toBeNull()
-    expect(ratios.permissionChecksPerPage).toBeNull()
+    expect(ratios).toEqual({
+      backendCallsPerPage: null,
+      sessionResolutionsPerPage: null,
+      frontendSessionResolutionsPerPage: null,
+      backendSessionResolutionsPerPage: null,
+      permissionChecksPerPage: null,
+      derived: {
+        backendCallsPerPage: null,
+        sessionResolutionsPerPage: null,
+        sessionResolutionsAtMeasuredD1: null,
+        permissionChecksPerPage: null
+      }
+    })
   })
 })
 
