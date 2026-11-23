@@ -134,7 +134,7 @@ describe('callRatioLine', () => {
         counts: COUNTS
       })
     ).toBe(
-      'Call ratio live-animals (trade-imports-animals-frontend, 412 page requests): backend calls 1.38 a page against 1 (D1, T8); session resolutions 1.97 a page against 2 (D2: 1 a page plus 1 a backend call; 2.38 at the measured backend calls), the frontend 1.97 and the journey backend 0 (no backend resolves a session today, c-008); permission checks 0 a page against 2 (D3): no permission check exists today (c-008; open items 17, 28)'
+      'Call ratio live-animals (trade-imports-animals-frontend, 412 page requests): backend calls 1.38 a page against 1 (D1, T8); session resolutions 1.97 a page against 2 (D2: 1 a page plus 1 a backend call; 2.38 at the measured backend calls), the frontend 1.97 and the journey backend 0 (no backend resolves a session today); permission checks 0 a page against 2 (D3): no permission check exists today'
     )
   })
 

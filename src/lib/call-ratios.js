@@ -73,9 +73,6 @@ const NO_RATIOS = Object.freeze({
  * Works out the call ratios a journey measured, beside the ones the
  * volumetrics page derives (D1, D2, D3).
  *
- * No journey backend resolves a session or checks a permission today (c-008),
- * so D2's backend share and all of D3 measure zero.
- *
  * @param {{ pageRequests: number, backendCalls: number, sessionResolutions: number }} counts - The journey's totals.
  * @returns {object} Every figure null when the journey carried no page requests.
  */
@@ -124,8 +121,8 @@ const measuredText = ({ journey, service, counts }) => {
     `Call ratio ${journey} (${service}, ${counts.pageRequests} page requests):`,
     `backend calls ${roundedText(ratios.backendCallsPerPage)} a page against ${derived.backendCallsPerPage} (${DERIVED_CALL_RATIOS.d1.label});`,
     `session resolutions ${roundedText(ratios.sessionResolutionsPerPage)} a page against ${derived.sessionResolutionsPerPage} (D2: ${DERIVED_CALL_RATIOS.d2.perPage} a page plus ${DERIVED_CALL_RATIOS.d2.perBackendCall} a backend call; ${roundedText(derived.sessionResolutionsAtMeasuredD1)} at the measured backend calls),`,
-    `the frontend ${roundedText(ratios.frontendSessionResolutionsPerPage)} and the journey backend ${ratios.backendSessionResolutionsPerPage} (no backend resolves a session today, c-008);`,
-    `permission checks ${ratios.permissionChecksPerPage} a page against ${derived.permissionChecksPerPage} (D3): no permission check exists today (c-008; open items 17, 28)`
+    `the frontend ${roundedText(ratios.frontendSessionResolutionsPerPage)} and the journey backend ${ratios.backendSessionResolutionsPerPage} (no backend resolves a session today);`,
+    `permission checks ${ratios.permissionChecksPerPage} a page against ${derived.permissionChecksPerPage} (D3): no permission check exists today`
   ].join(' ')
 }
 
