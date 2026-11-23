@@ -397,7 +397,13 @@ These are the calls, and their names. Use the strings exactly. `SCHEME_BY_SERVIC
 | `trade-imports-reference-data`                                                                  | `dotted`               | `mdm`               | `get-ports-of-entry`       | `SYN-19`  |
 | `trade-imports-dynamics-gateway`                                                                | `dotted`               | `azure-service-bus` | `send-message`             | none      |
 
-The dependency is the integration id of the stub profile, so a measured row joins to its profile with no mapping. A call counts as failed when it rejects or throws, or, for reference-data, when the answer's status is 400 or above. Nothing is measured in stub mode, because no call is made.
+The dependency is the integration id of the stub profile, so a measured row joins to its profile with no mapping. Each service has its own rule for a failed call:
+
+- `trade-imports-ins-frontend` and `trade-imports-plants-frontend`: the call rejects or throws
+- `trade-imports-reference-data`: the call throws, or the answer's status is 400 or above
+- `trade-imports-animals-frontend`: the call gets no answer, or the answer's status is 500 or above
+
+Nothing is measured in stub mode, because no call is made.
 
 Each Grafana widget reads one statistic for a namespace, dependency and operation, from the metric of the service's scheme:
 
