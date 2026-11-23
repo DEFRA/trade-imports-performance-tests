@@ -29,9 +29,8 @@ export const CALL_RATIOS = Object.freeze([
 ])
 
 /**
- * The call ratios the volumetrics page derives, as a count a page plus a count
- * a backend call. D2 and D3 are per page and per backend call: a frontend
- * resolves the session once a page and each backend call resolves it again.
+ * Each derived call ratio as a count a page plus a count a backend call, with
+ * the volumetrics source it comes from and, for D1, the label its line shows.
  */
 export const DERIVED_CALL_RATIOS = freezeDeep({
   d1: {

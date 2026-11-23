@@ -431,7 +431,7 @@ The perf-test task role needs `cloudwatch:GetMetricData`. That is CDP configurat
 
 ## Call ratios
 
-The volumetrics page derives its dependency rates from assumed call ratios: D1, one backend call a page (T8); D2, one session resolution a page plus one a backend call; D3, one permission check a page plus one a backend call. A journey run measures the real ones. k6 sees only its own requests and the journey backends publish no per-request timers, so each journey frontend counts for itself.
+The volumetrics page derives its dependency rates from assumed call ratios: D1, one backend call a page (T8); D2, one session resolution a page plus one a backend call; D3, one permission check a page plus one a backend call. D2 and D3 count once a page and once a backend call because a frontend resolves the session once for the page and each backend call resolves it again. A journey run measures the real ones. k6 sees only its own requests and the journey backends publish no per-request timers, so each journey frontend counts for itself.
 
 For every page request it handles, `trade-imports-animals-frontend` and `trade-imports-plants-frontend` count:
 
