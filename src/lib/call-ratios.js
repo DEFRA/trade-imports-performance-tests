@@ -7,11 +7,11 @@ import { EXTERNAL_CALLS } from '../config/external-calls.js'
 import { subMetricKey } from '../config/thresholds.js'
 import { summaryMetricValue } from './external-calls.js'
 
-const RATIO_DECIMALS = 2
-const NO_BACKEND_RESOLUTIONS = 0
-const NO_PERMISSION_CHECKS = 0
+const roundedText = (value) => {
+  const ratioDecimals = 2
 
-const roundedText = (value) => String(Number(value.toFixed(RATIO_DECIMALS)))
+  return String(Number(value.toFixed(ratioDecimals)))
+}
 
 /**
  * Reads one frontend's totals from the body of its `/call-counts` endpoint.
@@ -26,12 +26,15 @@ export const journeyCallCounts = ({ totals }) => ({
   externalCalls: totals.externalCalls ?? {}
 })
 
-const COUNT_FIELDS = ['pageRequests', 'backendCalls', 'sessionResolutions']
+const hasCounts = (totals) => {
+  const countFields = ['pageRequests', 'backendCalls', 'sessionResolutions']
 
-const hasCounts = (totals) =>
-  totals !== null &&
-  typeof totals === 'object' &&
-  COUNT_FIELDS.every((field) => Number.isFinite(totals[field]))
+  return (
+    totals !== null &&
+    typeof totals === 'object' &&
+    countFields.every((field) => Number.isFinite(totals[field]))
+  )
+}
 
 /**
  * Reads a 200 answer from a frontend's `/call-counts` endpoint without
@@ -85,16 +88,18 @@ export const callRatios = ({
     return NO_RATIOS
   }
 
+  const noBackendResolutions = 0
+  const noPermissionChecks = 0
   const backendCallsPerPage = backendCalls / pageRequests
   const frontendSessionResolutionsPerPage = sessionResolutions / pageRequests
 
   return {
     backendCallsPerPage,
     sessionResolutionsPerPage:
-      frontendSessionResolutionsPerPage + NO_BACKEND_RESOLUTIONS,
+      frontendSessionResolutionsPerPage + noBackendResolutions,
     frontendSessionResolutionsPerPage,
-    backendSessionResolutionsPerPage: NO_BACKEND_RESOLUTIONS,
-    permissionChecksPerPage: NO_PERMISSION_CHECKS,
+    backendSessionResolutionsPerPage: noBackendResolutions,
+    permissionChecksPerPage: noPermissionChecks,
     derived: {
       backendCallsPerPage: derivedPerPage(DERIVED_CALL_RATIOS.d1, 0),
       sessionResolutionsPerPage: derivedPerPage(
@@ -137,18 +142,19 @@ export const callRatioLine = ({ journey, service, counts }) =>
     ? measuredText({ journey, service, counts })
     : `Call ratio ${journey} (${service}): carried no page requests`
 
-const HTTP_NOT_FOUND = 404
-
 /**
  * Words why a journey's counts could not be read from its frontend.
  *
  * @param {{ journey: string, service: string, status: number }} options - The journey, its frontend and the status the endpoint answered.
  * @returns {string} The line.
  */
-export const notMeasuredLine = ({ journey, service, status }) =>
-  status === HTTP_NOT_FOUND
+export const notMeasuredLine = ({ journey, service, status }) => {
+  const httpNotFound = 404
+
+  return status === httpNotFound
     ? `Call ratio ${journey}: not measured here: ${service} does not expose /call-counts. On the platform the external call report reads its ${PAGE_REQUEST_METRICS.backendCalls} and ${PAGE_REQUEST_METRICS.sessionResolutions} from CloudWatch`
     : `Call ratio ${journey}: not measured here: could not read /call-counts: status ${status}`
+}
 
 /**
  * Words why a frontend answered 200 but its body was not call counts.
