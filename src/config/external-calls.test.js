@@ -117,7 +117,7 @@ describe('SCHEME_BY_SERVICE', () => {
 })
 
 describe('METRIC_SCHEMES', () => {
-  test('names the PascalCase metrics with Dependency and Operation dimensions, and the dotted Micrometer metrics with dependency and operation dimensions', () => {
+  test('names the PascalCase metrics with Dependency and Operation dimensions, and the dotted metrics with dependency and operation dimensions', () => {
     expect(METRIC_SCHEMES).toEqual({
       pascal: {
         duration: 'ExternalCallDuration',
