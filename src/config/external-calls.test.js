@@ -7,6 +7,7 @@ import {
   SCHEME_BY_SERVICE
 } from './external-calls.js'
 import { STUBBED_INTEGRATIONS } from './stub-profiles.js'
+import { unfrozenPaths } from '../test-support/unfrozen-paths.js'
 
 const defraIdRows = (service) => [
   {
@@ -88,9 +89,8 @@ describe('EXTERNAL_CALLS', () => {
     }
   })
 
-  test('is frozen', () => {
-    expect(Object.isFrozen(EXTERNAL_CALLS)).toBe(true)
-    expect(Object.isFrozen(EXTERNAL_CALLS[0])).toBe(true)
+  test('freezes the list and every row inside it', () => {
+    expect(unfrozenPaths(EXTERNAL_CALLS)).toEqual([])
   })
 })
 
@@ -134,9 +134,8 @@ describe('METRIC_SCHEMES', () => {
     })
   })
 
-  test('is frozen', () => {
-    expect(Object.isFrozen(METRIC_SCHEMES)).toBe(true)
-    expect(Object.isFrozen(METRIC_SCHEMES.dotted)).toBe(true)
+  test('freezes the schemes and every scheme inside them', () => {
+    expect(unfrozenPaths(METRIC_SCHEMES)).toEqual([])
   })
 })
 
