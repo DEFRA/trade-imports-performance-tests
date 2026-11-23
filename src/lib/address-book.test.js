@@ -49,20 +49,6 @@ describe('addAddressAnswers', () => {
       roles: ['CONSIGNEE', 'IMPORTER', 'PLACE_OF_DESTINATION']
     })
   })
-
-  test('gives the address fields under the name, ticking the role declared for the Branch type', () => {
-    expect(
-      addAddressAnswers(
-        { name: 'Old name', postcode: 'SW1A 1AA' },
-        'New name',
-        ADDRESS_TYPES.BRANCH
-      )
-    ).toEqual({
-      name: 'New name',
-      postcode: 'SW1A 1AA',
-      roles: ['BRANCH_ADDRESS']
-    })
-  })
 })
 
 describe('DECLARED_ROLES_BY_ADDRESS_TYPE', () => {
@@ -125,16 +111,17 @@ describe('addressBookListPath', () => {
     [
       'DESTINATION_CONSIGNEE_OR_IMPORTER',
       '/address-book?addressType=DESTINATION_CONSIGNEE_OR_IMPORTER'
-    ],
-    ['BRANCH', '/address-book?addressType=BRANCH']
+    ]
   ])('gives the bare path of the %s tab', (addressType, path) => {
     expect(addressBookListPath(addressType)).toBe(path)
   })
 
   test('adds the encoded search term after the tab', () => {
     expect(
-      addressBookListPath(ADDRESS_TYPES.BRANCH, { searchTerm: 'Perf & Co' })
-    ).toBe('/address-book?addressType=BRANCH&q=Perf%20%26%20Co')
+      addressBookListPath(ADDRESS_TYPES.ORIGIN_OR_CONSIGNOR, {
+        searchTerm: 'Perf & Co'
+      })
+    ).toBe('/address-book?addressType=ORIGIN_OR_CONSIGNOR&q=Perf%20%26%20Co')
   })
 
   test('adds the role between the tab and the encoded search term', () => {
