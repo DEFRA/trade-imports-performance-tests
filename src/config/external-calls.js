@@ -2,7 +2,8 @@ import { freezeDeep } from './traffic.js'
 
 /**
  * The CloudWatch metric and dimension names of each way of publishing, `pascal`
- * or `dotted`: the names of its external calls and of its page requests.
+ * or `dotted`: the names of its external calls and, for `dotted`, of its page
+ * requests.
  * `SCHEME_BY_SERVICE` gives the scheme each service publishes each with.
  */
 export const METRIC_SCHEMES = freezeDeep({
@@ -12,11 +13,6 @@ export const METRIC_SCHEMES = freezeDeep({
       failure: 'ExternalCallFailure',
       dependency: 'Dependency',
       operation: 'Operation'
-    },
-    pageRequests: {
-      dimension: { Name: 'RequestKind', Value: 'page' },
-      backendCalls: 'BackendCalls',
-      sessionResolutions: 'SessionResolutions'
     }
   },
   dotted: {

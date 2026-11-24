@@ -134,7 +134,7 @@ describe('SCHEME_BY_SERVICE', () => {
 })
 
 describe('METRIC_SCHEMES', () => {
-  test('names the PascalCase and the dotted metrics and dimensions of external calls and of page requests', () => {
+  test('names the PascalCase and the dotted metrics and dimensions of external calls, and the dotted ones of page requests', () => {
     expect(METRIC_SCHEMES).toEqual({
       pascal: {
         externalCalls: {
@@ -142,11 +142,6 @@ describe('METRIC_SCHEMES', () => {
           failure: 'ExternalCallFailure',
           dependency: 'Dependency',
           operation: 'Operation'
-        },
-        pageRequests: {
-          dimension: { Name: 'RequestKind', Value: 'page' },
-          backendCalls: 'BackendCalls',
-          sessionResolutions: 'SessionResolutions'
         }
       },
       dotted: {

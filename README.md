@@ -456,7 +456,6 @@ Each frontend publishes its page request counts by the page request names of the
 
 | Scheme   | Frontends whose page requests use it                              | Backend calls                | Session resolutions                | Dimension           |
 | -------- | ----------------------------------------------------------------- | ---------------------------- | ---------------------------------- | ------------------- |
-| `pascal` | none                                                              | `BackendCalls`               | `SessionResolutions`               | `RequestKind=page`  |
 | `dotted` | `trade-imports-animals-frontend`, `trade-imports-plants-frontend` | `page.request.backend.calls` | `page.request.session.resolutions` | `request.kind=page` |
 
 `trade-imports-plants-frontend` publishes its page requests `dotted` and its external calls `pascal`, so each family is read by its own scheme.
