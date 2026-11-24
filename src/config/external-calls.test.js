@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
 
+import { PAGE_REQUEST_SERVICES } from './call-ratios.js'
 import {
   EXTERNAL_CALLS,
   EXTERNAL_CALL_STATISTICS,
@@ -95,41 +96,71 @@ describe('EXTERNAL_CALLS', () => {
 })
 
 describe('SCHEME_BY_SERVICE', () => {
-  test('names the PascalCase scheme for ins-frontend and plants-frontend and the dotted scheme for animals-frontend, reference-data and dynamics-gateway', () => {
+  test('reads external calls PascalCase from ins-frontend and plants-frontend and dotted from the rest, and page requests dotted from animals-frontend and plants-frontend', () => {
     expect(SCHEME_BY_SERVICE).toEqual({
-      'trade-imports-ins-frontend': 'pascal',
-      'trade-imports-animals-frontend': 'dotted',
-      'trade-imports-plants-frontend': 'pascal',
-      'trade-imports-reference-data': 'dotted',
-      'trade-imports-dynamics-gateway': 'dotted'
+      'trade-imports-ins-frontend': { externalCalls: 'pascal' },
+      'trade-imports-animals-frontend': {
+        externalCalls: 'dotted',
+        pageRequests: 'dotted'
+      },
+      'trade-imports-plants-frontend': {
+        externalCalls: 'pascal',
+        pageRequests: 'dotted'
+      },
+      'trade-imports-reference-data': { externalCalls: 'dotted' },
+      'trade-imports-dynamics-gateway': { externalCalls: 'dotted' }
     })
   })
 
-  test('names a METRIC_SCHEMES entry for every service in EXTERNAL_CALLS', () => {
+  test('names a METRIC_SCHEMES entry for the external calls of every service in EXTERNAL_CALLS', () => {
     for (const { service } of EXTERNAL_CALLS) {
-      expect(Object.keys(METRIC_SCHEMES)).toContain(SCHEME_BY_SERVICE[service])
+      expect(Object.keys(METRIC_SCHEMES)).toContain(
+        SCHEME_BY_SERVICE[service].externalCalls
+      )
     }
   })
 
-  test('is frozen', () => {
-    expect(Object.isFrozen(SCHEME_BY_SERVICE)).toBe(true)
+  test('names a METRIC_SCHEMES entry for the page requests of every frontend in PAGE_REQUEST_SERVICES', () => {
+    for (const { service } of PAGE_REQUEST_SERVICES) {
+      expect(Object.keys(METRIC_SCHEMES)).toContain(
+        SCHEME_BY_SERVICE[service].pageRequests
+      )
+    }
+  })
+
+  test('freezes the services and every entry inside them', () => {
+    expect(unfrozenPaths(SCHEME_BY_SERVICE)).toEqual([])
   })
 })
 
 describe('METRIC_SCHEMES', () => {
-  test('names the PascalCase metrics with Dependency and Operation dimensions, and the dotted metrics with dependency and operation dimensions', () => {
+  test('names the PascalCase and the dotted metrics and dimensions of external calls and of page requests', () => {
     expect(METRIC_SCHEMES).toEqual({
       pascal: {
-        duration: 'ExternalCallDuration',
-        failure: 'ExternalCallFailure',
-        dependency: 'Dependency',
-        operation: 'Operation'
+        externalCalls: {
+          duration: 'ExternalCallDuration',
+          failure: 'ExternalCallFailure',
+          dependency: 'Dependency',
+          operation: 'Operation'
+        },
+        pageRequests: {
+          dimension: { Name: 'RequestKind', Value: 'page' },
+          backendCalls: 'BackendCalls',
+          sessionResolutions: 'SessionResolutions'
+        }
       },
       dotted: {
-        duration: 'external.call.duration',
-        failure: 'external.call.failure',
-        dependency: 'dependency',
-        operation: 'operation'
+        externalCalls: {
+          duration: 'external.call.duration',
+          failure: 'external.call.failure',
+          dependency: 'dependency',
+          operation: 'operation'
+        },
+        pageRequests: {
+          dimension: { Name: 'request.kind', Value: 'page' },
+          backendCalls: 'page.request.backend.calls',
+          sessionResolutions: 'page.request.session.resolutions'
+        }
       }
     })
   })

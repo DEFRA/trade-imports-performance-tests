@@ -6,7 +6,6 @@ import {
   CALL_COUNT_MEASURES,
   CALL_RATIOS,
   DERIVED_CALL_RATIOS,
-  PAGE_REQUEST_METRICS,
   PAGE_REQUEST_SERVICES
 } from './call-ratios.js'
 import { JOURNEYS } from './smoke.js'
@@ -52,19 +51,11 @@ describe('call ratio configuration', () => {
     })
   })
 
-  test('names the per-page-request metric dimension', () => {
-    expect(PAGE_REQUEST_METRICS.dimension).toEqual({
-      Name: 'request.kind',
-      Value: 'page'
-    })
-  })
-
   test.each([
     ['CALL_COUNT_JOURNEYS', CALL_COUNT_JOURNEYS],
     ['CALL_COUNT_MEASURES', CALL_COUNT_MEASURES],
     ['CALL_RATIOS', CALL_RATIOS],
     ['DERIVED_CALL_RATIOS', DERIVED_CALL_RATIOS],
-    ['PAGE_REQUEST_METRICS', PAGE_REQUEST_METRICS],
     ['PAGE_REQUEST_SERVICES', PAGE_REQUEST_SERVICES]
   ])('freezes %s and every value inside it', (_name, value) => {
     expect(unfrozenPaths(value)).toEqual([])

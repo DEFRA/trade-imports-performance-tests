@@ -1,11 +1,10 @@
 import {
   CALL_COUNT_JOURNEYS,
-  DERIVED_CALL_RATIOS,
-  PAGE_REQUEST_METRICS
+  DERIVED_CALL_RATIOS
 } from '../config/call-ratios.js'
 import { EXTERNAL_CALLS } from '../config/external-calls.js'
 import { subMetricKey } from '../config/thresholds.js'
-import { summaryMetricValue } from './external-calls.js'
+import { pageRequestNamesOf, summaryMetricValue } from './external-calls.js'
 
 const roundedText = (value) => {
   const ratioDecimals = 2
@@ -151,9 +150,13 @@ export const callRatioLine = ({ journey, service, counts }) =>
 export const notMeasuredLine = ({ journey, service, status }) => {
   const httpNotFound = 404
 
-  return status === httpNotFound
-    ? `Call ratio ${journey}: not measured here: ${service} does not expose /call-counts. On the platform the external call report reads its ${PAGE_REQUEST_METRICS.backendCalls} and ${PAGE_REQUEST_METRICS.sessionResolutions} from CloudWatch`
-    : `Call ratio ${journey}: not measured here: could not read /call-counts: status ${status}`
+  if (status !== httpNotFound) {
+    return `Call ratio ${journey}: not measured here: could not read /call-counts: status ${status}`
+  }
+
+  const { backendCalls, sessionResolutions } = pageRequestNamesOf(service)
+
+  return `Call ratio ${journey}: not measured here: ${service} does not expose /call-counts. On the platform the external call report reads its ${backendCalls} and ${sessionResolutions} from CloudWatch`
 }
 
 /**

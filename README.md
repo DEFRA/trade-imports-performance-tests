@@ -375,16 +375,16 @@ The verdict is reported, never gated: it does not fail the run. The stub-ceiling
 
 The stubs can only be as realistic as the figures behind them. So every INS service that calls a system outside the boundary measures each call, and a load run's report reads the figures back.
 
-Each service publishes to CloudWatch, in a namespace that is its CDP name, a duration and a failure metric for each call, with one dimension set naming the dependency and the operation. Services publish them under one of two schemes, and `METRIC_SCHEMES` in `src/config/external-calls.js` holds the names of each:
+Each service publishes to CloudWatch, in a namespace that is its CDP name, a duration and a failure metric for each call, with one dimension set naming the dependency and the operation. Services publish them under one of two schemes. `METRIC_SCHEMES` in `src/config/external-calls.js` holds the external call and page request names of each, and `SCHEME_BY_SERVICE` says which scheme each service publishes its external calls with and, for a journey frontend, its page requests with (see [Call ratios](#call-ratios)). The external call names:
 
-| Scheme   | Services                                                                                           | Duration metric          | Failure metric          | Dimensions                |
+| Scheme   | Services whose external calls use it                                                               | Duration metric          | Failure metric          | Dimensions                |
 | -------- | -------------------------------------------------------------------------------------------------- | ------------------------ | ----------------------- | ------------------------- |
 | `pascal` | `trade-imports-ins-frontend`, `trade-imports-plants-frontend`                                      | `ExternalCallDuration`   | `ExternalCallFailure`   | `Dependency`, `Operation` |
 | `dotted` | `trade-imports-animals-frontend`, `trade-imports-reference-data`, `trade-imports-dynamics-gateway` | `external.call.duration` | `external.call.failure` | `dependency`, `operation` |
 
 In both schemes the duration is in milliseconds, one raw value for each call, so CloudWatch gives `p50`, `p95` and `p99` from the raw values and `SampleCount` is the call count. The failure metric is 1 for a failed call and 0 for a successful one, so its `Average` is the error rate. A `pascal` service also writes the properties `Outcome` (`success` or `failure`) and `Interface` (the volumetrics section 9.3 SYN ID, left out where 9.3 gives none).
 
-These are the calls, and their names. Use the strings exactly. `SCHEME_BY_SERVICE` names each service's scheme, and the report reads each row of `EXTERNAL_CALLS` by the names of its service's scheme:
+These are the calls, and their names. Use the strings exactly. The report reads each row of `EXTERNAL_CALLS` by the external call names of its service's scheme:
 
 | Service (namespace)                                                                             | Scheme                 | Dependency          | Operation                  | Interface |
 | ----------------------------------------------------------------------------------------------- | ---------------------- | ------------------- | -------------------------- | --------- |
@@ -447,10 +447,19 @@ For every page request it handles, `trade-imports-animals-frontend` and `trade-i
 
 A page request is every request except `GET /health`, `GET /favicon.ico`, the static assets and `/call-counts` itself. The frontend keeps running totals for each route and serves them at `GET /call-counts`; `DELETE /call-counts` clears them. Two environment variables switch the counts on:
 
-| Variable                       | Default                               | Effect                                                                                                                             |
-| ------------------------------ | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `CALL_COUNTS_ENDPOINT_ENABLED` | on in the workspace stack, off on CDP | Serves `/call-counts`, which needs no sign-in                                                                                      |
-| `CALL_COUNTS_METRICS_ENABLED`  | off locally, on on CDP                | Writes one EMF document per page request: `page.request.backend.calls` and `page.request.session.resolutions`, `request.kind=page` |
+| Variable                       | Default                               | Effect                                                                                  |
+| ------------------------------ | ------------------------------------- | --------------------------------------------------------------------------------------- |
+| `CALL_COUNTS_ENDPOINT_ENABLED` | on in the workspace stack, off on CDP | Serves `/call-counts`, which needs no sign-in                                           |
+| `CALL_COUNTS_METRICS_ENABLED`  | off locally, on on CDP                | Writes one EMF document per page request: the backend calls and the session resolutions |
+
+Each frontend publishes its page request counts by the page request names of the scheme `SCHEME_BY_SERVICE` gives it, and the report reads them by those names:
+
+| Scheme   | Frontends whose page requests use it                              | Backend calls                | Session resolutions                | Dimension           |
+| -------- | ----------------------------------------------------------------- | ---------------------------- | ---------------------------------- | ------------------- |
+| `pascal` | none                                                              | `BackendCalls`               | `SessionResolutions`               | `RequestKind=page`  |
+| `dotted` | `trade-imports-animals-frontend`, `trade-imports-plants-frontend` | `page.request.backend.calls` | `page.request.session.resolutions` | `request.kind=page` |
+
+`trade-imports-plants-frontend` publishes its page requests `dotted` and its external calls `pascal`, so each family is read by its own scheme.
 
 `page.request.backend.calls` counts every call the frontend makes through its backend client, which includes the calls the upload page makes to cdp-uploader: the frontend routes those through the same client. So a journey that uploads a document reads higher than one backend call a page, and the `backendCallsPerPage` design target of 1 is the figure the report measures that against rather than a description of what a page does today.
 

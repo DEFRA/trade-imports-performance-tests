@@ -223,6 +223,55 @@ describe('metricDataRequest', () => {
       'trade-imports-plants-frontend'
     )
   })
+
+  test.each([
+    ['trade-imports-animals-frontend', 0],
+    ['trade-imports-plants-frontend', 1]
+  ])(
+    'reads the page requests of %s by the dotted names with the request.kind dimension',
+    (service, index) => {
+      const pageQueries = request({
+        pageRequestServices: PAGE_REQUEST_SERVICES
+      }).MetricDataQueries.filter(({ Id }) => Id.startsWith(`p${index}_`))
+      const dimensions = [{ Name: 'request.kind', Value: 'page' }]
+
+      expect(pageQueries.map(({ MetricStat }) => MetricStat.Metric)).toEqual([
+        {
+          Namespace: service,
+          MetricName: 'page.request.backend.calls',
+          Dimensions: dimensions
+        },
+        {
+          Namespace: service,
+          MetricName: 'page.request.backend.calls',
+          Dimensions: dimensions
+        },
+        {
+          Namespace: service,
+          MetricName: 'page.request.session.resolutions',
+          Dimensions: dimensions
+        }
+      ])
+    }
+  )
+
+  test('reads the external calls of plants-frontend by the PascalCase names', () => {
+    const index = EXTERNAL_CALLS.findIndex(
+      ({ service }) => service === 'trade-imports-plants-frontend'
+    )
+    const [durationQuery] = request().MetricDataQueries.filter(({ Id }) =>
+      Id.startsWith(`c${index}_`)
+    )
+
+    expect(durationQuery.MetricStat.Metric).toEqual({
+      Namespace: 'trade-imports-plants-frontend',
+      MetricName: 'ExternalCallDuration',
+      Dimensions: [
+        { Name: 'Dependency', Value: 'defra-id' },
+        { Name: 'Operation', Value: 'openid-configuration' }
+      ]
+    })
+  })
 })
 
 describe('pageRequestCountsFromResults', () => {

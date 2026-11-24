@@ -1,4 +1,3 @@
-import { PAGE_REQUEST_METRICS } from '../config/call-ratios.js'
 import {
   EXTERNAL_CALL_STATISTICS,
   METRIC_SCHEMES,
@@ -28,47 +27,51 @@ const queryId = (index, key) => `c${index}_${key.toLowerCase()}`
 
 const pageRequestQueryId = (index, key) => `p${index}_${key}`
 
+const metricNamesOf = (service, family) =>
+  METRIC_SCHEMES[SCHEME_BY_SERVICE[service][family]][family]
+
+/**
+ * Gives the CloudWatch names a journey frontend publishes its page requests
+ * with, from its `SCHEME_BY_SERVICE` entry.
+ *
+ * @param {string} service - The frontend's CDP service name.
+ * @returns {{ dimension: { Name: string, Value: string }, backendCalls: string, sessionResolutions: string }} The dimension that separates the counts from the other metrics in its namespace, and the two count metrics.
+ */
+export const pageRequestNamesOf = (service) =>
+  metricNamesOf(service, 'pageRequests')
+
 const PAGE_REQUEST_STATISTICS = Object.freeze([
-  {
-    key: 'backend_sum',
-    metric: PAGE_REQUEST_METRICS.backendCalls,
-    stat: 'Sum'
-  },
-  {
-    key: 'backend_count',
-    metric: PAGE_REQUEST_METRICS.backendCalls,
-    stat: 'SampleCount'
-  },
-  {
-    key: 'session_sum',
-    metric: PAGE_REQUEST_METRICS.sessionResolutions,
-    stat: 'Sum'
-  }
+  { key: 'backend_sum', metric: 'backendCalls', stat: 'Sum' },
+  { key: 'backend_count', metric: 'backendCalls', stat: 'SampleCount' },
+  { key: 'session_sum', metric: 'sessionResolutions', stat: 'Sum' }
 ])
 
-const pageRequestQueries = ({ service }, index, period) =>
-  PAGE_REQUEST_STATISTICS.map(({ key, metric, stat }) => ({
+const pageRequestQueries = ({ service }, index, period) => {
+  const names = pageRequestNamesOf(service)
+
+  return PAGE_REQUEST_STATISTICS.map(({ key, metric, stat }) => ({
     Id: pageRequestQueryId(index, key),
     ReturnData: true,
     MetricStat: {
       Metric: {
         Namespace: service,
-        MetricName: metric,
-        Dimensions: [PAGE_REQUEST_METRICS.dimension]
+        MetricName: names[metric],
+        Dimensions: [names.dimension]
       },
       Period: period,
       Stat: stat
     }
   }))
+}
 
-const metricNamesOf = (service) => METRIC_SCHEMES[SCHEME_BY_SERVICE[service]]
+const externalCallNamesOf = (service) => metricNamesOf(service, 'externalCalls')
 
 const externalCallQueries = (
   { service, dependency, operation },
   index,
   period
 ) => {
-  const names = metricNamesOf(service)
+  const names = externalCallNamesOf(service)
 
   return EXTERNAL_CALL_STATISTICS.map(({ key, metric, stat }) => ({
     Id: queryId(index, key),
@@ -96,10 +99,10 @@ const externalCallQueries = (
  * statistic comes back as one datapoint.
  *
  * @param {object} options - The request.
- * @param {Array<{ service: string, dependency: string, operation: string }>} options.externalCalls - The calls to read, each by the metric and dimension names its service's `SCHEME_BY_SERVICE` entry gives.
+ * @param {Array<{ service: string, dependency: string, operation: string }>} options.externalCalls - The calls to read, each by the external call names of its service's `SCHEME_BY_SERVICE` entry.
  * @param {string} options.runStartedAt - The run's start, as an ISO date-time.
  * @param {string} options.runEndedAt - The run's end, as an ISO date-time.
- * @param {Array<{ journey: string, service: string }>} [options.pageRequestServices] - The frontends whose per-page-request counts to read too.
+ * @param {Array<{ journey: string, service: string }>} [options.pageRequestServices] - The frontends whose per-page-request counts to read too, each by the page request names of its `SCHEME_BY_SERVICE` entry.
  * @returns {{ StartTime: string, EndTime: string, ScanBy: string, MetricDataQueries: object[] }} The request, in the shape `aws cloudwatch get-metric-data --cli-input-json` reads.
  * @throws {Error} When a time is missing or unparseable, or the end is before the start.
  */
@@ -359,7 +362,7 @@ const measuredLine = (row) =>
   `${callText(row)} ${latencyText(row)} over ${row.calls} calls, ${errorRateText(row.errorRate)}, beside ${stubText(row.stubProfile)}`
 
 const noDatapointsText = ({ service, dependency, operation }) => {
-  const names = metricNamesOf(service)
+  const names = externalCallNamesOf(service)
 
   return `no ${names.duration} datapoints by ${names.dependency}=${dependency}, ${names.operation}=${operation} in namespace ${service}`
 }

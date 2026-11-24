@@ -162,17 +162,17 @@ describe('callRatioLine', () => {
 })
 
 describe('notMeasuredLine', () => {
-  test('says the frontend does not expose the endpoint on a 404', () => {
-    expect(
-      notMeasuredLine({
-        journey: 'live-animals',
-        service: ANIMALS,
-        status: 404
-      })
-    ).toBe(
-      'Call ratio live-animals: not measured here: trade-imports-animals-frontend does not expose /call-counts. On the platform the external call report reads its page.request.backend.calls and page.request.session.resolutions from CloudWatch'
-    )
-  })
+  test.each([
+    ['live-animals', 'trade-imports-animals-frontend'],
+    ['high-risk-plants', 'trade-imports-plants-frontend']
+  ])(
+    'says on a 404 that the %s frontend does not expose the endpoint, naming its dotted page request metrics',
+    (journey, service) => {
+      expect(notMeasuredLine({ journey, service, status: 404 })).toBe(
+        `Call ratio ${journey}: not measured here: ${service} does not expose /call-counts. On the platform the external call report reads its page.request.backend.calls and page.request.session.resolutions from CloudWatch`
+      )
+    }
+  )
 
   test('names the status of any other answer', () => {
     expect(

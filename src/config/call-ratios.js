@@ -51,17 +51,6 @@ export const DERIVED_CALL_RATIOS = freezeDeep({
   }
 })
 
-/**
- * What each frontend publishes to CloudWatch for every page request: the
- * dimension that separates the figure from the other metrics in its namespace,
- * and the two counts.
- */
-export const PAGE_REQUEST_METRICS = freezeDeep({
-  dimension: { Name: 'request.kind', Value: 'page' },
-  backendCalls: 'page.request.backend.calls',
-  sessionResolutions: 'page.request.session.resolutions'
-})
-
 export const PAGE_REQUEST_SERVICES = freezeDeep(
   Object.entries(CALL_COUNT_JOURNEYS).map(([journey, { service }]) => ({
     journey,
