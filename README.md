@@ -477,7 +477,7 @@ Call ratio live-animals (trade-imports-animals-frontend, 412 page requests): bac
 | `call_count_external`  | Calls the frontend made to a system outside the boundary, tagged by `journey`, `dependency` and `operation`         |
 | `call_ratio`           | Backend calls and session resolutions a page, tagged by `journey` and `ratio`                                       |
 
-No journey backend resolves a session and no permission check exists (c-008), so D2's backend share and all of D3 measure 0 today, and the line says so. A frontend that answers 404 is logged as not measured here, with the CloudWatch route named. Only `call_counts_measured` is gated, and only in `local` (see [Thresholds](#thresholds)).
+No journey backend resolves a session and no permission check exists (c-008), so D2's backend share and all of D3 measure 0 today: the line prints 0 for the journey backend's session resolutions and for permission checks against D3. A frontend that answers 404 is logged as not measured here, with the CloudWatch route named. Only `call_counts_measured` is gated, and only in `local` (see [Thresholds](#thresholds)).
 
 ## Required service levels
 
@@ -796,7 +796,7 @@ At full length the run is 4 hours 30 seconds to the tail. At `local` length it i
 
 ### Session path
 
-Each frontend resolves the session from its own cache on every authenticated request (`trade-imports-ins-frontend` `src/plugins/auth.js`, and the same in the animals and plants frontends). No journey backend resolves a session, so there is no session API (c-008) and the stores' load is the frontends' page requests. A rendered page resolves the session twice in the animals and plants frontends (the auth plugin and the view context) and a redirect once, so the measured figure is in [Call ratios](#call-ratios), not one a page. The report states that rate over the `combined` phase against 1.35 RPS (NFR-DEP-05), over the `burst` against 2 (NFR-VOL-CORE-06) and over the `session-spike` against 25 (§9.4), and says that §9.4's backend share is carried by the frontends. It is reported, never gated: the rates are the run's input.
+Each frontend resolves the session from its own cache on every authenticated request (`trade-imports-ins-frontend` `src/plugins/auth.js`, and the same in the animals and plants frontends). No journey backend resolves a session, so there is no session API (c-008) and the stores' load is the frontends' page requests. A rendered page resolves the session twice in the animals and plants frontends (the auth plugin and the view context) and a redirect once, so the measured figure is in [Call ratios](#call-ratios), not one a page. The report states that rate over the `combined` phase against 1.35 RPS (NFR-DEP-05), over the `burst` against 2 (NFR-VOL-CORE-06) and over the `session-spike` against 25 (§9.4), and prints the journey backends' session resolutions a page request, 0, with the frontends carrying the rest of §9.4's backend share. It is reported, never gated: the rates are the run's input.
 
 To load the stores at 25 RPS while only the frontends resolve sessions, the three frontends must together serve 25 RPS, so the session spike takes each to 8.33 RPS, in proportion to the stated capacities. That is 1.67 times each frontend's own stated capacity (§4.2's 5 RPS), by design. The spike's response times are reported, never gated.
 
@@ -824,7 +824,7 @@ Combined pass rules: each scenario's response times in the `combined` phase at t
 ### Example lines
 
 ```text
-Session path (each frontend's own session store, one resolution a page request): 1.43 RPS over the combined (30m) against 1.35 sustained (NFR-DEP-05); 2.15 RPS in the burst (60s) against 2 (NFR-VOL-CORE-06); 24.6 RPS in the session spike (10s) against 25 (§9.4); no backend resolves a session today (c-008), so the frontends carry §9.4's backend share
+Session path (each frontend's own session store, one resolution a page request): 1.43 RPS over the combined (30m) against 1.35 sustained (NFR-DEP-05); 2.15 RPS in the burst (60s) against 2 (NFR-VOL-CORE-06); 24.6 RPS in the session spike (10s) against 25 (§9.4); the journey backends resolve 0 sessions a page request, and the frontends carry the rest of §9.4's backend share
 Dashboard read model (one read an INS dashboard view): 0.33 reads a second over the combined (30m) against 0.17 (§9.4 SYN-21); 0.48 in the burst (60s) against 0.25
 Read model consumer: live-animals events arrived P95 3.2s, max 7.9s after the outbox read (event_arrival_seconds)
 Reference data reference-data-countries-sps (/countries?blocks=GBNAG_SPS_EX): cold 2 reads (MDM called), P95 480ms, max 512ms; warm 1238 reads, P95 9ms, max 31ms; first read in the run warm

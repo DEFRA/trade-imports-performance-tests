@@ -23,6 +23,8 @@ export const CALL_COUNT_MEASURES = Object.freeze([
   'session-resolutions'
 ])
 
+export const BACKEND_SESSION_RESOLUTIONS_PER_PAGE = 0
+
 export const CALL_RATIOS = Object.freeze([
   'backend-calls-per-page',
   'session-resolutions-per-page'

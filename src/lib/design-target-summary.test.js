@@ -1461,7 +1461,7 @@ describe('the combined run', () => {
   describe('line writers', () => {
     test('states the session path against 1.35, 2 and 25', () => {
       expect(sessionPathLine({ shared })).toBe(
-        "Session path (each frontend's own session store, one resolution a page request): 1.43 RPS over the combined (30m) against 1.35 sustained (NFR-DEP-05); 2.15 RPS in the burst (60s) against 2 (NFR-VOL-CORE-06); 24.6 RPS in the session spike (10s) against 25 (§9.4); no backend resolves a session today (c-008), so the frontends carry §9.4's backend share"
+        "Session path (each frontend's own session store, one resolution a page request): 1.43 RPS over the combined (30m) against 1.35 sustained (NFR-DEP-05); 2.15 RPS in the burst (60s) against 2 (NFR-VOL-CORE-06); 24.6 RPS in the session spike (10s) against 25 (§9.4); the journey backends resolve 0 sessions a page request, and the frontends carry the rest of §9.4's backend share"
       )
     })
 

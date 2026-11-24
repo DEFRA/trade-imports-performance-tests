@@ -1,4 +1,5 @@
 import {
+  BACKEND_SESSION_RESOLUTIONS_PER_PAGE,
   CALL_COUNT_JOURNEYS,
   DERIVED_CALL_RATIOS
 } from '../config/call-ratios.js'
@@ -94,7 +95,7 @@ export const callRatios = ({
     backendCallsPerPage,
     sessionResolutionsPerPage,
     frontendSessionResolutionsPerPage: sessionResolutionsPerPage,
-    backendSessionResolutionsPerPage: 0,
+    backendSessionResolutionsPerPage: BACKEND_SESSION_RESOLUTIONS_PER_PAGE,
     permissionChecksPerPage: 0,
     derived: {
       backendCallsPerPage: derivedPerPage(DERIVED_CALL_RATIOS.d1, 0),
