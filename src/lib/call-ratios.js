@@ -87,18 +87,15 @@ export const callRatios = ({
     return NO_RATIOS
   }
 
-  const noBackendResolutions = 0
-  const noPermissionChecks = 0
   const backendCallsPerPage = backendCalls / pageRequests
-  const frontendSessionResolutionsPerPage = sessionResolutions / pageRequests
+  const sessionResolutionsPerPage = sessionResolutions / pageRequests
 
   return {
     backendCallsPerPage,
-    sessionResolutionsPerPage:
-      frontendSessionResolutionsPerPage + noBackendResolutions,
-    frontendSessionResolutionsPerPage,
-    backendSessionResolutionsPerPage: noBackendResolutions,
-    permissionChecksPerPage: noPermissionChecks,
+    sessionResolutionsPerPage,
+    frontendSessionResolutionsPerPage: sessionResolutionsPerPage,
+    backendSessionResolutionsPerPage: 0,
+    permissionChecksPerPage: 0,
     derived: {
       backendCallsPerPage: derivedPerPage(DERIVED_CALL_RATIOS.d1, 0),
       sessionResolutionsPerPage: derivedPerPage(
@@ -125,8 +122,8 @@ const measuredText = ({ journey, service, counts }) => {
     `Call ratio ${journey} (${service}, ${counts.pageRequests} page requests):`,
     `backend calls ${roundedText(ratios.backendCallsPerPage)} a page against ${derived.backendCallsPerPage} (${DERIVED_CALL_RATIOS.d1.label});`,
     `session resolutions ${roundedText(ratios.sessionResolutionsPerPage)} a page against ${derived.sessionResolutionsPerPage} (D2: ${DERIVED_CALL_RATIOS.d2.perPage} a page plus ${DERIVED_CALL_RATIOS.d2.perBackendCall} a backend call; ${roundedText(derived.sessionResolutionsAtMeasuredD1)} at the measured backend calls),`,
-    `the frontend ${roundedText(ratios.frontendSessionResolutionsPerPage)} and the journey backend ${ratios.backendSessionResolutionsPerPage} (no backend resolves a session today);`,
-    `permission checks ${ratios.permissionChecksPerPage} a page against ${derived.permissionChecksPerPage} (D3): no permission check exists today`
+    `the frontend ${roundedText(ratios.frontendSessionResolutionsPerPage)} and the journey backend ${ratios.backendSessionResolutionsPerPage};`,
+    `permission checks ${ratios.permissionChecksPerPage} a page against ${derived.permissionChecksPerPage} (D3)`
   ].join(' ')
 }
 
