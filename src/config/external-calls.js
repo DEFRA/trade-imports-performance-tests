@@ -31,10 +31,10 @@ export const METRIC_SCHEMES = freezeDeep({
 })
 
 /**
- * The statistics the report reads for each external call, and the metric of
- * its service's external call names and the statistic each comes from. `SampleCount` of the
- * duration is the call count, and `Average` of the failure metric is the error
- * rate.
+ * The statistics the report reads for each external call: the key it reports
+ * each under, the metric of the service's scheme it reads, and the statistic.
+ * `SampleCount` of the duration is the call count, and `Average` of the
+ * failure metric is the error rate.
  */
 export const EXTERNAL_CALL_STATISTICS = Object.freeze([
   { key: 'p50Ms', metric: 'duration', stat: 'p50' },
@@ -86,11 +86,9 @@ const defraIdCalls = FRONTENDS.flatMap((service) =>
 
 /**
  * The calls to systems outside the INS boundary that the report reads.
- * `service` is the CDP service name, which is
- * also the CloudWatch namespace it publishes to, and its `SCHEME_BY_SERVICE`
- * entry gives the scheme of its metric names. The strings are the services'
- * contract: each service emits exactly these dependency and operation names, and
- * `dependency` is the integration id of its stub profile.
+ * `service` is the CDP service name, which is also the CloudWatch namespace
+ * the report reads, and its `SCHEME_BY_SERVICE` entry gives the scheme of its
+ * metric names. `dependency` is the integration id of its stub profile.
  */
 export const EXTERNAL_CALLS = freezeDeep([
   ...defraIdCalls,
