@@ -166,15 +166,6 @@ const transporters = reachAndSubmit(
   })
 )
 
-const contact = reachAndSubmit(
-  'contact',
-  'consignment/contact/select',
-  ENDPOINTS.contact,
-  ({ addressName }, page) => ({
-    contactAddress: choiceLabelled(page, 'contactAddress', addressName)
-  })
-)
-
 export const LIVE_ANIMALS_STEPS = Object.freeze({
   draft: [
     reachAndSubmit('origin', 'origin', ENDPOINTS.origin, originAnswers),
@@ -226,8 +217,7 @@ export const LIVE_ANIMALS_STEPS = Object.freeze({
     })),
     portOfEntry,
     transitCountries,
-    transporters,
-    contact
+    transporters
   ],
   reEdit: [
     'origin',

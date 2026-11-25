@@ -94,7 +94,7 @@ describe('SCENARIOS', () => {
         'animals-identification',
         'animals-party-picker-save',
         'animals-port-of-entry-save',
-        'animals-contact-save'
+        'animals-addresses-save'
       ])
     )
     expect(SCENARIOS['high-risk-plants'].endpoints).toEqual(

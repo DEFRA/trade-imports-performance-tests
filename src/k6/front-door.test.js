@@ -171,8 +171,7 @@ describe('makeEveryDeclaredRoleFindable', () => {
     makeEveryDeclaredRoleFindable(requests, ADDRESS, NAME)
 
     expect(typeChoicesOf(requests.submitted)).toEqual([
-      ADDRESS_TYPES.DESTINATION_CONSIGNEE_OR_IMPORTER,
-      ADDRESS_TYPES.BRANCH
+      ADDRESS_TYPES.DESTINATION_CONSIGNEE_OR_IMPORTER
     ])
   })
 
@@ -191,15 +190,11 @@ describe('makeEveryDeclaredRoleFindable', () => {
     makeEveryDeclaredRoleFindable(requests, ADDRESS, NAME)
 
     expect(typeChoicesOf(requests.submitted)).toEqual([
-      ADDRESS_TYPES.ORIGIN_OR_CONSIGNOR,
-      ADDRESS_TYPES.BRANCH
+      ADDRESS_TYPES.ORIGIN_OR_CONSIGNOR
     ])
     expect(addsOf(requests.submitted)).toEqual([
       expect.objectContaining({
         roles: DECLARED_ROLES_BY_ADDRESS_TYPE[ADDRESS_TYPES.ORIGIN_OR_CONSIGNOR]
-      }),
-      expect.objectContaining({
-        roles: DECLARED_ROLES_BY_ADDRESS_TYPE[ADDRESS_TYPES.BRANCH]
       })
     ])
   })

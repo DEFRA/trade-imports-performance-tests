@@ -33,8 +33,7 @@ describe('STEP_ENDPOINTS', () => {
       'cph-number',
       'port-of-entry',
       'transit-countries',
-      'transporters',
-      'contact'
+      'transporters'
     ])
     expect(Object.keys(STEP_ENDPOINTS['high-risk-plants'])).toEqual([
       'commodity-type',
