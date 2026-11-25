@@ -23,15 +23,16 @@ export const CALL_COUNT_MEASURES = Object.freeze([
   'session-resolutions'
 ])
 
+export const BACKEND_SESSION_RESOLUTIONS_PER_PAGE = 0
+
 export const CALL_RATIOS = Object.freeze([
   'backend-calls-per-page',
   'session-resolutions-per-page'
 ])
 
 /**
- * The call ratios the volumetrics page derives, as a count a page plus a count
- * a backend call. D2 and D3 are per page and per backend call: a frontend
- * resolves the session once a page and each backend call resolves it again.
+ * Each derived call ratio as a count a page plus a count a backend call, with
+ * the volumetrics source it comes from and, for D1, the label its line shows.
  */
 export const DERIVED_CALL_RATIOS = freezeDeep({
   d1: {
@@ -50,17 +51,6 @@ export const DERIVED_CALL_RATIOS = freezeDeep({
     perBackendCall: 1,
     source: 'D3: §9.4'
   }
-})
-
-/**
- * What each frontend publishes to CloudWatch for every page request: the
- * dimension that separates the figure from the other metrics in its namespace,
- * and the two counts.
- */
-export const PAGE_REQUEST_METRICS = freezeDeep({
-  dimension: { Name: 'RequestKind', Value: 'page' },
-  backendCalls: 'BackendCalls',
-  sessionResolutions: 'SessionResolutions'
 })
 
 export const PAGE_REQUEST_SERVICES = freezeDeep(

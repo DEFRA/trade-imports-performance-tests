@@ -25,6 +25,7 @@ import {
   spikeCapacities,
   spikeProfileLine
 } from '../config/design-target.js'
+import { BACKEND_SESSION_RESOLUTIONS_PER_PAGE } from '../config/call-ratios.js'
 import { kindOf } from '../config/endpoints.js'
 import { REFERENCE_DATA_READS } from '../config/reference-data.js'
 import { RE_AUTHENTICATION_TAG } from '../config/request-mix.js'
@@ -1119,7 +1120,7 @@ export const sessionPathLine = ({ shared }) => {
   const { combined, burst } = shared
   const spike = shared['session-spike']
 
-  return `Session path (each frontend's own session store, one resolution a page request): ${rpsText(combined.sessionPathRps)} RPS over the combined (${combined.duration}) against ${rpsText(combined.sessionPathTarget)} sustained (NFR-DEP-05); ${rpsText(burst.sessionPathRps)} RPS in the burst (${burst.duration}) against ${rpsText(burst.sessionPathTarget)} (NFR-VOL-CORE-06); ${rpsText(spike.sessionPathRps)} RPS in the session spike (${spike.duration}) against ${rpsText(spike.sessionPathTarget)} (§9.4); no backend resolves a session today (c-008), so the frontends carry §9.4's backend share`
+  return `Session path (each frontend's own session store, one resolution a page request): ${rpsText(combined.sessionPathRps)} RPS over the combined (${combined.duration}) against ${rpsText(combined.sessionPathTarget)} sustained (NFR-DEP-05); ${rpsText(burst.sessionPathRps)} RPS in the burst (${burst.duration}) against ${rpsText(burst.sessionPathTarget)} (NFR-VOL-CORE-06); ${rpsText(spike.sessionPathRps)} RPS in the session spike (${spike.duration}) against ${rpsText(spike.sessionPathTarget)} (§9.4); the journey backends resolve ${BACKEND_SESSION_RESOLUTIONS_PER_PAGE} sessions a page request, and the frontends carry the rest of §9.4's backend share`
 }
 
 /**

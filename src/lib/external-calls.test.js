@@ -84,6 +84,17 @@ describe('metricDataRequest', () => {
       ['ExternalCallDuration', 'ExternalCallFailure', 'Dependency', 'Operation']
     ],
     [
+      'trade-imports-animals-frontend',
+      'defra-id',
+      'token-exchange',
+      [
+        'external.call.duration',
+        'external.call.failure',
+        'dependency',
+        'operation'
+      ]
+    ],
+    [
       'trade-imports-reference-data',
       'mdm',
       'get-countries',
@@ -197,8 +208,8 @@ describe('metricDataRequest', () => {
       MetricStat: {
         Metric: {
           Namespace: 'trade-imports-animals-frontend',
-          MetricName: 'BackendCalls',
-          Dimensions: [{ Name: 'RequestKind', Value: 'page' }]
+          MetricName: 'page.request.backend.calls',
+          Dimensions: [{ Name: 'request.kind', Value: 'page' }]
         },
         Period: 480,
         Stat: 'Sum'
@@ -206,11 +217,60 @@ describe('metricDataRequest', () => {
     })
     expect(pageQueries[1].MetricStat.Stat).toBe('SampleCount')
     expect(pageQueries[2].MetricStat.Metric.MetricName).toBe(
-      'SessionResolutions'
+      'page.request.session.resolutions'
     )
     expect(pageQueries[3].MetricStat.Metric.Namespace).toBe(
       'trade-imports-plants-frontend'
     )
+  })
+
+  test.each([
+    ['trade-imports-animals-frontend', 0],
+    ['trade-imports-plants-frontend', 1]
+  ])(
+    'reads the page requests of %s by the dotted names with the request.kind dimension',
+    (service, index) => {
+      const pageQueries = request({
+        pageRequestServices: PAGE_REQUEST_SERVICES
+      }).MetricDataQueries.filter(({ Id }) => Id.startsWith(`p${index}_`))
+      const dimensions = [{ Name: 'request.kind', Value: 'page' }]
+
+      expect(pageQueries.map(({ MetricStat }) => MetricStat.Metric)).toEqual([
+        {
+          Namespace: service,
+          MetricName: 'page.request.backend.calls',
+          Dimensions: dimensions
+        },
+        {
+          Namespace: service,
+          MetricName: 'page.request.backend.calls',
+          Dimensions: dimensions
+        },
+        {
+          Namespace: service,
+          MetricName: 'page.request.session.resolutions',
+          Dimensions: dimensions
+        }
+      ])
+    }
+  )
+
+  test('reads the external calls of plants-frontend by the PascalCase names', () => {
+    const index = EXTERNAL_CALLS.findIndex(
+      ({ service }) => service === 'trade-imports-plants-frontend'
+    )
+    const [durationQuery] = request().MetricDataQueries.filter(({ Id }) =>
+      Id.startsWith(`c${index}_`)
+    )
+
+    expect(durationQuery.MetricStat.Metric).toEqual({
+      Namespace: 'trade-imports-plants-frontend',
+      MetricName: 'ExternalCallDuration',
+      Dimensions: [
+        { Name: 'Dependency', Value: 'defra-id' },
+        { Name: 'Operation', Value: 'openid-configuration' }
+      ]
+    })
   })
 })
 
@@ -383,14 +443,20 @@ describe('externalCallReport', () => {
     const [first] = report({
       metricResults: resultsFor({
         c0_p50ms: [98],
+        c0_p95ms: [460],
+        c0_p99ms: [880.4],
         c0_calls: [0],
         c0_errorrate: [0]
       })
     }).rows
 
-    expect(first.calls).toBe(0)
-    expect(first.p50Ms).toBeNull()
-    expect(first.errorRate).toBeNull()
+    expect(first).toMatchObject({
+      calls: 0,
+      p50Ms: null,
+      p95Ms: null,
+      p99Ms: null,
+      errorRate: null
+    })
   })
 
   test('says why the figures are unavailable and leaves every row empty', () => {
@@ -401,8 +467,13 @@ describe('externalCallReport', () => {
     expect(unavailable.source).toBe('unavailable')
     expect(unavailable.unavailableReason).toBe('No AWS CLI')
     for (const row of unavailable.rows) {
-      expect(row.calls).toBeNull()
-      expect(row.p50Ms).toBeNull()
+      expect(row).toMatchObject({
+        calls: null,
+        p50Ms: null,
+        p95Ms: null,
+        p99Ms: null,
+        errorRate: null
+      })
     }
   })
 
