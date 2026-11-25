@@ -61,7 +61,7 @@ export const SCHEME_BY_SERVICE = freezeDeep({
     pageRequests: 'dotted'
   },
   'trade-imports-plants-frontend': {
-    externalCalls: 'pascal',
+    externalCalls: 'dotted',
     pageRequests: 'dotted'
   },
   'trade-imports-reference-data': { externalCalls: 'dotted' },
