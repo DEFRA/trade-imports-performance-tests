@@ -1,16 +1,17 @@
 import {
+  BACKEND_SESSION_RESOLUTIONS_PER_PAGE,
   CALL_COUNT_JOURNEYS,
   DERIVED_CALL_RATIOS
 } from '../config/call-ratios.js'
 import { EXTERNAL_CALLS } from '../config/external-calls.js'
 import { subMetricKey } from '../config/thresholds.js'
-import { summaryMetricValue } from './external-calls.js'
+import { pageRequestNamesOf, summaryMetricValue } from './external-calls.js'
 
-const RATIO_DECIMALS = 2
-const NO_BACKEND_RESOLUTIONS = 0
-const NO_PERMISSION_CHECKS = 0
+const roundedText = (value) => {
+  const ratioDecimals = 2
 
-const roundedText = (value) => String(Number(value.toFixed(RATIO_DECIMALS)))
+  return String(Number(value.toFixed(ratioDecimals)))
+}
 
 /**
  * Reads one frontend's totals from the body of its `/call-counts` endpoint.
@@ -25,12 +26,15 @@ export const journeyCallCounts = ({ totals }) => ({
   externalCalls: totals.externalCalls ?? {}
 })
 
-const COUNT_FIELDS = ['pageRequests', 'backendCalls', 'sessionResolutions']
+const hasCounts = (totals) => {
+  const countFields = ['pageRequests', 'backendCalls', 'sessionResolutions']
 
-const hasCounts = (totals) =>
-  totals !== null &&
-  typeof totals === 'object' &&
-  COUNT_FIELDS.every((field) => Number.isFinite(totals[field]))
+  return (
+    totals !== null &&
+    typeof totals === 'object' &&
+    countFields.every((field) => Number.isFinite(totals[field]))
+  )
+}
 
 /**
  * Reads a 200 answer from a frontend's `/call-counts` endpoint without
@@ -72,9 +76,6 @@ const NO_RATIOS = Object.freeze({
  * Works out the call ratios a journey measured, beside the ones the
  * volumetrics page derives (D1, D2, D3).
  *
- * No journey backend resolves a session or checks a permission today (c-008),
- * so D2's backend share and all of D3 measure zero.
- *
  * @param {{ pageRequests: number, backendCalls: number, sessionResolutions: number }} counts - The journey's totals.
  * @returns {object} Every figure null when the journey carried no page requests.
  */
@@ -88,15 +89,14 @@ export const callRatios = ({
   }
 
   const backendCallsPerPage = backendCalls / pageRequests
-  const frontendSessionResolutionsPerPage = sessionResolutions / pageRequests
+  const sessionResolutionsPerPage = sessionResolutions / pageRequests
 
   return {
     backendCallsPerPage,
-    sessionResolutionsPerPage:
-      frontendSessionResolutionsPerPage + NO_BACKEND_RESOLUTIONS,
-    frontendSessionResolutionsPerPage,
-    backendSessionResolutionsPerPage: NO_BACKEND_RESOLUTIONS,
-    permissionChecksPerPage: NO_PERMISSION_CHECKS,
+    sessionResolutionsPerPage,
+    frontendSessionResolutionsPerPage: sessionResolutionsPerPage,
+    backendSessionResolutionsPerPage: BACKEND_SESSION_RESOLUTIONS_PER_PAGE,
+    permissionChecksPerPage: 0,
     derived: {
       backendCallsPerPage: derivedPerPage(DERIVED_CALL_RATIOS.d1, 0),
       sessionResolutionsPerPage: derivedPerPage(
@@ -123,8 +123,8 @@ const measuredText = ({ journey, service, counts }) => {
     `Call ratio ${journey} (${service}, ${counts.pageRequests} page requests):`,
     `backend calls ${roundedText(ratios.backendCallsPerPage)} a page against ${derived.backendCallsPerPage} (${DERIVED_CALL_RATIOS.d1.label});`,
     `session resolutions ${roundedText(ratios.sessionResolutionsPerPage)} a page against ${derived.sessionResolutionsPerPage} (D2: ${DERIVED_CALL_RATIOS.d2.perPage} a page plus ${DERIVED_CALL_RATIOS.d2.perBackendCall} a backend call; ${roundedText(derived.sessionResolutionsAtMeasuredD1)} at the measured backend calls),`,
-    `the frontend ${roundedText(ratios.frontendSessionResolutionsPerPage)} and the journey backend ${ratios.backendSessionResolutionsPerPage} (no backend resolves a session today, c-008);`,
-    `permission checks ${ratios.permissionChecksPerPage} a page against ${derived.permissionChecksPerPage} (D3): no permission check exists today (c-008; open items 17, 28)`
+    `the frontend ${roundedText(ratios.frontendSessionResolutionsPerPage)} and the journey backend ${ratios.backendSessionResolutionsPerPage};`,
+    `permission checks ${ratios.permissionChecksPerPage} a page against ${derived.permissionChecksPerPage} (D3)`
   ].join(' ')
 }
 
@@ -139,18 +139,23 @@ export const callRatioLine = ({ journey, service, counts }) =>
     ? measuredText({ journey, service, counts })
     : `Call ratio ${journey} (${service}): carried no page requests`
 
-const HTTP_NOT_FOUND = 404
-
 /**
  * Words why a journey's counts could not be read from its frontend.
  *
  * @param {{ journey: string, service: string, status: number }} options - The journey, its frontend and the status the endpoint answered.
  * @returns {string} The line.
  */
-export const notMeasuredLine = ({ journey, service, status }) =>
-  status === HTTP_NOT_FOUND
-    ? `Call ratio ${journey}: not measured here: ${service} does not expose /call-counts. On the platform the external call report reads its BackendCalls and SessionResolutions from CloudWatch`
-    : `Call ratio ${journey}: not measured here: could not read /call-counts: status ${status}`
+export const notMeasuredLine = ({ journey, service, status }) => {
+  const httpNotFound = 404
+
+  if (status !== httpNotFound) {
+    return `Call ratio ${journey}: not measured here: could not read /call-counts: status ${status}`
+  }
+
+  const { backendCalls, sessionResolutions } = pageRequestNamesOf(service)
+
+  return `Call ratio ${journey}: not measured here: ${service} does not expose /call-counts. On the platform the external call report reads its ${backendCalls} and ${sessionResolutions} from CloudWatch`
+}
 
 /**
  * Words why a frontend answered 200 but its body was not call counts.

@@ -98,7 +98,7 @@ describe('unreadableCountsLine', () => {
 })
 
 describe('callRatios', () => {
-  test('divides each count by the page requests and sets them beside the derived figures', () => {
+  test('divides each count by the page requests, gives the journey backend and permission checks none, and sets them beside the derived figures', () => {
     const ratios = callRatios(COUNTS)
 
     expect(ratios.backendCallsPerPage).toBeCloseTo(1.381, 3)
@@ -119,9 +119,19 @@ describe('callRatios', () => {
       sessionResolutions: 0
     })
 
-    expect(ratios.backendCallsPerPage).toBeNull()
-    expect(ratios.derived.sessionResolutionsPerPage).toBeNull()
-    expect(ratios.permissionChecksPerPage).toBeNull()
+    expect(ratios).toEqual({
+      backendCallsPerPage: null,
+      sessionResolutionsPerPage: null,
+      frontendSessionResolutionsPerPage: null,
+      backendSessionResolutionsPerPage: null,
+      permissionChecksPerPage: null,
+      derived: {
+        backendCallsPerPage: null,
+        sessionResolutionsPerPage: null,
+        sessionResolutionsAtMeasuredD1: null,
+        permissionChecksPerPage: null
+      }
+    })
   })
 })
 
@@ -134,7 +144,7 @@ describe('callRatioLine', () => {
         counts: COUNTS
       })
     ).toBe(
-      'Call ratio live-animals (trade-imports-animals-frontend, 412 page requests): backend calls 1.38 a page against 1 (D1, T8); session resolutions 1.97 a page against 2 (D2: 1 a page plus 1 a backend call; 2.38 at the measured backend calls), the frontend 1.97 and the journey backend 0 (no backend resolves a session today, c-008); permission checks 0 a page against 2 (D3): no permission check exists today (c-008; open items 17, 28)'
+      'Call ratio live-animals (trade-imports-animals-frontend, 412 page requests): backend calls 1.38 a page against 1 (D1, T8); session resolutions 1.97 a page against 2 (D2: 1 a page plus 1 a backend call; 2.38 at the measured backend calls), the frontend 1.97 and the journey backend 0; permission checks 0 a page against 2 (D3)'
     )
   })
 
@@ -152,17 +162,17 @@ describe('callRatioLine', () => {
 })
 
 describe('notMeasuredLine', () => {
-  test('says the frontend does not expose the endpoint on a 404', () => {
-    expect(
-      notMeasuredLine({
-        journey: 'live-animals',
-        service: ANIMALS,
-        status: 404
-      })
-    ).toBe(
-      'Call ratio live-animals: not measured here: trade-imports-animals-frontend does not expose /call-counts. On the platform the external call report reads its BackendCalls and SessionResolutions from CloudWatch'
-    )
-  })
+  test.each([
+    ['live-animals', 'trade-imports-animals-frontend'],
+    ['high-risk-plants', 'trade-imports-plants-frontend']
+  ])(
+    'says on a 404 that the %s frontend does not expose the endpoint, naming its dotted page request metrics',
+    (journey, service) => {
+      expect(notMeasuredLine({ journey, service, status: 404 })).toBe(
+        `Call ratio ${journey}: not measured here: ${service} does not expose /call-counts. On the platform the external call report reads its page.request.backend.calls and page.request.session.resolutions from CloudWatch`
+      )
+    }
+  )
 
   test('names the status of any other answer', () => {
     expect(

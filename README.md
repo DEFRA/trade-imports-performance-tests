@@ -375,29 +375,35 @@ The verdict is reported, never gated: it does not fail the run. The stub-ceiling
 
 The stubs can only be as realistic as the figures behind them. So every INS service that calls a system outside the boundary measures each call, and a load run's report reads the figures back.
 
-Each service publishes to CloudWatch, in a namespace that is its CDP name, a duration and a failure metric for each call, with one dimension set naming the dependency and the operation. Services publish them under one of two schemes, and `METRIC_SCHEMES` in `src/config/external-calls.js` holds the names of each:
+Each service publishes to CloudWatch, in a namespace that is its CDP name, a duration and a failure metric for each call, with one dimension set naming the dependency and the operation. Services publish them under one of two schemes. `METRIC_SCHEMES` in `src/config/external-calls.js` holds the external call and page request names of each, and `SCHEME_BY_SERVICE` says which scheme each service publishes its external calls with and, for a journey frontend, its page requests with (see [Call ratios](#call-ratios)). The external call names:
 
-| Scheme   | Services                                                                                        | Duration metric          | Failure metric          | Dimensions                |
-| -------- | ----------------------------------------------------------------------------------------------- | ------------------------ | ----------------------- | ------------------------- |
-| `pascal` | `trade-imports-ins-frontend`, `trade-imports-animals-frontend`, `trade-imports-plants-frontend` | `ExternalCallDuration`   | `ExternalCallFailure`   | `Dependency`, `Operation` |
-| `dotted` | `trade-imports-reference-data`, `trade-imports-dynamics-gateway`                                | `external.call.duration` | `external.call.failure` | `dependency`, `operation` |
+| Scheme   | Services whose external calls use it                                                               | Duration metric          | Failure metric          | Dimensions                |
+| -------- | -------------------------------------------------------------------------------------------------- | ------------------------ | ----------------------- | ------------------------- |
+| `pascal` | `trade-imports-ins-frontend`, `trade-imports-plants-frontend`                                      | `ExternalCallDuration`   | `ExternalCallFailure`   | `Dependency`, `Operation` |
+| `dotted` | `trade-imports-animals-frontend`, `trade-imports-reference-data`, `trade-imports-dynamics-gateway` | `external.call.duration` | `external.call.failure` | `dependency`, `operation` |
 
 In both schemes the duration is in milliseconds, one raw value for each call, so CloudWatch gives `p50`, `p95` and `p99` from the raw values and `SampleCount` is the call count. The failure metric is 1 for a failed call and 0 for a successful one, so its `Average` is the error rate. A `pascal` service also writes the properties `Outcome` (`success` or `failure`) and `Interface` (the volumetrics section 9.3 SYN ID, left out where 9.3 gives none).
 
-These are the calls, and their names. Use the strings exactly. `SCHEME_BY_SERVICE` names each service's scheme, and the report reads each row of `EXTERNAL_CALLS` by the names of its service's scheme:
+These are the calls, and their names. Use the strings exactly. The report reads each row of `EXTERNAL_CALLS` by the external call names of its service's scheme:
 
-| Service (namespace)                                                                             | Scheme   | Dependency          | Operation                  | Interface |
-| ----------------------------------------------------------------------------------------------- | -------- | ------------------- | -------------------------- | --------- |
-| `trade-imports-ins-frontend`, `trade-imports-animals-frontend`, `trade-imports-plants-frontend` | `pascal` | `defra-id`          | `openid-configuration`     | none      |
-| the same three                                                                                  | `pascal` | `defra-id`          | `jwks`                     | `SYN-12`  |
-| the same three                                                                                  | `pascal` | `defra-id`          | `token-exchange`           | `SYN-11`  |
-| the same three                                                                                  | `pascal` | `defra-id`          | `token-refresh`            | `SYN-13`  |
-| `trade-imports-reference-data`                                                                  | `dotted` | `trade-token`       | `client-credentials-token` | `SYN-19`  |
-| `trade-imports-reference-data`                                                                  | `dotted` | `mdm`               | `get-countries`            | `SYN-19`  |
-| `trade-imports-reference-data`                                                                  | `dotted` | `mdm`               | `get-ports-of-entry`       | `SYN-19`  |
-| `trade-imports-dynamics-gateway`                                                                | `dotted` | `azure-service-bus` | `send-message`             | none      |
+| Service (namespace)                                                                             | Scheme                 | Dependency          | Operation                  | Interface |
+| ----------------------------------------------------------------------------------------------- | ---------------------- | ------------------- | -------------------------- | --------- |
+| `trade-imports-ins-frontend`, `trade-imports-animals-frontend`, `trade-imports-plants-frontend` | each its own, as above | `defra-id`          | `openid-configuration`     | none      |
+| the same three                                                                                  | each its own, as above | `defra-id`          | `jwks`                     | `SYN-12`  |
+| the same three                                                                                  | each its own, as above | `defra-id`          | `token-exchange`           | `SYN-11`  |
+| the same three                                                                                  | each its own, as above | `defra-id`          | `token-refresh`            | `SYN-13`  |
+| `trade-imports-reference-data`                                                                  | `dotted`               | `trade-token`       | `client-credentials-token` | `SYN-19`  |
+| `trade-imports-reference-data`                                                                  | `dotted`               | `mdm`               | `get-countries`            | `SYN-19`  |
+| `trade-imports-reference-data`                                                                  | `dotted`               | `mdm`               | `get-ports-of-entry`       | `SYN-19`  |
+| `trade-imports-dynamics-gateway`                                                                | `dotted`               | `azure-service-bus` | `send-message`             | none      |
 
-The dependency is the integration id of the stub profile, so a measured row joins to its profile with no mapping. A call counts as failed when it rejects or throws, or, for reference-data, when the answer's status is 400 or above. Nothing is measured in stub mode, because no call is made.
+The dependency is the integration id of the stub profile, so a measured row joins to its profile with no mapping. Each service has its own rule for a failed call:
+
+- `trade-imports-ins-frontend` and `trade-imports-plants-frontend`: the call rejects or throws
+- `trade-imports-reference-data`: the call throws, or the answer's status is 400 or above
+- `trade-imports-animals-frontend`: the call gets no answer, or the answer's status is 500 or above
+
+Nothing is measured in stub mode, because no call is made.
 
 Each Grafana widget reads one statistic for a namespace, dependency and operation, from the metric of the service's scheme:
 
@@ -431,7 +437,7 @@ The perf-test task role needs `cloudwatch:GetMetricData`. That is CDP configurat
 
 ## Call ratios
 
-The volumetrics page derives its dependency rates from assumed call ratios: D1, one backend call a page (T8); D2, one session resolution a page plus one a backend call; D3, one permission check a page plus one a backend call. A journey run measures the real ones. k6 sees only its own requests and the journey backends publish no per-request timers, so each journey frontend counts for itself.
+The volumetrics page derives its dependency rates from assumed call ratios: D1, one backend call a page (T8); D2, one session resolution a page plus one a backend call; D3, one permission check a page plus one a backend call. D2 and D3 count once a page and once a backend call because a frontend resolves the session once for the page and each backend call resolves it again. A journey run measures the real ones. k6 sees only its own requests and the journey backends publish no per-request timers, so each journey frontend counts for itself.
 
 For every page request it handles, `trade-imports-animals-frontend` and `trade-imports-plants-frontend` count:
 
@@ -441,19 +447,27 @@ For every page request it handles, `trade-imports-animals-frontend` and `trade-i
 
 A page request is every request except `GET /health`, `GET /favicon.ico`, the static assets and `/call-counts` itself. The frontend keeps running totals for each route and serves them at `GET /call-counts`; `DELETE /call-counts` clears them. Two environment variables switch the counts on:
 
-| Variable                       | Default                               | Effect                                                                                                |
-| ------------------------------ | ------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `CALL_COUNTS_ENDPOINT_ENABLED` | on in the workspace stack, off on CDP | Serves `/call-counts`, which needs no sign-in                                                         |
-| `CALL_COUNTS_METRICS_ENABLED`  | off locally, on on CDP                | Writes one EMF document per page request: `BackendCalls` and `SessionResolutions`, `RequestKind=page` |
+| Variable                       | Default                               | Effect                                                                                  |
+| ------------------------------ | ------------------------------------- | --------------------------------------------------------------------------------------- |
+| `CALL_COUNTS_ENDPOINT_ENABLED` | on in the workspace stack, off on CDP | Serves `/call-counts`, which needs no sign-in                                           |
+| `CALL_COUNTS_METRICS_ENABLED`  | off locally, on on CDP                | Writes one EMF document per page request: the backend calls and the session resolutions |
 
-`BackendCalls` counts every call the frontend makes through its backend client, which includes the calls the upload page makes to cdp-uploader: the frontend routes those through the same client. So a journey that uploads a document reads higher than one backend call a page, and the `backendCallsPerPage` design target of 1 is the figure the report measures that against rather than a description of what a page does today.
+Each frontend publishes its page request counts by the page request names of the scheme `SCHEME_BY_SERVICE` gives it, and the report reads them by those names:
 
-Switching the endpoint on in a CDP environment is `cdp-app-config`, which a person changes. Until then the report reads the same ratios from CloudWatch: `Sum` over `SampleCount` of `BackendCalls` and of `SessionResolutions` gives the ratio a page.
+| Scheme   | Frontends whose page requests use it                              | Backend calls                | Session resolutions                | Dimension           |
+| -------- | ----------------------------------------------------------------- | ---------------------------- | ---------------------------------- | ------------------- |
+| `dotted` | `trade-imports-animals-frontend`, `trade-imports-plants-frontend` | `page.request.backend.calls` | `page.request.session.resolutions` | `request.kind=page` |
+
+`trade-imports-plants-frontend` publishes its page requests `dotted` and its external calls `pascal`, so each family is read by its own scheme.
+
+`page.request.backend.calls` counts every call the frontend makes through its backend client, which includes the calls the upload page makes to cdp-uploader: the frontend routes those through the same client. So a journey that uploads a document reads higher than one backend call a page, and the `backendCallsPerPage` design target of 1 is the figure the report measures that against rather than a description of what a page does today.
+
+Switching the endpoint on in a CDP environment is `cdp-app-config`, which a person changes. Until then the report reads the same ratios from CloudWatch: `Sum` over `SampleCount` of `page.request.backend.calls` and of `page.request.session.resolutions` gives the ratio a page.
 
 Smoke, every design-target suite and peak day clear the counts at the end of `setup()`, after every set-up read, and read them first thing in `teardown()`. For each journey they log its ratios against D1, D2 and D3 and record gauges:
 
 ```
-Call ratio live-animals (trade-imports-animals-frontend, 412 page requests): backend calls 1.38 a page against 1 (D1, T8); session resolutions 1.97 a page against 2 (D2: 1 a page plus 1 a backend call; 2.38 at the measured backend calls), the frontend 1.97 and the journey backend 0 (no backend resolves a session today, c-008); permission checks 0 a page against 2 (D3): no permission check exists today (c-008; open items 17, 28)
+Call ratio live-animals (trade-imports-animals-frontend, 412 page requests): backend calls 1.38 a page against 1 (D1, T8); session resolutions 1.97 a page against 2 (D2: 1 a page plus 1 a backend call; 2.38 at the measured backend calls), the frontend 1.97 and the journey backend 0; permission checks 0 a page against 2 (D3)
 ```
 
 | Metric                 | What it shows                                                                                                       |
@@ -463,7 +477,7 @@ Call ratio live-animals (trade-imports-animals-frontend, 412 page requests): bac
 | `call_count_external`  | Calls the frontend made to a system outside the boundary, tagged by `journey`, `dependency` and `operation`         |
 | `call_ratio`           | Backend calls and session resolutions a page, tagged by `journey` and `ratio`                                       |
 
-No journey backend resolves a session and no permission check exists (c-008), so D2's backend share and all of D3 measure 0 today, and the line says so. A frontend that answers 404 is logged as not measured here, with the CloudWatch route named. Only `call_counts_measured` is gated, and only in `local` (see [Thresholds](#thresholds)).
+No journey backend resolves a session and no permission check exists (c-008), so D2's backend share and all of D3 measure 0 today: the line prints 0 for the journey backend's session resolutions and for permission checks against D3. A frontend that answers 404 is logged as not measured here, with the CloudWatch route named. Only `call_counts_measured` is gated, and only in `local` (see [Thresholds](#thresholds)).
 
 ## Required service levels
 
@@ -782,7 +796,7 @@ At full length the run is 4 hours 30 seconds to the tail. At `local` length it i
 
 ### Session path
 
-Each frontend resolves the session from its own cache on every authenticated request (`trade-imports-ins-frontend` `src/plugins/auth.js`, and the same in the animals and plants frontends). No journey backend resolves a session, so there is no session API (c-008) and the stores' load is the frontends' page requests. A rendered page resolves the session twice in the animals and plants frontends (the auth plugin and the view context) and a redirect once, so the measured figure is in [Call ratios](#call-ratios), not one a page. The report states that rate over the `combined` phase against 1.35 RPS (NFR-DEP-05), over the `burst` against 2 (NFR-VOL-CORE-06) and over the `session-spike` against 25 (§9.4), and says that §9.4's backend share is carried by the frontends. It is reported, never gated: the rates are the run's input.
+Each frontend resolves the session from its own cache on every authenticated request (`trade-imports-ins-frontend` `src/plugins/auth.js`, and the same in the animals and plants frontends). No journey backend resolves a session, so there is no session API (c-008) and the stores' load is the frontends' page requests. A rendered page resolves the session twice in the animals and plants frontends (the auth plugin and the view context) and a redirect once, so the measured figure is in [Call ratios](#call-ratios), not one a page. The report states that rate over the `combined` phase against 1.35 RPS (NFR-DEP-05), over the `burst` against 2 (NFR-VOL-CORE-06) and over the `session-spike` against 25 (§9.4), and prints the journey backends' session resolutions a page request, 0, with the frontends carrying the rest of §9.4's backend share. It is reported, never gated: the rates are the run's input.
 
 To load the stores at 25 RPS while only the frontends resolve sessions, the three frontends must together serve 25 RPS, so the session spike takes each to 8.33 RPS, in proportion to the stated capacities. That is 1.67 times each frontend's own stated capacity (§4.2's 5 RPS), by design. The spike's response times are reported, never gated.
 
@@ -810,7 +824,7 @@ Combined pass rules: each scenario's response times in the `combined` phase at t
 ### Example lines
 
 ```text
-Session path (each frontend's own session store, one resolution a page request): 1.43 RPS over the combined (30m) against 1.35 sustained (NFR-DEP-05); 2.15 RPS in the burst (60s) against 2 (NFR-VOL-CORE-06); 24.6 RPS in the session spike (10s) against 25 (§9.4); no backend resolves a session today (c-008), so the frontends carry §9.4's backend share
+Session path (each frontend's own session store, one resolution a page request): 1.43 RPS over the combined (30m) against 1.35 sustained (NFR-DEP-05); 2.15 RPS in the burst (60s) against 2 (NFR-VOL-CORE-06); 24.6 RPS in the session spike (10s) against 25 (§9.4); the journey backends resolve 0 sessions a page request, and the frontends carry the rest of §9.4's backend share
 Dashboard read model (one read an INS dashboard view): 0.33 reads a second over the combined (30m) against 0.17 (§9.4 SYN-21); 0.48 in the burst (60s) against 0.25
 Read model consumer: live-animals events arrived P95 3.2s, max 7.9s after the outbox read (event_arrival_seconds)
 Reference data reference-data-countries-sps (/countries?blocks=GBNAG_SPS_EX): cold 2 reads (MDM called), P95 480ms, max 512ms; warm 1238 reads, P95 9ms, max 31ms; first read in the run warm
