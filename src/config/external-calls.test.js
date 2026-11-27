@@ -96,7 +96,7 @@ describe('EXTERNAL_CALLS', () => {
 })
 
 describe('SCHEME_BY_SERVICE', () => {
-  test('reads external calls PascalCase from ins-frontend and plants-frontend and dotted from the rest, and page requests dotted from animals-frontend and plants-frontend', () => {
+  test('reads external calls PascalCase from ins-frontend and dotted from the rest, and page requests dotted from animals-frontend and plants-frontend', () => {
     expect(SCHEME_BY_SERVICE).toEqual({
       'trade-imports-ins-frontend': { externalCalls: 'pascal' },
       'trade-imports-animals-frontend': {
@@ -104,7 +104,7 @@ describe('SCHEME_BY_SERVICE', () => {
         pageRequests: 'dotted'
       },
       'trade-imports-plants-frontend': {
-        externalCalls: 'pascal',
+        externalCalls: 'dotted',
         pageRequests: 'dotted'
       },
       'trade-imports-reference-data': { externalCalls: 'dotted' },

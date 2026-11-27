@@ -4,7 +4,6 @@ import { freezeDeep } from './traffic.js'
  * The CloudWatch metric and dimension names of each way of publishing, `pascal`
  * or `dotted`: the names of its external calls and, for `dotted`, of its page
  * requests.
- * `SCHEME_BY_SERVICE` gives the scheme each service publishes each with.
  */
 export const METRIC_SCHEMES = freezeDeep({
   pascal: {
@@ -31,10 +30,10 @@ export const METRIC_SCHEMES = freezeDeep({
 })
 
 /**
- * The statistics the report reads for each external call, and the metric of
- * its service's external call names and the statistic each comes from. `SampleCount` of the
- * duration is the call count, and `Average` of the failure metric is the error
- * rate.
+ * Each external call statistic: its result key, the scheme metric it comes
+ * from (`duration` or `failure`) and the CloudWatch statistic.
+ * `SampleCount` of the duration is the call count, and `Average` of the
+ * failure metric is the error rate.
  */
 export const EXTERNAL_CALL_STATISTICS = Object.freeze([
   { key: 'p50Ms', metric: 'duration', stat: 'p50' },
@@ -51,8 +50,9 @@ const FRONTENDS = Object.freeze([
 ])
 
 /**
- * The `METRIC_SCHEMES` entry each service publishes its external calls with,
- * and a journey frontend its page requests with, keyed by its CDP service name.
+ * The metric scheme, `pascal` or `dotted`, each service publishes its external
+ * calls with, and a journey frontend its page requests with, keyed by its CDP
+ * service name.
  */
 export const SCHEME_BY_SERVICE = freezeDeep({
   'trade-imports-ins-frontend': { externalCalls: 'pascal' },
@@ -61,7 +61,7 @@ export const SCHEME_BY_SERVICE = freezeDeep({
     pageRequests: 'dotted'
   },
   'trade-imports-plants-frontend': {
-    externalCalls: 'pascal',
+    externalCalls: 'dotted',
     pageRequests: 'dotted'
   },
   'trade-imports-reference-data': { externalCalls: 'dotted' },
@@ -85,12 +85,9 @@ const defraIdCalls = FRONTENDS.flatMap((service) =>
 )
 
 /**
- * The calls to systems outside the INS boundary that the report reads.
- * `service` is the CDP service name, which is
- * also the CloudWatch namespace it publishes to, and its `SCHEME_BY_SERVICE`
- * entry gives the scheme of its metric names. The strings are the services'
- * contract: each service emits exactly these dependency and operation names, and
- * `dependency` is the integration id of its stub profile.
+ * Calls to systems outside the INS boundary. `service` is the CDP service name
+ * and CloudWatch namespace of the caller, `dependency` is the integration id of
+ * its stub profile, and `interfaceId` is the interface id of the call, or null.
  */
 export const EXTERNAL_CALLS = freezeDeep([
   ...defraIdCalls,
