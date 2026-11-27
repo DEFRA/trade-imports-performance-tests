@@ -95,6 +95,17 @@ describe('metricDataRequest', () => {
       ]
     ],
     [
+      'trade-imports-plants-frontend',
+      'defra-id',
+      'openid-configuration',
+      [
+        'external.call.duration',
+        'external.call.failure',
+        'dependency',
+        'operation'
+      ]
+    ],
+    [
       'trade-imports-reference-data',
       'mdm',
       'get-countries',
@@ -254,24 +265,6 @@ describe('metricDataRequest', () => {
       ])
     }
   )
-
-  test('reads the external calls of plants-frontend by the PascalCase names', () => {
-    const index = EXTERNAL_CALLS.findIndex(
-      ({ service }) => service === 'trade-imports-plants-frontend'
-    )
-    const [durationQuery] = request().MetricDataQueries.filter(({ Id }) =>
-      Id.startsWith(`c${index}_`)
-    )
-
-    expect(durationQuery.MetricStat.Metric).toEqual({
-      Namespace: 'trade-imports-plants-frontend',
-      MetricName: 'ExternalCallDuration',
-      Dimensions: [
-        { Name: 'Dependency', Value: 'defra-id' },
-        { Name: 'Operation', Value: 'openid-configuration' }
-      ]
-    })
-  })
 })
 
 describe('pageRequestCountsFromResults', () => {
